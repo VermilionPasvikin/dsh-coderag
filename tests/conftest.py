@@ -14,7 +14,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def tiny_repo(tmp_path: Path) -> Path:
     """Copy the tiny fixture into tmp_path so tests never write repo files."""
     dst = tmp_path / "repo"
-    shutil.copytree(FIXTURES / "tiny", dst)
+    shutil.copytree(FIXTURES / "tiny", dst, ignore=shutil.ignore_patterns(".coderag"))
     return dst
 
 

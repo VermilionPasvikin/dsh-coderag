@@ -1,14 +1,22 @@
-"""SQLite schema and connection setup for the dsh_coderag index.
+"""SQLite schema, connection setup and synchronous indexing for dsh_coderag.
 
-This module owns the index database layout and the connection pragmas the
-project relies on. Chunking, incremental writing and querying live in
-later tasks; this module does not read source files or run searches.
+This module owns the index database layout, the connection pragmas and the
+first synchronous writer that walks a workspace, chunks each file and stores
+files, chunks and the full-text index. Incremental hash-based skipping,
+safety filtering and asynchronous task management live in later tasks.
 """
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
+import time
+from dataclasses import dataclass
 from pathlib import Path
+
+from dsh_coderag.chunker import chunk_text
+from dsh_coderag.text import to_bigrams
+from dsh_coderag.walker import walk
 
 SCHEMA_VERSION = 1
 
@@ -71,6 +79,15 @@ CREATE TABLE IF NOT EXISTS workspace_index (
 """
 
 
+@dataclass(frozen=True)
+class IndexSummary:
+    """Counts produced by one synchronous indexing run."""
+
+    root: Path
+    files: int
+    chunks: int
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     """Open the index database with the pragmas this project relies on."""
     connection = sqlite3.connect(db_path)
@@ -82,3 +99,106 @@ def connect(db_path: Path) -> sqlite3.Connection:
 def init_schema(connection: sqlite3.Connection) -> None:
     """Create every index table and index that does not already exist."""
     connection.executescript(SCHEMA_SQL)
+
+
+def open_index(db_path: Path) -> sqlite3.Connection:
+    """Open the index database and make sure its schema exists."""
+    connection = connect(db_path)
+    init_schema(connection)
+    return connection
+
+
+def index_sync(root: Path) -> IndexSummary:
+    """Index a workspace synchronously and return the resulting counts.
+
+    Re-running replaces each file's rows, so the index never accumulates
+    duplicates. Hash-based skipping of unchanged files is added in T2-08.
+    """
+    base = root.resolve()
+    db_path = base / ".coderag" / "index.sqlite3"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = open_index(db_path)
+    try:
+        entries = walk(base)
+        total_chunks = 0
+        for absolute, size, mtime_ns in entries:
+            total_chunks += _index_file(connection, base, absolute, size, mtime_ns)
+        _mark_ready(connection, base)
+        return IndexSummary(root=base, files=len(entries), chunks=total_chunks)
+    finally:
+        connection.close()
+
+
+def _index_file(
+    connection: sqlite3.Connection,
+    base: Path,
+    absolute: Path,
+    size: int,
+    mtime_ns: int,
+) -> int:
+    """Replace one file's rows; return the number of chunks written."""
+    relative = absolute.relative_to(base).as_posix()
+    raw = absolute.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    text = raw.decode("utf-8", errors="replace")
+    chunks = chunk_text(text, relative)
+    with connection:
+        existing = connection.execute(
+            "SELECT id FROM files WHERE path = ?", (relative,)
+        ).fetchone()
+        if existing is not None:
+            connection.execute("DELETE FROM chunks_fts WHERE file_id = ?", (existing[0],))
+            connection.execute("DELETE FROM files WHERE id = ?", (existing[0],))
+        cursor = connection.execute(
+            "INSERT INTO files (path, size, mtime_ns, content_hash, lang, indexed_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (relative, size, mtime_ns, digest, None, int(time.time())),
+        )
+        assert cursor.lastrowid is not None
+        file_id = cursor.lastrowid
+        for chunk in chunks:
+            chunk_digest = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+            chunk_cursor = connection.execute(
+                "INSERT INTO chunks"
+                " (file_id, seq, start_line, end_line, symbol_kind, symbol_name,"
+                "  text, content_hash)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    file_id,
+                    chunk.seq,
+                    chunk.start_line,
+                    chunk.end_line,
+                    chunk.symbol_kind,
+                    chunk.symbol_name,
+                    chunk.text,
+                    chunk_digest,
+                ),
+            )
+            assert chunk_cursor.lastrowid is not None
+            connection.execute(
+                "INSERT INTO chunks_fts (text_bigram, symbol, path, chunk_id, file_id)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (
+                    to_bigrams(chunk.text),
+                    chunk.symbol_name or "",
+                    relative,
+                    chunk_cursor.lastrowid,
+                    file_id,
+                ),
+            )
+    return len(chunks)
+
+
+def _mark_ready(connection: sqlite3.Connection, base: Path) -> None:
+    """Record that the workspace index is complete and usable."""
+    with connection:
+        connection.execute(
+            "INSERT INTO workspace_index (root, db_schema, ready, last_task_id, updated_at)"
+            " VALUES (?, ?, 1, NULL, ?)"
+            " ON CONFLICT(root) DO UPDATE SET"
+            " db_schema = excluded.db_schema,"
+            " ready = excluded.ready,"
+            " last_task_id = excluded.last_task_id,"
+            " updated_at = excluded.updated_at",
+            (str(base), SCHEMA_VERSION, int(time.time())),
+        )
