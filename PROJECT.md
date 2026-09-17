@@ -1267,6 +1267,7 @@ T4-10  ← T4-08
 | T1-08 | 已完成 | `$ dsh-coderag search add`（在 tests/fixtures/tiny 内，已先 `dsh-coderag index tests/fixtures/tiny`）<br>`lib.c:1-3`<br>`main.py:1-2`<br>`app.ts:1-3`<br>（退出码 0；按 bm25 排序，T2-14 再改为顺序保持） | `716c4db` | 新增 search() 与 CLI search 子命令；无索引时抛 FileNotFoundError，不返回空列表 |
 | T1-09 | 已完成 | `$ python -m pytest tests/test_render.py -q`<br>`....                                                                     [100%]`<br>（退出码 0；4 个用例通过，含 2 个 inline-snapshot 快照） | `0e638e8` | 格式见 §3.5；符号缺失时省略 []；omitted>0 时输出 token 预算提示 |
 | T1-10 | 已完成 | `$ python -m pytest tests/test_taskman.py -q`<br>`.......                                                                  [100%]`<br>（退出码 0；7 个用例通过，含 pending→running→ready 与持久化） | `e1c51d6` | TaskManager: create/status/cancel + mark_running/ready/failed；非法流转抛 TaskStateError |
+| T1-11 | 已完成 | `$ python -m dsh_coderag.server`（stdin 发 initialize + notifications/initialized + tools/list）<br>`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"experimental":{},"tools":{"listChanged":false}},"serverInfo":{"name":"coderag","version":"0.1.0"}}}`<br>`tools: 4`<br>`names: ['code_search', 'code_outline', 'code_index', 'index_status']`<br>`serverInfo: {'name': 'coderag', 'version': '0.1.0'}`<br>（stdout 全部为合法 JSON-RPC；stderr 为空） | `fcdc300` | 4 工具 schema 与 §3.5 一致；code_outline 返回未实现的结构化状态；code_index 暂同步（T1-12 改异步） |
 | … | | | | |
 
 ---
