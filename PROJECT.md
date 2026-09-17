@@ -1266,6 +1266,7 @@ T4-10  ← T4-08
 | T1-07 | 已完成 | `$ dsh-coderag index tests/fixtures/tiny`<br>`indexed 3 files, 3 chunks into /Users/vermi/个人项目/python/dsh-coderag/tests/fixtures/tiny/.coderag/index.sqlite3`<br>`$ sqlite3 tests/fixtures/tiny/.coderag/index.sqlite3 "select count(*) from chunks;"`<br>`3`<br>（files: app.ts / lib.c / main.py；行区间 1-3 / 1-3 / 1-2） | `ced4777` | 新增 open_index 与 CLI index 子命令；重复索引不产生重复行 |
 | T1-08 | 已完成 | `$ dsh-coderag search add`（在 tests/fixtures/tiny 内，已先 `dsh-coderag index tests/fixtures/tiny`）<br>`lib.c:1-3`<br>`main.py:1-2`<br>`app.ts:1-3`<br>（退出码 0；按 bm25 排序，T2-14 再改为顺序保持） | `716c4db` | 新增 search() 与 CLI search 子命令；无索引时抛 FileNotFoundError，不返回空列表 |
 | T1-09 | 已完成 | `$ python -m pytest tests/test_render.py -q`<br>`....                                                                     [100%]`<br>（退出码 0；4 个用例通过，含 2 个 inline-snapshot 快照） | `0e638e8` | 格式见 §3.5；符号缺失时省略 []；omitted>0 时输出 token 预算提示 |
+| T1-10 | 已完成 | `$ python -m pytest tests/test_taskman.py -q`<br>`.......                                                                  [100%]`<br>（退出码 0；7 个用例通过，含 pending→running→ready 与持久化） | `e1c51d6` | TaskManager: create/status/cancel + mark_running/ready/failed；非法流转抛 TaskStateError |
 | … | | | | |
 
 ---
