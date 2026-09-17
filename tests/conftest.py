@@ -16,3 +16,9 @@ def tiny_repo(tmp_path: Path) -> Path:
     dst = tmp_path / "repo"
     shutil.copytree(FIXTURES / "tiny", dst)
     return dst
+
+
+@pytest.fixture
+def index_db(tmp_path: Path) -> Path:
+    """A temporary index database path; never the repository (T-04)."""
+    return tmp_path / "index.sqlite3"
