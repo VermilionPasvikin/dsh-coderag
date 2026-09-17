@@ -24,6 +24,8 @@ dev = [
   "pytest>=8",
   "pytest-cov",
   "pytest-anyio",
+  "pytest-asyncio",
+  "pytest-timeout",
   "anyio",
   "inline-snapshot",
   "hypothesis",
