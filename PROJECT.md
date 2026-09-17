@@ -1237,6 +1237,7 @@ T4-10  ← T4-08
 | T1-02 | 已完成 | `$ python -m pytest tests/test_config.py -q`<br>`...                                                                      [100%]`<br>（退出码 0；3 个点 = 3 个用例通过） | `8c11c80` | 正常 / 缺必填 / 类型错误 |
 | T1-03 | 已完成 | `$ python -c "from dsh_coderag.types import ErrorCode; print(len(ErrorCode))"`<br>`10`<br>（≥9；§5.6 现有 10 个，含新增的 FTS5_UNAVAILABLE，任务描述里的「9 个」已过时） | `16859d5` | tests/test_types.py 5 例全过；ruff/mypy 通过 |
 | T1-04 | 已完成 | `$ python -m pytest tests/test_walker.py -q`<br>`.....                                                                    [100%]`<br>（退出码 0；5 个用例通过） | `1a528cb` | 新增 tests/fixtures/tiny 与 conftest 的 tiny_repo fixture |
+| T1-05 | 已完成 | `$ python -m pytest tests/test_chunker.py -q`<br>`..............                                                           [100%]`<br>（退出码 0；14 个用例通过） | `ca85e60` | 固定 80 行 / 20 行重叠；symbol_kind=None；每行至少被一个 chunk 覆盖 |
 | … | | | | |
 
 ---
