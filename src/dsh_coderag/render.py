@@ -1,13 +1,13 @@
-"""Render search hits into the model-visible text contract.
+"""Render search hits and status payloads into the model-visible contract.
 
-This module formats hits exactly as documented in PROJECT.md 3.5, which is
-a byte-stable contract for the model. It does not search, rank or trim by
-token budget; it only formats the hits and counters it is given.
+This module formats hits and status messages exactly as documented in
+PROJECT.md 3.5, which is a byte-stable contract for the model. It does not
+search, rank or trim by token budget.
 """
 
 from __future__ import annotations
 
-from dsh_coderag.types import Hit, SearchStatus
+from dsh_coderag.types import ErrorCode, Hit, SearchStatus
 
 
 def render_search_result(
@@ -44,6 +44,28 @@ def render_search_result(
     return "\n\n".join(blocks) + "\n"
 
 
+def render_status(
+    status: SearchStatus,
+    *,
+    message: str | None = None,
+    code: ErrorCode | None = None,
+    hint: str | None = None,
+) -> str:
+    """Render a status or error payload as model-visible plain text.
+
+    Fields appear in a fixed order and every dynamic value is collapsed onto
+    one line so it cannot forge an extra status field.
+    """
+    lines = [f"status: {status.value}"]
+    if code is not None:
+        lines.append(f"code: {code.value}")
+    if message is not None:
+        lines.append(f"message: {_one_line(message)}")
+    if hint is not None:
+        lines.append(f"hint: {_one_line(hint)}")
+    return "\n".join(lines) + "\n"
+
+
 def _format_location(hit: Hit) -> str:
     """Format the separator line that precedes each hit body."""
     parts = [f"── {hit.path}:{hit.start_line}-{hit.end_line}"]
@@ -52,3 +74,8 @@ def _format_location(hit: Hit) -> str:
         parts.append(f"[{label}]")
     parts.append(f"(chunk {hit.seq})")
     return "  ".join(parts)
+
+
+def _one_line(value: str) -> str:
+    """Collapse a dynamic value to one line of single-spaced words."""
+    return " ".join(value.split())

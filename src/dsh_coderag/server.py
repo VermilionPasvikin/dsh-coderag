@@ -21,7 +21,7 @@ from mcp.types import TextContent, Tool
 from dsh_coderag import __version__
 from dsh_coderag.config import ConfigError, load_config
 from dsh_coderag.indexer import index_sync, open_index
-from dsh_coderag.render import render_search_result
+from dsh_coderag.render import render_search_result, render_status
 from dsh_coderag.searcher import search
 from dsh_coderag.taskman import TaskManager, TaskNotFoundError
 from dsh_coderag.types import ErrorCode, SearchStatus
@@ -32,9 +32,11 @@ TOOLS: list[Tool] = [
     Tool(
         name="code_search",
         description=(
-            "Search the indexed codebase for relevant code snippets. Use this when you"
-            " do not know the exact identifier and need to find where something is"
-            " implemented. Results include file paths and line numbers."
+            "Search the workspace codebase for relevant code. Returns ranked code"
+            " snippets with exact file paths and line numbers. Prefer this over grep"
+            " when you do not know the exact identifier, or when searching for"
+            " behaviour across multiple files. When the index is not ready the result"
+            " reports a structured status instead of an empty list."
         ),
         inputSchema={
             "type": "object",
@@ -174,31 +176,39 @@ def _dispatch(
         if name == "index_status":
             return _index_status(arguments, root)
     except ConfigError as exc:
-        return _status_json(SearchStatus.ERROR, str(exc), code=ErrorCode.INDEX_NOT_FOUND)
+        return render_status(
+            SearchStatus.ERROR, message=str(exc), code=ErrorCode.INDEX_NOT_FOUND
+        )
     except FileNotFoundError as exc:
-        return _status_json(
+        return render_status(
             SearchStatus.INDEXING,
-            str(exc),
+            message=str(exc),
             code=ErrorCode.INDEX_NOT_FOUND,
             hint="Call code_index for this workspace, then retry.",
         )
     except TaskNotFoundError as exc:
-        return _status_json(SearchStatus.ERROR, str(exc), code=ErrorCode.TASK_NOT_FOUND)
-    return _status_json(SearchStatus.ERROR, f"unknown tool: {name}", code=ErrorCode.SEARCH_FAILED)
+        return render_status(
+            SearchStatus.ERROR, message=str(exc), code=ErrorCode.TASK_NOT_FOUND
+        )
+    return render_status(
+        SearchStatus.ERROR, message=f"unknown tool: {name}", code=ErrorCode.SEARCH_FAILED
+    )
 
 
 def _code_search(arguments: dict[str, Any], root: Path) -> str:
     query = arguments.get("query")
     if not isinstance(query, str) or not query.strip():
-        return _status_json(
-            SearchStatus.ERROR, "query is required", code=ErrorCode.SEARCH_INVALID_QUERY
+        return render_status(
+            SearchStatus.ERROR,
+            message="query is required",
+            code=ErrorCode.SEARCH_INVALID_QUERY,
         )
     limit = min(int(arguments.get("limit", 5)), 50)
     result = search(root, query, k=limit)
     if result.status is not SearchStatus.READY:
-        return _status_json(
+        return render_status(
             result.status,
-            result.message or "Search did not return results.",
+            message=result.message or "Search did not return results.",
             code=result.code,
             hint=result.hint,
         )
@@ -211,9 +221,9 @@ def _code_search(arguments: dict[str, Any], root: Path) -> str:
 
 
 def _code_outline() -> str:
-    return _status_json(
+    return render_status(
         SearchStatus.EMPTY,
-        "code_outline is not implemented yet.",
+        message="code_outline is not implemented yet.",
         hint="Use code_search to locate the symbol, then read the file directly.",
     )
 
@@ -241,9 +251,9 @@ def _index_status(arguments: dict[str, Any], root: Path) -> str:
     task_id = arguments.get("task_id")
     if isinstance(task_id, str) and task_id:
         if not db_path.exists():
-            return _status_json(
+            return render_status(
                 SearchStatus.ERROR,
-                "no index for this workspace",
+                message="no index for this workspace",
                 code=ErrorCode.INDEX_NOT_FOUND,
             )
         run = TaskManager(db_path).status(task_id)
@@ -260,9 +270,9 @@ def _index_status(arguments: dict[str, Any], root: Path) -> str:
             ensure_ascii=False,
         )
     if not db_path.exists():
-        return _status_json(
+        return render_status(
             SearchStatus.ERROR,
-            "no index for this workspace",
+            message="no index for this workspace",
             code=ErrorCode.INDEX_NOT_FOUND,
         )
     connection = open_index(db_path)
@@ -274,9 +284,9 @@ def _index_status(arguments: dict[str, Any], root: Path) -> str:
     finally:
         connection.close()
     if row is None:
-        return _status_json(
+        return render_status(
             SearchStatus.ERROR,
-            "no index for this workspace",
+            message="no index for this workspace",
             code=ErrorCode.INDEX_NOT_FOUND,
         )
     return json.dumps(
@@ -286,20 +296,6 @@ def _index_status(arguments: dict[str, Any], root: Path) -> str:
 
 
 
-
-def _status_json(
-    status: SearchStatus,
-    message: str,
-    *,
-    code: ErrorCode | None = None,
-    hint: str | None = None,
-) -> str:
-    payload: dict[str, object] = {"status": status.value, "message": message}
-    if code is not None:
-        payload["code"] = code.value
-    if hint is not None:
-        payload["hint"] = hint
-    return json.dumps(payload, ensure_ascii=False)
 
 
 async def main() -> None:

@@ -66,11 +66,35 @@ async def test_tool_schemas_match_the_contract(client: ClientSession) -> None:
     assert list(tools["index_status"].inputSchema["properties"]) == ["task_id"]
 
 
+@pytest.mark.snapshot
+@pytest.mark.anyio
+async def test_tool_descriptions_are_stable(client: ClientSession) -> None:
+    """M9: tool descriptions are a model-visible contract."""
+    tools = await client.list_tools()
+    assert [tool.description for tool in tools.tools] == snapshot(
+        [
+            "Search the workspace codebase for relevant code. Returns ranked code"
+            " snippets with exact file paths and line numbers. Prefer this over grep"
+            " when you do not know the exact identifier, or when searching for"
+            " behaviour across multiple files. When the index is not ready the result"
+            " reports a structured status instead of an empty list.",
+            "Return the symbol outline (classes, functions, methods) of one file, with"
+            " line numbers. Use this to understand a file's structure before reading"
+            " it in full.",
+            "Start (or refresh) the code index for a workspace directory. Returns"
+            " immediately with a task id; indexing continues in the background. Poll"
+            " index_status for progress.",
+            "Report the state and progress of an indexing task, or of the workspace"
+            " index when no task id is given.",
+        ]
+    )
+
+
 @pytest.mark.anyio
 async def test_code_outline_returns_a_structured_status(client: ClientSession) -> None:
     result = await client.call_tool("code_outline", {"path": "a.py"})
     text = result.content[0].text
-    assert '"status"' in text
+    assert text.startswith("status: empty")
     assert "not implemented" in text
 
 

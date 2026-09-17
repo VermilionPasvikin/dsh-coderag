@@ -31,6 +31,10 @@ def _text(result: Any) -> str:
     return result.content[0].text
 
 
+def _status_of(text: str) -> str:
+    return text.splitlines()[0].split(":", 1)[1].strip()
+
+
 async def _index_and_wait(client: ClientSession) -> None:
     payload = json.loads(_text(await client.call_tool("code_index", {})))
     for _ in range(200):
@@ -50,8 +54,8 @@ async def test_search_without_index_returns_a_structured_status(
     """RL-06: an absent index must not look like an empty result array."""
     text = _text(await client.call_tool("code_search", {"query": "anything"}))
     assert text.strip() != "[]"
-    assert '"status"' in text
-    assert any(word in text for word in ('"indexing"', '"empty"', '"error"'))
+    assert text.startswith("status:")
+    assert _status_of(text) in {"indexing", "empty", "error"}
 
 
 @pytest.mark.anyio
@@ -64,8 +68,7 @@ async def test_search_with_no_matches_is_empty_not_a_bare_array(
     await _index_and_wait(client)
     text = _text(await client.call_tool("code_search", {"query": "zzzabsentzzz"}))
     assert text.strip() != "[]"
-    assert '"status"' in text
-    assert '"empty"' in text
+    assert text.startswith("status: empty")
 
 
 @pytest.mark.anyio
@@ -78,6 +81,4 @@ async def test_missing_workspace_config_returns_a_structured_error(
     async with create_connected_server_and_client_session(server) as session:
         result = await session.call_tool("code_search", {"query": "x"})
     assert result.isError is not True
-    text = _text(result)
-    assert '"status"' in text
-    assert '"error"' in text
+    assert _status_of(_text(result)) == "error"

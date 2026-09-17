@@ -142,8 +142,9 @@ async def test_index_absent_returns_structured_status_not_empty_list(client, tmp
     """M3 / RL-06：无索引时必须返回结构化状态，绝不返回空列表。"""
     result = await client.call_tool("code_search", {"query": "anything"})
     text = result.content[0].text
-    assert '"status"' in text
-    assert '"indexing"' in text or '"empty"' in text or '"error"' in text
+    assert text.startswith("status:")
+    status = text.splitlines()[0].split(":", 1)[1].strip()
+    assert status in {"indexing", "empty", "error"}
     # 关键断言：不是一个空的结果数组
     assert text.strip() not in ("[]", "hits: 0", "")
 ```
