@@ -1272,6 +1272,7 @@ T4-10  ← T4-08
 | T1-13 | 已完成 | `$ python -m pytest tests/test_status_contract.py -q`<br>`...                                                                      [100%]`<br>（退出码 0；3 个用例通过） | `808ac17` | search() 返回 SearchResult；无索引→indexing、无命中→empty、异常→error，均不含裸 [] |
 | T1-14 | 已完成 | `$ ./scripts/dsh web --patch ./cordis.patch.yml --dump-config`（E-07：dsh 命令经包装脚本）<br>`- id: mcp-coderag`<br>`  name: '@deepseek-ai/dsh-mcp-client'`<br>`  config:`<br>`    serverName: coderag`<br>`    transport: stdio`<br>`    command: !!js process.env.CODERAG_PYTHON ?? '/opt/anaconda3/envs/forBSH/bin/python'`<br>（rc=0，stderr 为空）<br>配置的 command 实测：`serverInfo {name: coderag, version: 0.1.0}`、`tools [code_search, code_outline, code_index, index_status]` | `41f5d54` | 同一文件兼作 dev overlay 与 bundle patch；未真正 boot web（避免占用 3080），用 --dump-config + 直接跑配置命令验证 |
 | T1-15 | 已完成 | 人工验收（DSH Web :3099，工作区 `examples/demo-workspace`，创造模式）<br>问「用户令牌在哪里校验」→ 先 grep×2，再调 `mcp__coderag__code_search`，返回 `status: ready` / `hits: 1` / `── src/auth/token.py:1-20`<br>问「连接池代码在哪？」→ **首发** code_search，参数 `{"query":"连接池 connection pool","limit":10}`，返回 `── src/db/pool.py:1-8` | `cd71afa` | 工具出现且被调用，返回正确文件+行号；R5 部分缓解（未知标识符时优先 code_search，已知标识符仍可能先 grep） |
+| T1-16 | 已完成 | `$ test -f docs/m1-findings.md && grep -c '^### 观察' docs/m1-findings.md`<br>`exists`<br>`8` | `7dcdb57` | 8 条具体观察 + 3 条开发期缺陷修复记录 + 已知限制 |
 | … | | | | |
 
 ---
