@@ -1,0 +1,22 @@
+# dsh-coderag bundle patch.
+#
+# One file serves as both the local development overlay and the distributed
+# bundle patch. It inserts a single MCP client row pointing at the Python
+# engine; that row references a DSH built-in package, so this bundle ships no
+# JavaScript of its own.
+#
+# The interpreter is overridable with CODERAG_PYTHON (E-06). The workspace the
+# engine indexes defaults to the process working directory and is overridable
+# with CODERAG_ROOT; both are set through config.env because stdio child
+# environments are scrubbed (E-02).
+
+- insert:
+    - id: mcp-coderag
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: coderag
+        transport: stdio
+        command: !!js process.env.CODERAG_PYTHON ?? '/opt/anaconda3/envs/forBSH/bin/python'
+        args: ['-m', 'dsh_coderag.server']
+        env:
+          CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
