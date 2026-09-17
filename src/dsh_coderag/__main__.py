@@ -13,6 +13,7 @@ from pathlib import Path
 from dsh_coderag import __version__
 from dsh_coderag.indexer import index_sync
 from dsh_coderag.searcher import search
+from dsh_coderag.types import SearchStatus
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,8 +70,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     if args.command == "search":
-        hits = search(Path(args.root), args.query, k=args.limit)
-        for hit in hits:
+        result = search(Path(args.root), args.query, k=args.limit)
+        if result.status is not SearchStatus.READY:
+            sys.stderr.write(f"{result.status.value}: {result.message}\n")
+            return 1
+        for hit in result.hits:
             sys.stdout.write(f"{hit.path}:{hit.start_line}-{hit.end_line}\n")
         return 0
     parser.print_help()

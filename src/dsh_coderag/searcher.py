@@ -1,34 +1,68 @@
 """FTS5 search over the dsh_coderag index.
 
 This module turns a query into a full-text match expression, ranks chunks
-with bm25 and returns them as hits. It does not build the index and does
-not render model-visible text; the status contract is added in T1-13.
+with bm25 and reports a structured status so callers never have to infer
+"nothing is there" from an empty list (RL-06). It does not build the index
+and does not render model-visible text.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dsh_coderag.indexer import connect
 from dsh_coderag.text import to_bigrams
-from dsh_coderag.types import Hit
+from dsh_coderag.types import ErrorCode, Hit, SearchStatus
 
 
-def search(root: Path, query: str, k: int = 5) -> list[Hit]:
-    """Return up to k hits for query from the index under root, best first.
+@dataclass(frozen=True)
+class SearchResult:
+    """A search outcome: a status plus, when ready, the hits."""
 
-    Raises FileNotFoundError when the workspace has no index, rather than
-    returning an empty list that would read as "the code is not there".
-    """
+    status: SearchStatus
+    query: str
+    hits: list[Hit] = field(default_factory=list)
+    scanned_files: int = 0
+    scanned_chunks: int = 0
+    message: str | None = None
+    hint: str | None = None
+    code: ErrorCode | None = None
+
+
+def search(root: Path, query: str, k: int = 5) -> SearchResult:
+    """Search the index under root and always return a structured status."""
     db_path = root.resolve() / ".coderag" / "index.sqlite3"
     if not db_path.exists():
-        raise FileNotFoundError(f"no index for {root}; run 'dsh-coderag index' first")
+        return SearchResult(
+            status=SearchStatus.INDEXING,
+            query=query,
+            message="The code index for this workspace has not been built.",
+            hint="Call code_index for this workspace, or use grep for exact identifiers.",
+            code=ErrorCode.INDEX_NOT_FOUND,
+        )
     connection = connect(db_path)
     try:
-        return _search(connection, query, k)
+        files, chunks = _index_counts(connection)
+        hits = _search(connection, query, k)
     finally:
         connection.close()
+    if not hits:
+        return SearchResult(
+            status=SearchStatus.EMPTY,
+            query=query,
+            scanned_files=files,
+            scanned_chunks=chunks,
+            hint="No matches. Try different keywords, or use grep for exact identifiers.",
+        )
+    return SearchResult(
+        status=SearchStatus.READY,
+        query=query,
+        hits=hits,
+        scanned_files=files,
+        scanned_chunks=chunks,
+    )
 
 
 def _search(connection: sqlite3.Connection, query: str, k: int) -> list[Hit]:
@@ -61,6 +95,12 @@ def _search(connection: sqlite3.Connection, query: str, k: int) -> list[Hit]:
         )
         for path, seq, start_line, end_line, symbol_kind, symbol_name, text, score in rows
     ]
+
+
+def _index_counts(connection: sqlite3.Connection) -> tuple[int, int]:
+    files = connection.execute("SELECT count(*) FROM files").fetchone()[0]
+    chunks = connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
+    return int(files), int(chunks)
 
 
 def _build_match(query: str) -> str | None:

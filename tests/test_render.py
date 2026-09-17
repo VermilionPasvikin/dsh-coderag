@@ -86,7 +86,12 @@ def test_render_uses_the_given_status() -> None:
 
 def test_render_of_real_search_output_contains_the_hit_location(tiny_repo: Path) -> None:
     index_sync(tiny_repo)
-    hits = search(tiny_repo, "add", k=5)
-    out = render_search_result(hits, query="add", scanned_files=3, scanned_chunks=3)
+    result = search(tiny_repo, "add", k=5)
+    out = render_search_result(
+        result.hits,
+        query=result.query,
+        scanned_files=result.scanned_files,
+        scanned_chunks=result.scanned_chunks,
+    )
     assert "status: ready" in out
     assert "main.py:1-2" in out

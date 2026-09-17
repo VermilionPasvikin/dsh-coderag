@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -153,14 +154,17 @@ def build_server(root: Path | None = None) -> Server:
 
     @server.call_tool()  # type: ignore[untyped-decorator]
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-        return [TextContent(type="text", text=_dispatch(name, arguments, workspace_root()))]
+        return [TextContent(type="text", text=_dispatch(name, arguments, workspace_root))]
 
     return server
 
 
-def _dispatch(name: str, arguments: dict[str, Any], root: Path) -> str:
+def _dispatch(
+    name: str, arguments: dict[str, Any], root_provider: Callable[[], Path]
+) -> str:
     """Run one tool, converting every expected failure into structured text."""
     try:
+        root = root_provider()
         if name == "code_search":
             return _code_search(arguments, root)
         if name == "code_outline":
@@ -190,10 +194,19 @@ def _code_search(arguments: dict[str, Any], root: Path) -> str:
             SearchStatus.ERROR, "query is required", code=ErrorCode.SEARCH_INVALID_QUERY
         )
     limit = min(int(arguments.get("limit", 5)), 50)
-    hits = search(root, query, k=limit)
-    files, chunks = _index_counts(root)
+    result = search(root, query, k=limit)
+    if result.status is not SearchStatus.READY:
+        return _status_json(
+            result.status,
+            result.message or "Search did not return results.",
+            code=result.code,
+            hint=result.hint,
+        )
     return render_search_result(
-        hits, query=query, scanned_files=files, scanned_chunks=chunks
+        result.hits,
+        query=result.query,
+        scanned_files=result.scanned_files,
+        scanned_chunks=result.scanned_chunks,
     )
 
 
@@ -272,14 +285,6 @@ def _index_status(arguments: dict[str, Any], root: Path) -> str:
     )
 
 
-def _index_counts(root: Path) -> tuple[int, int]:
-    connection = open_index(root.resolve() / ".coderag" / "index.sqlite3")
-    try:
-        files = connection.execute("SELECT count(*) FROM files").fetchone()[0]
-        chunks = connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
-    finally:
-        connection.close()
-    return int(files), int(chunks)
 
 
 def _status_json(
