@@ -1,0 +1,82 @@
+# ============================================================
+# dsh-coderag
+# ============================================================
+# 分两类：
+#   ① 项目特有的（第 1、6 节）—— 漏了会出事故，不要删
+#   ② 语言/工具的常规产物（第 2–5、7 节）—— 样板内容
+# ============================================================
+
+# ── 1. 索引产物【项目特有，必须忽略】────────────────────────
+# S-03：索引库固定在 <root>/.coderag/index.sqlite3
+# S-04：该路径必须被 .gitignore 排除
+# 不忽略的后果：索引库（含代码全文副本）会被提交进 git
+.coderag/
+
+# ── 2. Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# ── 3. Node / npm bundle ────────────────────────────────────
+# 仓库根同时是 npm 包（PROJECT.md §1.6.1）。
+# 但它是零依赖、零构建脚本的，所以这里只需要挡掉安装与打包产物。
+node_modules/
+*.tgz
+npm-debug.log*
+pnpm-debug.log*
+
+# ── 4. 测试 / 类型检查 / 覆盖率缓存 ─────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# TESTING.md §6.4 明确要求：Hypothesis 会保存导致失败的输入，
+# 必须忽略（但 CI 要缓存它，否则复现不了失败）
+.hypothesis/
+
+# ── 5. 密钥与凭据（RL-02：绝不提交任何形式的凭据）──────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.npmrc
+.pypirc
+.netrc
+.git-credentials
+
+# ── 6. 安全过滤 fixture 的例外【项目特有，必须有】──────────
+# ⚠️ 这一节和上一节是配套的，不能只留上一节。
+#
+# TESTING.md §3.1 规定 tests/fixtures/secrets/ 里必须放：
+#   .env  id_rsa  config.py  normal.py  .coderagignore
+# 这些文件**内容是假凭据**，但 T2-06 的安全测试就是靠它们
+# 证明「过滤器确实拦住了密钥文件」。
+#
+# 没有下面的 ! 例外，第 5 节的 .env / id_rsa* 会把它们全部忽略掉：
+# 测试在你本机能过（文件还在磁盘上），别人 clone 下来就缺文件、
+# 直接报错——典型的「我这儿是好的」故障。
+#
+# 注意：负向规则（!）必须写在对应正向规则**之后**，git 取最后一条匹配。
+!tests/fixtures/secrets/.env
+!tests/fixtures/secrets/id_rsa
+!tests/fixtures/secrets/.coderagignore
+
+# ── 7. macOS / 编辑器 ───────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/

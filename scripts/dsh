@@ -1,0 +1,34 @@
+#!/bin/sh
+# dsh-coderag 的统一 dsh 调用入口。
+#
+# 为什么需要它：dsh 不一定在 PATH 上。
+#   * 只在某个 dsh 会话内执行时，会话会把 npx 缓存的 .bin 注入 PATH —— 那是**临时**的；
+#   * 干净终端里 `dsh` 通常不可见，只能走 npx；
+#   * 而裸 `npx @deepseek-ai/dsh` 会拉 `latest`，版本会漂移，本项目需要钉死。
+#
+# 行为：
+#   1. 若有全局安装的 dsh 且未设 DSH_FORCE_NPX=1 → 直接用（启动快）
+#   2. 否则回退到钉版本的 npx
+#
+# 用法（项目文档里所有 `dsh X` 都读作 `./scripts/dsh X`）：
+#   ./scripts/dsh --version
+#   ./scripts/dsh plugin --profile codearg-dev add .
+#
+# 换版本：改下面这一行，或设环境变量 DSH_VERSION=0.1.6-alpha.1
+
+# 换版本：改下面这一行，**并同步更新 PROJECT.md §4.1 与 §4.3.1 的版本号**，
+# 然后按 §4.1.2 的三步清单验证。
+#
+# 为什么钉 0.1.5-rc.1：
+#   * 本机 npx 缓存里已有这个版本 → 走 npx 时无需重新下载约 190 个包
+#   * npm 的 `latest` 在本会话期间就从 0.1.5-rc.1 漂到了 0.1.5-rc.2（见 PROJECT.md §4.1.2）
+#     —— 钉住一个已验证过的版本，比追 latest 更可复现
+#   * 升级步骤：改这一行 → 更新 §4.1 → 重跑 §4.5 清单 → 跑 scripts/eval-gate.sh
+
+DSH_VERSION="${DSH_VERSION:-0.1.5-rc.1}"
+
+if [ "${DSH_FORCE_NPX:-0}" != "1" ] && command -v dsh >/dev/null 2>&1; then
+  exec dsh "$@"
+fi
+
+exec npx --yes "@deepseek-ai/dsh@${DSH_VERSION}" "$@"
