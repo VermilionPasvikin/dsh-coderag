@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dsh-coderag"
+version = "0.1.0"
+description = "Codebase retrieval engine for DeepSeek Harness, exposed over MCP"
+requires-python = ">=3.10,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+  "mcp>=1.28,<2",
+  "tree-sitter>=0.23",
+  "tree-sitter-language-pack",
+  "pathspec>=0.12",
+]
+
+[project.scripts]
+dsh-coderag = "dsh_coderag.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov",
+  "pytest-anyio",
+  "anyio",
+  "inline-snapshot",
+  "hypothesis",
+  "ruff",
+  "mypy",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not e2e' --strict-markers --strict-config"
+asyncio_mode = "strict"
+timeout = 30
+session_timeout = 600
+filterwarnings = ["error"]
+markers = [
+  "e2e: end-to-end test that spawns a real subprocess",
+  "hypothesis: property-based test",
+  "snapshot: inline-snapshot test, must run single-process with -n0",
+]
+
+[tool.coverage.run]
+source = ["src/dsh_coderag"]
+branch = true
+patch = ["subprocess"]
+parallel = true
+omit = ["*/eval/*"]
+
+[tool.coverage.report]
+fail_under = 88
+exclude_also = ["if TYPE_CHECKING:", "if sys.platform =="]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "I", "T20"]
+
+[tool.mypy]
+strict = true
+warn_unreachable = true
