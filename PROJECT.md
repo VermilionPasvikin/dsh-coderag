@@ -1233,7 +1233,7 @@ T4-10  ← T4-08
 
 | ID | 状态 | 验收输出（粘贴实际结果） | 提交（短 SHA） | 备注 |
 |---|---|---|---|---|
-| T1-01 | 未开始 | | | |
+| T1-01 | 已完成 | `$ pip install -e . && dsh-coderag --version`<br>`Successfully built dsh-coderag`<br>`Installing collected packages: dsh-coderag`<br>`Successfully installed dsh-coderag-0.1.0`<br>`dsh-coderag 0.1.0`<br>（forBSH 环境，退出码 0） | `954d1ca` | 产出三文件；仅打包骨架，无独立单测 |
 | T1-02 | 未开始 | | | |
 | … | | | | |
 
