@@ -1268,6 +1268,7 @@ T4-10  ← T4-08
 | T1-09 | 已完成 | `$ python -m pytest tests/test_render.py -q`<br>`....                                                                     [100%]`<br>（退出码 0；4 个用例通过，含 2 个 inline-snapshot 快照） | `0e638e8` | 格式见 §3.5；符号缺失时省略 []；omitted>0 时输出 token 预算提示 |
 | T1-10 | 已完成 | `$ python -m pytest tests/test_taskman.py -q`<br>`.......                                                                  [100%]`<br>（退出码 0；7 个用例通过，含 pending→running→ready 与持久化） | `e1c51d6` | TaskManager: create/status/cancel + mark_running/ready/failed；非法流转抛 TaskStateError |
 | T1-11 | 已完成 | `$ python -m dsh_coderag.server`（stdin 发 initialize + notifications/initialized + tools/list）<br>`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"experimental":{},"tools":{"listChanged":false}},"serverInfo":{"name":"coderag","version":"0.1.0"}}}`<br>`tools: 4`<br>`names: ['code_search', 'code_outline', 'code_index', 'index_status']`<br>`serverInfo: {'name': 'coderag', 'version': '0.1.0'}`<br>（stdout 全部为合法 JSON-RPC；stderr 为空） | `fcdc300` | 4 工具 schema 与 §3.5 一致；code_outline 返回未实现的结构化状态；code_index 暂同步（T1-12 改异步） |
+| T1-12 | 已完成 | `code_index` 内存传输实测（50 个文件的工作区）<br>`elapsed_ms: 3.1`<br>`returned_state: pending`<br>`taskId_prefix_ok: True`<br>`final_state: ready files: 50 chunks: 50`<br>（< 200 ms 要求；后台线程走 pending→running→ready） | `c8aba73` | 新增 TaskManager.start(worker) 后台线程；失败写入 failed + 日志到 stderr |
 | … | | | | |
 
 ---
