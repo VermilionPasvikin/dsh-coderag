@@ -7,14 +7,19 @@ transitions while they do the work.
 
 from __future__ import annotations
 
+import logging
 import secrets
 import sqlite3
+import threading
 import time
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 
-from dsh_coderag.indexer import open_index
+from dsh_coderag.indexer import IndexSummary, open_index
 from dsh_coderag.types import IndexRun
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class TaskState(str, Enum):
@@ -40,6 +45,35 @@ class TaskManager:
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
+
+    def start(self, root: Path, worker: Callable[[Path], IndexSummary]) -> str:
+        """Create a task and run worker(root) on a daemon thread.
+
+        Returns immediately with the task id; the caller polls status().
+        """
+        task_id = self.create(root)
+        threading.Thread(
+            target=self._run_worker, args=(task_id, root, worker), daemon=True
+        ).start()
+        return task_id
+
+    def _run_worker(
+        self, task_id: str, root: Path, worker: Callable[[Path], IndexSummary]
+    ) -> None:
+        self.mark_running(task_id)
+        try:
+            summary = worker(root)
+        except Exception as exc:
+            _LOGGER.exception("indexing task %s failed", task_id)
+            self.mark_failed(task_id, f"{type(exc).__name__}: {exc}")
+            return
+        self.mark_ready(
+            task_id,
+            total_files=summary.files,
+            done_files=summary.files,
+            total_chunks=summary.chunks,
+            done_chunks=summary.chunks,
+        )
 
     def create(self, root: Path) -> str:
         """Insert a pending task for root and return its id."""

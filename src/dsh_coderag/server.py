@@ -212,23 +212,12 @@ def _code_index(arguments: dict[str, Any], root: Path) -> str:
         target = (root / relative).resolve()
     db_path = target.resolve() / ".coderag" / "index.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    manager = TaskManager(db_path)
-    task_id = manager.create(target)
-    manager.mark_running(task_id)
-    summary = index_sync(target)
-    manager.mark_ready(
-        task_id,
-        total_files=summary.files,
-        done_files=summary.files,
-        total_chunks=summary.chunks,
-        done_chunks=summary.chunks,
-    )
+    task_id = TaskManager(db_path).start(target, index_sync)
     return json.dumps(
         {
             "taskId": task_id,
-            "state": "ready",
-            "files": summary.files,
-            "chunks": summary.chunks,
+            "state": "pending",
+            "hint": "Poll index_status with this taskId.",
         },
         ensure_ascii=False,
     )
