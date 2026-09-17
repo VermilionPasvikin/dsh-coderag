@@ -1264,6 +1264,7 @@ T4-10  ← T4-08
 | T1-05 | 已完成 | `$ python -m pytest tests/test_chunker.py -q`<br>`..............                                                           [100%]`<br>（退出码 0；14 个用例通过） | `ca85e60` | 固定 80 行 / 20 行重叠；symbol_kind=None；每行至少被一个 chunk 覆盖 |
 | T1-06 | 已完成 | `$ python -m pytest tests/test_schema.py tests/test_text.py -q`<br>`....................                                                     [100%]`<br>（退出码 0；20 个用例通过） | `36c000c` | 5 张表（不含 embeddings）；WAL；chunks_fts=unicode61；bigram 索引/查询对称且幂等；§5.3.1 代码块同步为实际实现（原文有首尾空格且非幂等） |
 | T1-07 | 已完成 | `$ dsh-coderag index tests/fixtures/tiny`<br>`indexed 3 files, 3 chunks into /Users/vermi/个人项目/python/dsh-coderag/tests/fixtures/tiny/.coderag/index.sqlite3`<br>`$ sqlite3 tests/fixtures/tiny/.coderag/index.sqlite3 "select count(*) from chunks;"`<br>`3`<br>（files: app.ts / lib.c / main.py；行区间 1-3 / 1-3 / 1-2） | `ced4777` | 新增 open_index 与 CLI index 子命令；重复索引不产生重复行 |
+| T1-08 | 已完成 | `$ dsh-coderag search add`（在 tests/fixtures/tiny 内，已先 `dsh-coderag index tests/fixtures/tiny`）<br>`lib.c:1-3`<br>`main.py:1-2`<br>`app.ts:1-3`<br>（退出码 0；按 bm25 排序，T2-14 再改为顺序保持） | `716c4db` | 新增 search() 与 CLI search 子命令；无索引时抛 FileNotFoundError，不返回空列表 |
 | … | | | | |
 
 ---
