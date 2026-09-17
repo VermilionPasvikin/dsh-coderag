@@ -8,7 +8,9 @@ modifies the DeepSeek Harness host.
 from __future__ import annotations
 
 from dsh_coderag.indexer import index_sync
+from dsh_coderag.searcher import search
+from dsh_coderag.types import SearchStatus
 
-__all__ = ["__version__", "index_sync"]
+__all__ = ["SearchStatus", "__version__", "index_sync", "search"]
 
 __version__ = "0.1.0"

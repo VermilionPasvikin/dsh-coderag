@@ -12,6 +12,7 @@ from pathlib import Path
 
 from dsh_coderag import __version__
 from dsh_coderag.indexer import index_sync
+from dsh_coderag.searcher import search
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +37,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=".",
         help="Workspace directory to index (default: current directory).",
     )
+    search_parser = subparsers.add_parser(
+        "search",
+        help="Search the workspace index.",
+    )
+    search_parser.add_argument("query", help="Keyword or natural-language query.")
+    search_parser.add_argument(
+        "--root",
+        default=".",
+        help="Workspace root to search (default: current directory).",
+    )
+    search_parser.add_argument(
+        "-k",
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum number of hits (default: 5).",
+    )
     return parser
 
 
@@ -49,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
             f"indexed {summary.files} files, {summary.chunks} chunks "
             f"into {summary.root}/.coderag/index.sqlite3\n"
         )
+        return 0
+    if args.command == "search":
+        hits = search(Path(args.root), args.query, k=args.limit)
+        for hit in hits:
+            sys.stdout.write(f"{hit.path}:{hit.start_line}-{hit.end_line}\n")
         return 0
     parser.print_help()
     return 0
