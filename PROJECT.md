@@ -1235,6 +1235,7 @@ T4-10  ← T4-08
 |---|---|---|---|---|
 | T1-01 | 已完成 | `$ pip install -e . && dsh-coderag --version`<br>`Successfully built dsh-coderag`<br>`Installing collected packages: dsh-coderag`<br>`Successfully installed dsh-coderag-0.1.0`<br>`dsh-coderag 0.1.0`<br>（forBSH 环境，退出码 0） | `954d1ca` | 产出三文件；仅打包骨架，无独立单测 |
 | T1-02 | 已完成 | `$ python -m pytest tests/test_config.py -q`<br>`...                                                                      [100%]`<br>（退出码 0；3 个点 = 3 个用例通过） | `8c11c80` | 正常 / 缺必填 / 类型错误 |
+| T1-03 | 已完成 | `$ python -c "from dsh_coderag.types import ErrorCode; print(len(ErrorCode))"`<br>`10`<br>（≥9；§5.6 现有 10 个，含新增的 FTS5_UNAVAILABLE，任务描述里的「9 个」已过时） | `16859d5` | tests/test_types.py 5 例全过；ruff/mypy 通过 |
 | … | | | | |
 
 ---
