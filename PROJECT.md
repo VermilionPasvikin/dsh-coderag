@@ -787,19 +787,43 @@ FTS5 MATCH 查询 → bm25() 排序 → 结构化加分 → 截断 → 顺序保
 ```python
 CJK = re.compile(r"[\u4e00-\u9fff]+")
 
+
 def to_bigrams(text: str) -> str:
-    """把 CJK 连续段切成 bigram 并以空格分隔；拉丁词与代码原样保留。
+    """把 CJK 连续段切成 bigram；拉丁词与代码原样保留。
+
     unicode61 会按空格切词，因此 bigram 成为独立 token，且相邻 bigram 保持位置关系。
+    纯 CJK 不产生首尾空格，整体幂等，纯拉丁文本原样返回。
     """
-    out, pos = [], 0
-    for m in CJK.finditer(text):
-        out.append(text[pos:m.start()])
-        run = m.group()
-        out.append(" ".join(run[i:i+2] for i in range(len(run) - 1)) if len(run) > 1 else run)
-        pos = m.end()
-    out.append(text[pos:])
-    return " ".join(out)
+    pieces: list[str] = []
+    pos = 0
+    for match in CJK.finditer(text):
+        pieces.append(text[pos : match.start()])
+        pieces.append(_bigram_run(match.group()))
+        pos = match.end()
+    pieces.append(text[pos:])
+    return _join_pieces(pieces)
+
+
+def _bigram_run(run: str) -> str:
+    """把一个 CJK 连续段展开为 bigram；单字原样保留。"""
+    if len(run) == 1:
+        return run
+    return " ".join(run[index : index + 2] for index in range(len(run) - 1))
+
+
+def _join_pieces(pieces: list[str]) -> str:
+    """拼接各段，只在两段会贴在一起时补一个空格。"""
+    result = ""
+    for piece in pieces:
+        if not piece:
+            continue
+        if result and not result[-1].isspace() and not piece[0].isspace():
+            result += " "
+        result += piece
+    return result
 ```
+
+该实现保证：纯拉丁文本原样返回；纯 CJK 不产生首尾空格；整体幂等（`to_bigrams(to_bigrams(x)) == to_bigrams(x)`）。
 
 **两种查询模式（实测行为已验证）**：
 
@@ -1238,7 +1262,7 @@ T4-10  ← T4-08
 | T1-03 | 已完成 | `$ python -c "from dsh_coderag.types import ErrorCode; print(len(ErrorCode))"`<br>`10`<br>（≥9；§5.6 现有 10 个，含新增的 FTS5_UNAVAILABLE，任务描述里的「9 个」已过时） | `16859d5` | tests/test_types.py 5 例全过；ruff/mypy 通过 |
 | T1-04 | 已完成 | `$ python -m pytest tests/test_walker.py -q`<br>`.....                                                                    [100%]`<br>（退出码 0；5 个用例通过） | `1a528cb` | 新增 tests/fixtures/tiny 与 conftest 的 tiny_repo fixture |
 | T1-05 | 已完成 | `$ python -m pytest tests/test_chunker.py -q`<br>`..............                                                           [100%]`<br>（退出码 0；14 个用例通过） | `ca85e60` | 固定 80 行 / 20 行重叠；symbol_kind=None；每行至少被一个 chunk 覆盖 |
-| T1-06 | 已完成 | `$ python -m pytest tests/test_schema.py tests/test_text.py -q`<br>`....................                                                     [100%]`<br>（退出码 0；20 个用例通过） | `36c000c` | 5 张表（不含 embeddings）；WAL；chunks_fts=unicode61；bigram 索引/查询对称且幂等 |
+| T1-06 | 已完成 | `$ python -m pytest tests/test_schema.py tests/test_text.py -q`<br>`....................                                                     [100%]`<br>（退出码 0；20 个用例通过） | `36c000c` | 5 张表（不含 embeddings）；WAL；chunks_fts=unicode61；bigram 索引/查询对称且幂等；§5.3.1 代码块同步为实际实现（原文有首尾空格且非幂等） |
 | … | | | | |
 
 ---
