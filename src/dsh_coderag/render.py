@@ -7,7 +7,7 @@ search, rank or trim by token budget.
 
 from __future__ import annotations
 
-from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus
+from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus, SkipReport
 
 _CONTEXT_PREFIX_MARKER = "// file: "
 
@@ -41,6 +41,7 @@ def render_search_result(result: SearchResult, *, omitted: int = 0) -> str:
             f'query: "{result.query}"',
             f"scanned: {result.scanned_files} files / {result.scanned_chunks} chunks",
             f"hits: {len(result.hits)} (sorted by source order)",
+            _format_skip_report("skipped", result.skipped),
         ]
     )
     blocks = [header]
@@ -62,6 +63,7 @@ def render_status(
     message: str | None = None,
     code: ErrorCode | None = None,
     hint: str | None = None,
+    skipped: SkipReport | None = None,
 ) -> str:
     """Render a status or error payload as model-visible plain text.
 
@@ -75,7 +77,19 @@ def render_status(
         lines.append(f"message: {_one_line(message)}")
     if hint is not None:
         lines.append(f"hint: {_one_line(hint)}")
+    if skipped is not None:
+        lines.append(_format_skip_report("skipped", skipped))
     return "\n".join(lines) + "\n"
+
+
+def _format_skip_report(label: str, report: SkipReport) -> str:
+    """Format one skip report, ordering reasons so output is deterministic."""
+    if not report.reasons:
+        return f"{label}: {report.count}"
+    details = ", ".join(
+        f"{reason}: {count}" for reason, count in sorted(report.reasons.items())
+    )
+    return f"{label}: {report.count} ({details})"
 
 
 def _format_location(hit: Hit) -> str:

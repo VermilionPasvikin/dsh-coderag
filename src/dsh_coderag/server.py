@@ -25,6 +25,7 @@ from dsh_coderag.render import render_search_result, render_status
 from dsh_coderag.searcher import search
 from dsh_coderag.taskman import TaskManager, TaskNotFoundError
 from dsh_coderag.types import ErrorCode, SearchStatus
+from dsh_coderag.walker import walk_with_report
 
 SERVER_NAME = "coderag"
 
@@ -211,6 +212,7 @@ def _code_search(arguments: dict[str, Any], root: Path) -> str:
             message=result.message or "Search did not return results.",
             code=result.code,
             hint=result.hint,
+            skipped=result.skipped,
         )
     return render_search_result(result)
 
@@ -284,8 +286,13 @@ def _index_status(arguments: dict[str, Any], root: Path) -> str:
             message="no index for this workspace",
             code=ErrorCode.INDEX_NOT_FOUND,
         )
+    skipped = walk_with_report(root).reasons
     return json.dumps(
-        {"status": "ready" if row[0] else "indexing", "db_schema": row[1]},
+        {
+            "status": "ready" if row[0] else "indexing",
+            "db_schema": row[1],
+            "skipped": {"count": sum(skipped.values()), "reasons": skipped},
+        },
         ensure_ascii=False,
     )
 

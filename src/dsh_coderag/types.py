@@ -71,6 +71,22 @@ class Hit:
 
 
 @dataclass(frozen=True)
+class SkipReport:
+    """Files the index filter kept out, counted by reason (PROJECT.md 4.2).
+
+    Model-visible: search and index status report these so a filtered file
+    never looks like absent code.
+    """
+
+    reasons: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def count(self) -> int:
+        """Total number of skipped files across every reason."""
+        return sum(self.reasons.values())
+
+
+@dataclass(frozen=True)
 class SearchResult:
     """A search outcome: a status plus, when ready, the hits."""
 
@@ -82,6 +98,7 @@ class SearchResult:
     message: str | None = None
     hint: str | None = None
     code: ErrorCode | None = None
+    skipped: SkipReport = field(default_factory=SkipReport)
 
 
 @dataclass

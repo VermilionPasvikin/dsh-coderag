@@ -37,6 +37,7 @@ status: ready
 query: "verify_token"
 scanned: 3 files / 7 chunks
 hits: 2 (sorted by source order)
+skipped: 0
 
 ── src/auth/token.py:1-4  (chunk 0)
 def verify_token(raw):
@@ -77,6 +78,7 @@ status: ready
 query: "如何校验用户令牌"
 scanned: 1284 files / 9632 chunks
 hits: 1 (sorted by source order)
+skipped: 0
 
 ── src/auth/token.py:42-67  [function verify_token]  (chunk 7)
 def verify_token(raw: str) -> Claims:

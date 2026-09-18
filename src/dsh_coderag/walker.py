@@ -9,6 +9,7 @@ each chunk.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pathspec
@@ -36,25 +37,47 @@ def load_ignore_spec(root: Path) -> pathspec.GitIgnoreSpec:
     return pathspec.GitIgnoreSpec.from_lines(lines)
 
 
+@dataclass
+class WalkReport:
+    """One walk's collected files plus the per-reason skip counts."""
+
+    files: list[tuple[Path, int, int]] = field(default_factory=list)
+    reasons: dict[str, int] = field(default_factory=dict)
+
+
 def walk(root: Path) -> list[tuple[Path, int, int]]:
-    """Collect whitelisted, non-secret, non-ignored files below root.
+    """Collect whitelisted, non-secret, non-ignored files below root."""
+    return walk_with_report(root).files
+
+
+def walk_with_report(root: Path) -> WalkReport:
+    """Collect code files under root and count why others were skipped.
 
     Returns (absolute path, size in bytes, mtime in nanoseconds) for every
-    regular file whose suffix is in CODE_EXTENSIONS, sorted by path so the
-    result is deterministic.
+    regular file whose suffix is in CODE_EXTENSIONS, sorted by path, plus the
+    number of code files dropped per reason (secret_file, gitignored). A file
+    that is not a code extension at all is not a skip.
     """
     base = root.resolve()
     spec = load_ignore_spec(base)
-    found: list[tuple[Path, int, int]] = []
+    report = WalkReport()
     for candidate in base.rglob("*"):
         if not candidate.is_file():
             continue
         if candidate.suffix.lower() not in CODE_EXTENSIONS:
             continue
         relative = candidate.relative_to(base).as_posix()
-        if is_secret_path(Path(relative)) or spec.match_file(relative):
+        if is_secret_path(Path(relative)):
+            _count(report.reasons, "secret_file")
+            continue
+        if spec.match_file(relative):
+            _count(report.reasons, "gitignored")
             continue
         stat = candidate.stat()
-        found.append((candidate, stat.st_size, stat.st_mtime_ns))
-    found.sort(key=lambda entry: str(entry[0]))
-    return found
+        report.files.append((candidate, stat.st_size, stat.st_mtime_ns))
+    report.files.sort(key=lambda entry: str(entry[0]))
+    return report
+
+
+def _count(reasons: dict[str, int], reason: str) -> None:
+    reasons[reason] = reasons.get(reason, 0) + 1

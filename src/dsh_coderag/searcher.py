@@ -13,7 +13,8 @@ from pathlib import Path
 
 from dsh_coderag.indexer import connect
 from dsh_coderag.text import to_bigrams
-from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus
+from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus, SkipReport
+from dsh_coderag.walker import walk_with_report
 
 
 def search(root: Path, query: str, k: int = 5) -> SearchResult:
@@ -33,6 +34,7 @@ def search(root: Path, query: str, k: int = 5) -> SearchResult:
         hits = _search(connection, query, k)
     finally:
         connection.close()
+    skipped = SkipReport(reasons=walk_with_report(root).reasons)
     if not hits:
         return SearchResult(
             status=SearchStatus.EMPTY,
@@ -40,6 +42,7 @@ def search(root: Path, query: str, k: int = 5) -> SearchResult:
             scanned_files=files,
             scanned_chunks=chunks,
             hint="No matches. Try different keywords, or use grep for exact identifiers.",
+            skipped=skipped,
         )
     return SearchResult(
         status=SearchStatus.READY,
@@ -47,6 +50,7 @@ def search(root: Path, query: str, k: int = 5) -> SearchResult:
         hits=hits,
         scanned_files=files,
         scanned_chunks=chunks,
+        skipped=skipped,
     )
 
 
