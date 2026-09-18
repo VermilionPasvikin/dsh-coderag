@@ -402,17 +402,17 @@ code_search(query, path, limit, mode)
 **模块依赖方向（禁止反向依赖）**：
 
 ```
-server ──► {taskman, searcher, indexer, render, walker, config, types}
+server ──► {taskman, searcher, indexer, render, walker, sqlite_caps, config, types}
 cli ─────► {indexer, searcher, types}
 taskman ─► {indexer, types}
-searcher ► {indexer, walker, chunker, parser, text, config, types}
-indexer ─► {walker, chunker, sanitize, text, log, config, types}
+searcher ► {indexer, walker, chunker, parser, text, sqlite_caps, config, types}
+indexer ─► {walker, chunker, sanitize, text, log, sqlite_caps, config, types}
 walker ──► {sanitize, config, types}
 chunker ─► {parser, types}
 render ──► types
 eval ────► searcher（M3 规划）
 
-config / types / parser / text / sanitize / log：叶子模块，不依赖其它 dsh_coderag 模块；
+config / types / parser / text / sanitize / log / sqlite_caps：叶子模块，不依赖其它 dsh_coderag 模块；
 config 与 types 被所有模块只读引用。render 只被 server（以及 M3 的 eval）调用。
 ```
 
