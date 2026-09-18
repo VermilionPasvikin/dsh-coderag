@@ -382,7 +382,7 @@ code_search(query, path, limit, mode)
 
 | 模块 | 文件 | 职责 | 不负责 |
 |---|---|---|---|
-| `config` | `src/dsh_coderag/config.py` | 配置读取与校验（环境变量 + 可选配置文件） | 不做默认值猜测（缺失必填项要报错） |
+| `config` | `src/dsh_coderag/config.py` | 配置读取与校验（环境变量） | 不做默认值猜测（缺失必填项要报错） |
 | `walker` | `src/dsh_coderag/walker.py` | 遍历工作区、应用忽略规则与密钥黑名单 | 不读文件内容 |
 | `chunker` | `src/dsh_coderag/chunker.py` | tree-sitter 声明感知分块 | 不写数据库 |
 | `indexer` | `src/dsh_coderag/indexer.py` | SQLite schema、增量写入、幂等 | 不做检索 |
@@ -658,7 +658,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
 
 ### 4.2 依赖清单
 
-**必需（M1 就要）**
+**必需（M1 起声明依赖，M2 起使用）**
 
 | 依赖 | 版本约束 | 用途 | 备注 |
 |---|---|---|---|
@@ -667,6 +667,8 @@ CREATE TABLE IF NOT EXISTS embeddings (
 | `tree-sitter` | `>=0.23` | 解析器运行时 | |
 | `tree-sitter-language-pack` 或按语言分装的 grammar 包 | 最新 | C / C++ / Python / TS / JS / Rust / Go 等 | 第一版只需 C/C++/Python/TS |
 | `pathspec` | `>=0.12` | `.gitignore` 语法解析 | 不要自己实现 gitignore 匹配 |
+
+> 这些依赖自 T1-01 起就写进 `pyproject.toml`；实际使用时间：`mcp` 从 T1-11、`tree-sitter` 从 T2-01、`pathspec` 从 T2-06。
 
 **可选（M3 决策通过后才加）**
 
@@ -1124,16 +1126,17 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T2-07 | 过滤结果对模型可见：`index_status`/`code_search` 报告 `skipped`/`redacted` 的数量与原因分类 | `render.py` | `python -m pytest -k "skip_report" -q` | 返回体含 `skipped: {count, reasons}` | T2-06 | 1h |
 | T2-08 | 实现内容哈希增量：`files.content_hash` 未变则整文件跳过 | `indexer.py` | `python -m pytest -k "incremental" -q` | 二次索引同一目录，`files` 表无新增行 | T2-07 | 2h |
 | T2-09 | 实现三类变更的事务处理：新增 / 修改（先删后插）/ 删除（级联） | `indexer.py` | `python -m pytest -k "add_modify_delete" -q` | 三条用例分别验证 `chunks` 表状态 | T2-08 | 2h |
-| T2-10 | 实现**自适应并发与批大小**（5.2 节，约束 C8）：由 CPU/内存推导，动态调整 | `indexer.py` | `python -m pytest -k "adaptive_concurrency" -q` | 模拟慢/快环境时批大小按规则变化 | T2-09 | 2h |
+| T2-10 | 实现**自适应并发与批大小**（5.2 节，约束 C8）：由 CPU/内存推导，动态调整；**参数可被 `IndexConfig` override（未设置时才自适应推导）** | `indexer.py`, `config.py` | `python -m pytest -k "adaptive_concurrency" -q` | 模拟慢/快环境时批大小按规则变化；override 时使用给定值 | T2-09 | 2h |
 | T2-11 | 实现文件数上限**显式失败**（5.2 节，约束 C9）：超限时报 `INDEX_TOO_MANY_FILES` 并带 `actual_count` | `walker.py` | `python -m pytest -k "too_many_files" -q` | 错误体含 `actual_count` 与实际数字一致 | T1-04 | 1h |
 | T2-12 | 实现任务取消：`code_index` 支持 cancel，工作线程在每个文件边界检查取消标志 | `taskman.py`, `indexer.py` | `python -m pytest -k "cancel" -q` | 取消后状态为 `cancelled` 且不再写库 | T1-10 | 1.5h |
 | T2-13 | 实现 `code_outline` 的真实功能（替换 T1-11 的占位实现） | `searcher.py`, `server.py` | `python -m pytest tests/test_outline.py -q` | 对 fixture 文件返回正确的符号树 | T2-02 | 1.5h |
 | T2-14 | 实现**顺序保持**（ADR-05）：选按分数、排按 `(path, start_line)` | `searcher.py` | `python -m pytest -k "order_preserving" -q` | 构造分数逆序的输入，输出仍按源码顺序 | T1-08 | 1h |
-| T2-15 | 实现 token 预算裁剪（5.4 节）与省略提示 | `searcher.py` | `python -m pytest -k "token_budget" -q` | 超预算时截断且末尾含省略说明行 | T2-14 | 1h |
+| T2-15 | 实现 token 预算裁剪（5.4 节）与省略提示 | `searcher.py`, `render.py` | `python -m pytest -k "token_budget" -q` | 超预算时截断且末尾含省略说明行 | T2-14 | 1h |
 | T2-16 | 实现结构化日志（JSON Lines 到 **stderr**，绝不写 stdout）与 `last-index.json` 审计转储 | `src/dsh_coderag/log.py` | 运行索引后检查 stderr 与文件 | stderr 每行是合法 JSON；审计文件含 5.7 节全部字段 | T2-10 | 1.5h |
 | T2-17 | **M2 端到端验收**：在**本仓库**（DSH 自身，约 3300 个 TS 文件）上跑一次完整索引与检索，记录耗时与质量 | `docs/m2-findings.md` | 人工 | 索引成功；对 5 个真实问题检索，≥4 个找到正确文件 | T2-16 | 2h |
 | T2-18 | 分块质量人工抽检 20 个 chunk，记录问题 | `docs/m2-chunk-audit.md` | 文件存在且含 20 条逐条结论 | 无"半个函数" | T2-03 | 1h |
 | **T2-19** | **实现标点查询路由（ADR-13）**：`code_search` 检测短标点序列，去掉标点后无可检索词时返回 `status: empty` + 指向 `grep` 的结构化提示；同时确认**未使用 `porter` tokenizer** | `src/dsh_coderag/searcher.py`, `tests/test_tokenizer_semantics.py` | `python -m pytest tests/test_tokenizer_semantics.py -q` | **三条语义测试全绿**：标点路由、无词干化、停用词可检索 | T2-14 | 2h |
+| T2-20 | 实现 `code_search` 的 `path` 参数：把检索范围限定到工作区内的子目录 | `searcher.py`, `server.py` | `python -m pytest -k "path_filter" -q` | 传入子目录时只返回该目录下的命中；省略时行为不变 | T1-08 | 1h |
 
 **M2 出口判据**：`T2-06`（安全）、`T2-14`（顺序）、`T2-17`（端到端）、**`T2-19`（分词器语义）** 通过，`T2-18` 抽检无严重问题。
 
@@ -1247,6 +1250,7 @@ T2-16  ← T2-10
 T2-17  ← T2-16
 T2-18  ← T2-03
 T2-19  ← T2-14
+T2-20  ← T1-08
 T3-00  ← T2-17
 T3-01  ← T2-17
 T3-02a  ← T3-01
