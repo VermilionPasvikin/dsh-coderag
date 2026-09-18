@@ -382,24 +382,37 @@ code_search(query, path, limit, mode)
 
 | 模块 | 文件 | 职责 | 不负责 |
 |---|---|---|---|
-| `config` | `src/dsh_coderag/config.py` | 配置读取与校验（环境变量） | 不做默认值猜测（缺失必填项要报错） |
-| `walker` | `src/dsh_coderag/walker.py` | 遍历工作区、应用忽略规则与密钥黑名单 | 不读文件内容 |
-| `chunker` | `src/dsh_coderag/chunker.py` | tree-sitter 声明感知分块 | 不写数据库 |
-| `indexer` | `src/dsh_coderag/indexer.py` | SQLite schema、增量写入、幂等 | 不做检索 |
-| `searcher` | `src/dsh_coderag/searcher.py` | FTS5 查询、打分、顺序保持、预算裁剪 | 不做索引 |
+| `config` | `src/dsh_coderag/config.py` | 配置读取与校验（环境变量）、自适应并发/批大小推导 | 不做默认值猜测（缺失必填项要报错） |
+| `types` | `src/dsh_coderag/types.py` | 跨模块数据类与错误码枚举 | 不含行为 |
+| `parser` | `src/dsh_coderag/parser.py` | 按扩展名探测语言、提供 tree-sitter grammar/parser | 不解析语法树、不遍历工作区 |
+| `text` | `src/dsh_coderag/text.py` | 中文 bigram 预转换（索引与查询两侧共用） | 不做分词决策 |
+| `sanitize` | `src/dsh_coderag/sanitize.py` | 密钥文件名/路径黑名单与内容正则扫描 | 不遍历、不读文件、不写库 |
+| `walker` | `src/dsh_coderag/walker.py` | 遍历工作区、应用忽略规则与密钥黑名单、上报 skip 原因与文件数上限 | 不读文件内容 |
+| `chunker` | `src/dsh_coderag/chunker.py` | tree-sitter 声明感知分块、超大符号拆分、module 头、无 grammar 降级、上下文前缀 | 不写数据库 |
+| `indexer` | `src/dsh_coderag/indexer.py` | SQLite schema、增量写入、幂等、三类变更、批量写库、内容级 redact、审计转储 | 不做检索 |
+| `searcher` | `src/dsh_coderag/searcher.py` | FTS5 查询、打分、顺序保持、预算裁剪、标点路由、path 过滤、`code_outline` 符号树 | 不做索引 |
 | `taskman` | `src/dsh_coderag/taskman.py` | 异步任务创建/进度/取消/持久化 | 不执行具体索引逻辑 |
-| `render` | `src/dsh_coderag/render.py` | 把结果渲染成模型可见文本 | 不做检索决策 |
-| `server` | `src/dsh_coderag/server.py` | MCP 协议实现、4 个工具注册 | 不含业务逻辑（薄层） |
-| `eval` | `src/dsh_coderag/eval/` | 评测集加载、运行、指标计算、报告 | 不参与生产路径 |
+| `render` | `src/dsh_coderag/render.py` | 把 search/status 结果渲染成模型可见文本 | 不做检索决策 |
+| `log` | `src/dsh_coderag/log.py` | JSON-Lines 日志（stderr）与 `last-index.json` 审计 | 不写 stdout、不索引/检索 |
+| `server` | `src/dsh_coderag/server.py` | MCP 协议实现、4 个工具注册、outline 文本渲染 | 不含业务逻辑（薄层） |
+| `eval` | `src/dsh_coderag/eval/` | 评测集加载、运行、指标计算、报告（**M3 规划，当前未创建**） | 不参与生产路径 |
 | `cli` | `src/dsh_coderag/__main__.py` | 命令行入口（`index` / `search`） | 供人调试用，非模型接口 |
 
 **模块依赖方向（禁止反向依赖）**：
 
 ```
-cli ──► server ──► {taskman, searcher} ──► {indexer, walker} ──► chunker
-  └──────────────────────► eval ──────────────────────────────►┘
-config ◄── 所有模块（只被读取，不依赖任何模块）
-render ◄── server, eval（只被调用）
+server ──► {taskman, searcher, indexer, render, walker, config, types}
+cli ─────► {indexer, searcher, types}
+taskman ─► {indexer, types}
+searcher ► {indexer, walker, chunker, parser, text, config, types}
+indexer ─► {walker, chunker, sanitize, text, log, config, types}
+walker ──► {sanitize, config, types}
+chunker ─► {parser, types}
+render ──► types
+eval ────► searcher（M3 规划）
+
+config / types / parser / text / sanitize / log：叶子模块，不依赖其它 dsh_coderag 模块；
+config 与 types 被所有模块只读引用。render 只被 server（以及 M3 的 eval）调用。
 ```
 
 ### 3.5 MCP 工具契约
@@ -568,7 +581,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   seq           INTEGER NOT NULL,          -- 文件内序号，用于"原文顺序"
   start_line    INTEGER NOT NULL,          -- 1-based，闭区间
   end_line      INTEGER NOT NULL,          -- 1-based，闭区间
-  symbol_kind   TEXT,                      -- function|class|method|module
+  symbol_kind   TEXT,                      -- function|method|class|struct|union|enum|namespace|interface|module
   symbol_name   TEXT,
   text          TEXT    NOT NULL,
   content_hash  TEXT    NOT NULL,
@@ -765,7 +778,7 @@ print('bigram OK')"
 |---|---|
 | **L1 声明边界** | 用 tree-sitter 解析，按 `function_definition` / `class_specifier` / `method_definition` / `struct_specifier` 等节点边界切分。这是**主路径**。 |
 | **L2 超大符号降级** | 单个声明超过 `maxChunkLines`（默认 200 行）时，按内部逻辑块（`compound_statement` 的直接子语句、注释块边界）二次切分，每片补齐 `symbol_name` 与 `#part/N` 后缀。 |
-| **L3 文件头** | 每个文件产生一个 `symbol_kind="module"` 的头部块（前 40 行），内含 license/import/宏定义，便于回答"这个模块是干什么的"。 |
+| **L3 文件头** | 文件开头、首个声明**之前**的非声明区块标记为 `symbol_kind="module"` 的头部块，上界 40 行（取该区间内最后一个非空行），内含 license/import/宏定义，便于回答"这个模块是干什么的"。**文件以声明开头时没有独立头部块**。 |
 | **L4 无解析器降级** | 语言没有 grammar 时，按空行分隔的段落切分，**并在结果中标注 `low_confidence: true`**，让模型知道这块质量低。 |
 
 **每个 chunk 必须携带的元数据**（依据 arXiv 2401.05856 的教训：*"Adding the file name and chunk number into the retrieved context helped the reader extract the required information"*）：
@@ -795,7 +808,7 @@ print('bigram OK')"
 | **批大小** | 起始 64 个 chunk 一批，根据单批耗时动态调整（>2s 减半，<200ms 翻倍），上限 512 |
 | **上限** | `maxFiles` 默认 20000。超过时**立刻失败**并报告 `actual_count`（约束 C9） |
 | **单文件上限** | `maxFileBytes` 默认 1 MiB，超过则跳过并记入 `skipped` 列表 |
-| **状态持久化** | 每次索引开始/结束都写 `index_runs` 与 `workspace_index`（约束 C10） |
+| **状态持久化** | 任务路径由 `TaskManager` 写 `index_runs`；索引完成写 `workspace_index.ready`（约束 C10）。直接 `index_sync`（CLI）不写 `index_runs` |
 | **取消** | `taskman.cancel(taskId)` 设置取消标志，工作线程在每个文件边界检查一次 |
 
 ### 5.3 检索策略
@@ -1002,12 +1015,14 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | `TASK_NOT_FOUND` | taskId 不存在 |
 | `CANCELLED` | 任务被取消 |
 
+> **当前发出状态**（2026-09-17，T2 收口）：已实际发出的 code 是 `INDEX_NOT_FOUND`、`SEARCH_INVALID_QUERY`、`TASK_NOT_FOUND`、`SEARCH_FAILED`、`INDEX_READ_FAILED`；`INDEX_TOO_MANY_FILES` 目前只作为 `TooManyFilesError.code` 经任务 `message` 暴露，尚未以 `code:` 字段返回；`INDEX_RUNNING`、`INDEX_WRITE_FAILED`、`CANCELLED` 尚无发出路径。这是**契约先行**，不是已实现清单。
+
 **铁律**：任何内部异常都**不得**向上冒泡成 MCP 的 `isError` 而丢失结构。必须转成带 `status` 与 `code` 的**正常返回值**，让模型能据此决策。
 
 ### 5.7 可观测性
 
 - **结构化日志**：JSON Lines 输出到 `stderr`（**绝不能写 stdout**，stdout 是 MCP 协议通道）。
-- 每条日志含：`ts`, `level`, `event`, `task_id`, `duration_ms`, 及事件相关字段。
+- 每条日志含：`ts`, `level`, `event`, `task_id`, `duration_ms`, 及事件相关字段。**当前 `index_sync` 不接收 taskman 的 taskId，直接/CLI 索引时该字段为 `null`；经 `code_index` 触发的任务应由 taskman 注入（待补，见 `docs/backlog.md`）。**
 - **审计转储**：每次索引结束写一份 `<root>/.coderag/last-index.json`，含文件数、chunk 数、跳过数、被净化数、耗时分解。这是你调试索引质量的主要依据。
 - **不采集任何遥测**，不外发任何数据。
 

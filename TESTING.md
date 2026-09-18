@@ -80,22 +80,27 @@
 
 ```
 tests/
-├── conftest.py                    # 共享 fixture
+├── conftest.py                    # 共享 fixture：tiny_repo / decl_repo / oversized_repo / secrets_repo / index_db
 ├── fixtures/
-│   ├── tiny/                      # 极小仓库：3 个文件，覆盖 3 种语言
-│   ├── secrets/                   # ⚠️ 安全测试专用：含 .env / id_rsa / AKIA...
-│   ├── cjk/                       # 中文注释与标识符（含 2 字词）
-│   └── oversized/                 # 单函数 1000 行（测降级切分）
-├── test_text.py                   # M2
-├── test_chunker.py                # M6
-├── test_walker.py                 # M8
-├── test_sanitize.py               # M1
-├── test_indexer.py                # 增量、事务、取消
-├── test_searcher.py               # M7
-├── test_render.py                 # M9
-├── test_server.py                 # M3 / M4 / M10（内存传输）
-├── test_retrieval_quality.py      # M5（跑 eval/tasks.jsonl）
-└── test_properties.py             # 属性测试
+│   ├── tiny/                      # 极小仓库：.py/.c/.ts 各 1 个
+│   ├── decl/                      # 声明感知分块的 4 语言样例（T2-02）
+│   ├── oversized/                 # 单函数 1000 行（T2-03）
+│   └── secrets/                   # ⚠️ 全假凭据：.env / id_rsa / config.py(AKIA) / normal.py（T2-06）
+├── test_config.py / test_types.py / test_text.py
+├── test_schema.py
+├── test_walker.py / test_too_many_files.py
+├── test_chunker.py / test_chunker_decl.py / test_chunker_oversized.py / test_contextual_prefix.py
+├── test_parser.py
+├── test_indexer.py / test_incremental.py / test_indexer_changes.py
+├── test_searcher.py / test_order_preserving.py / test_token_budget.py / test_path_filter.py
+├── test_security.py / test_skip_report.py
+├── test_status_contract.py / test_server.py / test_render.py / test_outline.py
+├── test_taskman.py / test_cancel.py / test_adaptive_concurrency.py / test_log.py
+├── test_tokenizer_semantics.py
+└── test_retrieval_quality.py      # M5（M3 规划，跑 eval/tasks.jsonl）
+
+（属性测试（M6/M8）位于 test_chunker_decl.py / test_too_many_files.py，未单独建 test_properties.py；
+  `cjk/` fixture 尚未创建，中文用例在 test_searcher.py / test_tokenizer_semantics.py 内用 tmp_path 自建。）
 ```
 
 **`tests/fixtures/secrets/` 里放什么**（刻意构造，**内容必须是假的**）：
@@ -301,7 +306,7 @@ async def test_tool_descriptions_are_stable(client):
 ### 3.6 安全过滤测试（M1，**硬门禁**）
 
 ```python
-# tests/test_sanitize.py
+# tests/test_security.py
 def test_secret_files_never_enter_index(indexed_secrets_repo):
     """M1 / RL-03：这是安全事故级断言，不通过不允许进入 M3。"""
     paths = all_indexed_paths(indexed_secrets_repo)
@@ -506,7 +511,7 @@ import pytest
 from dsh_coderag import search, SearchStatus
 
 # ── 测试 1：标点查询必须被显式路由，而不是静默返回空 ────────────────
-@pytest.mark.parametrize("query", ["(", "::", "->", "self.(", "std::"])
+@pytest.mark.parametrize("query", ["(", "::", "->", "[", "#", "{}", "()"])
 def test_punctuation_query_routes_to_grep_with_structured_hint(indexed_fixture, query):
     """ADR-13：短标点 FTS 搜不到（实测三档 tokenizer 全失败）。
 
@@ -547,6 +552,8 @@ def test_stopwords_are_searchable(indexed_fixture, word):
     if fixture_contains(indexed_fixture, word):
         assert r.hits, f"停用词 {word!r} 被剥离了 —— tokenizer 配置有问题"
 ```
+
+> **与 ADR-13 对齐**：路由的精确判据是「去掉标点后**没有可检索词**」。因此 `self.(`、`std::` 不属于路由用例（它们含标识符 `self`/`std`，会走 FTS）；真正路由的是纯标点，即上面参数化列出的那些。`self.authenticate`/`std::vector` 是「含标点但仍有可检索词」的对照组。
 
 **这三条的价值**：它们在**默认配置下就会暴露问题**——如果你不小心用了 `porter`、或者以为换个 tokenizer 就能搜标点，这三条会立刻告诉你方向错了。**评测设计里"预期失败"的测试同样重要，前提是你知道它为什么失败。**
 

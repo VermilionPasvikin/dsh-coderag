@@ -31,3 +31,30 @@
 - 设计（§5.3.1）：先精度模式（标识符整体短语 + CJK bigram 短语），0 条时**降级到召回模式**，
   两者都 0 才 empty。
 - 建议：实现召回模式（放宽 AND / 子串命中），中文自然语言查询才有机会命中。
+
+## 缺口 P1：单文件大小上限 `maxFileBytes` 未实现（文档一致性审查）
+
+- 文档承诺：PROJECT §5.2「`maxFileBytes` 默认 1 MiB，超过则跳过并记入 `skipped`」；
+  PROJECT §3.5 与 AGENTS §4.2 的 `skipped` 示例都含 `too_large`。
+- 实际：**无任何任务行实现它**；`config.py` 无 `max_file_bytes`；`indexer._prepare_file`
+  用 `absolute.read_bytes()` 整文件读入、`chunk_text()` 返回全部 chunk 后再写库（indexer.py:286）。
+- 风险：生成的/压缩的超大单文件会一次性占用等量内存并产生超长 chunk 列表；DSH 语料最大
+  文件 489 KB、>1 MiB 的 0 个，本语料暂不触发。
+- 建议方案：`IndexConfig` 加 `max_file_bytes`（env `CODERAG_MAX_FILE_BYTES`，默认 1 MiB）；
+  `walk_with_report` 用已有的 `stat` 大小在**读内容前**跳过并计 `reason="too_large"`；
+  indexer 传入 `config.max_file_bytes`；补测试与 §6.6 验收。估时 1–2h。
+
+## 缺口 P2：FTS5 能力探测未实现、`FTS5_UNAVAILABLE` 从不发出（文档一致性审查）
+
+- 文档承诺：TESTING §4.2「FTS5 能力探测（**必须做**）」并给出 `sqlite_caps.fts5_available()`；
+  PROJECT §5.6 列 `FTS5_UNAVAILABLE`（须给可操作提示）。
+- 实际：无 `src/dsh_coderag/sqlite_caps.py`；`init_schema` 直接 `executescript`（indexer.py:126-128）；
+  `server._dispatch` 只捕获 `ConfigError/FileNotFoundError/TaskNotFoundError`（server.py:179-194）。
+- 风险：FTS5 缺失的发行版（2025-07 前的 uv CPython、某些 macOS 系统 python）上，
+  `CREATE VIRTUAL TABLE ... USING fts5` 抛 `sqlite3.OperationalError` → 可能冒泡成 MCP
+  `isError`，违反 RL-09；测试也无法 skip。
+- 建议方案：(1) 新增 `sqlite_caps.fts5_available()`（TESTING §4.2 已给实现）；
+  (2) `index_sync`/`search` 开库前探测，不可用则返回
+  `status: error, code: FTS5_UNAVAILABLE` + 可操作 hint；(3) `server._dispatch` 加兜底
+  `except Exception` → `SEARCH_FAILED`（RL-09 纵深防御）；(4) 可用时测试正常跑、
+  不可用时 `pytest.skip`。估时 1.5–2h。
