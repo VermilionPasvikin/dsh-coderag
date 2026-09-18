@@ -141,21 +141,26 @@ def _index_file(
     relative = absolute.relative_to(base).as_posix()
     raw = absolute.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
+    existing = connection.execute(
+        "SELECT id, content_hash FROM files WHERE path = ?", (relative,)
+    ).fetchone()
+    if existing is not None and existing[1] == digest:
+        return 0
+    existing_id = existing[0] if existing is not None else None
     text = raw.decode("utf-8", errors="replace")
     chunks = chunk_text(text, relative)
     # Layer 3: drop chunks whose text matches a secret pattern. A file whose
     # chunks are all redacted is not recorded at all.
     surviving = [chunk for chunk in chunks if scan_secret(chunk.text) is None]
     if chunks and not surviving:
+        if existing_id is not None:
+            with connection:
+                _delete_file_rows(connection, existing_id)
         return 0
     chunks = surviving
     with connection:
-        existing = connection.execute(
-            "SELECT id FROM files WHERE path = ?", (relative,)
-        ).fetchone()
-        if existing is not None:
-            connection.execute("DELETE FROM chunks_fts WHERE file_id = ?", (existing[0],))
-            connection.execute("DELETE FROM files WHERE id = ?", (existing[0],))
+        if existing_id is not None:
+            _delete_file_rows(connection, existing_id)
         cursor = connection.execute(
             "INSERT INTO files (path, size, mtime_ns, content_hash, lang, indexed_at)"
             " VALUES (?, ?, ?, ?, ?, ?)",
@@ -194,6 +199,12 @@ def _index_file(
                 ),
             )
     return len(chunks)
+
+
+def _delete_file_rows(connection: sqlite3.Connection, file_id: int) -> None:
+    """Delete one file's chunks (including FTS rows) and the file row."""
+    connection.execute("DELETE FROM chunks_fts WHERE file_id = ?", (file_id,))
+    connection.execute("DELETE FROM files WHERE id = ?", (file_id,))
 
 
 def _mark_ready(connection: sqlite3.Connection, base: Path) -> None:
