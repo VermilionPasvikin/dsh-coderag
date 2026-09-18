@@ -665,7 +665,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
 | Python | `>=3.10,<3.13` | 运行时 | `forBSH` 已满足 |
 | `mcp` | `>=1.28,<2` | MCP 服务端 SDK | **必须加 `<2` 上界**：v2 是破坏性重构 |
 | `tree-sitter` | `>=0.23` | 解析器运行时 | |
-| `tree-sitter-language-pack` 或按语言分装的 grammar 包 | 最新 | C / C++ / Python / TS / JS / Rust / Go 等 | 第一版只需 C/C++/Python/TS |
+| `tree-sitter-language-pack` | `>=0.13,<0.14` | C / C++ / Python / TS / JS / Rust / Go 等 | 第一版只需 C/C++/Python/TS。**必须钉 `<1`**：1.x 是 Rust 重写，wheel 不含 grammar，运行时从 GitHub Release 下载（离线不可用、违反 `TESTING.md` T-02）；0.13 是最后一个打包 grammar 的 abi3 wheel |
 | `pathspec` | `>=0.12` | `.gitignore` 语法解析 | 不要自己实现 gitignore 匹配 |
 
 > 这些依赖自 T1-01 起就写进 `pyproject.toml`；实际使用时间：`mcp` 从 T1-11、`tree-sitter` 从 T2-01、`pathspec` 从 T2-06。
@@ -1304,6 +1304,7 @@ T4-10  ← T4-08
 | T1-14 | 已完成 | `$ ./scripts/dsh web --patch ./cordis.patch.yml --dump-config`（E-07：dsh 命令经包装脚本）<br>`- id: mcp-coderag`<br>`  name: '@deepseek-ai/dsh-mcp-client'`<br>`  config:`<br>`    serverName: coderag`<br>`    transport: stdio`<br>`    command: !!js process.env.CODERAG_PYTHON ?? '/opt/anaconda3/envs/forBSH/bin/python'`<br>（rc=0，stderr 为空）<br>配置的 command 实测：`serverInfo {name: coderag, version: 0.1.0}`、`tools [code_search, code_outline, code_index, index_status]` | `41f5d54` | 同一文件兼作 dev overlay 与 bundle patch；未真正 boot web（避免占用 3080），用 --dump-config + 直接跑配置命令验证 |
 | T1-15 | 已完成 | 人工验收（DSH Web :3099，工作区 `examples/demo-workspace`，创造模式）<br>问「用户令牌在哪里校验」→ 先 grep×2，再调 `mcp__coderag__code_search`，返回 `status: ready` / `hits: 1` / `── src/auth/token.py:1-20`<br>问「连接池代码在哪？」→ **首发** code_search，参数 `{"query":"连接池 connection pool","limit":10}`，返回 `── src/db/pool.py:1-8` | `cd71afa` | 工具出现且被调用，返回正确文件+行号；R5 部分缓解（未知标识符时优先 code_search，已知标识符仍可能先 grep） |
 | T1-16 | 已完成 | `$ test -f docs/m1-findings.md && grep -c '^### 观察' docs/m1-findings.md`<br>`exists`<br>`8` | `7dcdb57` | 8 条具体观察 + 3 条开发期缺陷修复记录 + 已知限制 |
+| T2-01 | 已完成 | `$ python -m pytest tests/test_parser.py -q`<br>`......................                                                   [100%]`<br>（退出码 0；22 个用例通过。其中 4 例对 python/c/cpp/typescript 四种 grammar 做实际解析，断言 root 节点分别为 module / translation_unit / translation_unit / program 且 `has_error` 为 False；1 例断言 `EXTENSION_LANGUAGES` 覆盖 `walker.CODE_EXTENSIONS` 全部 7 个后缀） | `PENDING` | 新增 `parser.py`：扩展名→grammar 名映射 + `get_language`/`get_parser`；`pyproject.toml` 钉 `tree-sitter-language-pack>=0.13,<0.14`（原未钉版本装到 1.20.0，实际运行时需联网从 GitHub 下载 grammar，本机实测 `available_languages()==0`、`get_language('python')` 报 DownloadError，离线不可用） | |
 | … | | | | |
 
 ---
