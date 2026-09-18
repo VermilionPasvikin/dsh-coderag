@@ -212,12 +212,7 @@ def _code_search(arguments: dict[str, Any], root: Path) -> str:
             code=result.code,
             hint=result.hint,
         )
-    return render_search_result(
-        result.hits,
-        query=result.query,
-        scanned_files=result.scanned_files,
-        scanned_chunks=result.scanned_chunks,
-    )
+    return render_search_result(result)
 
 
 def _code_outline() -> str:

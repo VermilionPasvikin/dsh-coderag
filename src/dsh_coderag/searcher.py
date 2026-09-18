@@ -9,26 +9,11 @@ and does not render model-visible text.
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from dsh_coderag.indexer import connect
 from dsh_coderag.text import to_bigrams
-from dsh_coderag.types import ErrorCode, Hit, SearchStatus
-
-
-@dataclass(frozen=True)
-class SearchResult:
-    """A search outcome: a status plus, when ready, the hits."""
-
-    status: SearchStatus
-    query: str
-    hits: list[Hit] = field(default_factory=list)
-    scanned_files: int = 0
-    scanned_chunks: int = 0
-    message: str | None = None
-    hint: str | None = None
-    code: ErrorCode | None = None
+from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus
 
 
 def search(root: Path, query: str, k: int = 5) -> SearchResult:

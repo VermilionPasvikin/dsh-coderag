@@ -7,32 +7,24 @@ search, rank or trim by token budget.
 
 from __future__ import annotations
 
-from dsh_coderag.types import ErrorCode, Hit, SearchStatus
+from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus
 
 
-def render_search_result(
-    hits: list[Hit],
-    *,
-    query: str,
-    scanned_files: int,
-    scanned_chunks: int,
-    status: SearchStatus = SearchStatus.READY,
-    omitted: int = 0,
-) -> str:
-    """Render hits as the model-visible search result text.
+def render_search_result(result: SearchResult, *, omitted: int = 0) -> str:
+    """Render a search result as the model-visible text.
 
     Any change to the output must be reflected in tests/test_render.py.
     """
     header = "\n".join(
         [
-            f"status: {status.value}",
-            f'query: "{query}"',
-            f"scanned: {scanned_files} files / {scanned_chunks} chunks",
-            f"hits: {len(hits)} (sorted by source order)",
+            f"status: {result.status.value}",
+            f'query: "{result.query}"',
+            f"scanned: {result.scanned_files} files / {result.scanned_chunks} chunks",
+            f"hits: {len(result.hits)} (sorted by source order)",
         ]
     )
     blocks = [header]
-    for hit in hits:
+    for hit in result.hits:
         blocks.append(f"{_format_location(hit)}\n{hit.text}")
     if omitted > 0:
         noun = "hit" if omitted == 1 else "hits"

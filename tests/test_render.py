@@ -10,7 +10,7 @@ from inline_snapshot import snapshot
 from dsh_coderag.indexer import index_sync
 from dsh_coderag.render import render_search_result, render_status
 from dsh_coderag.searcher import search
-from dsh_coderag.types import ErrorCode, Hit, SearchStatus
+from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus
 
 
 def _hit(path: str, seq: int, start: int, end: int, text: str) -> Hit:
@@ -24,7 +24,13 @@ def test_render_search_result_matches_the_contract() -> None:
         _hit("src/auth/middleware.py", 3, 15, 33, "def require_auth():\n    ..."),
     ]
     out = render_search_result(
-        hits, query="verify_token", scanned_files=3, scanned_chunks=7
+        SearchResult(
+            status=SearchStatus.READY,
+            query="verify_token",
+            hits=hits,
+            scanned_files=3,
+            scanned_chunks=7,
+        )
     )
     assert out == snapshot("""\
 status: ready
@@ -57,10 +63,13 @@ def test_render_includes_symbol_and_omitted_note() -> None:
         )
     ]
     out = render_search_result(
-        hits,
-        query="如何校验用户令牌",
-        scanned_files=1284,
-        scanned_chunks=9632,
+        SearchResult(
+            status=SearchStatus.READY,
+            query="如何校验用户令牌",
+            hits=hits,
+            scanned_files=1284,
+            scanned_chunks=9632,
+        ),
         omitted=1,
     )
     assert out == snapshot("""\
@@ -78,21 +87,14 @@ def verify_token(raw: str) -> Claims:
 
 
 def test_render_uses_the_given_status() -> None:
-    out = render_search_result(
-        [], query="x", scanned_files=0, scanned_chunks=0, status=SearchStatus.EMPTY
-    )
+    out = render_search_result(SearchResult(status=SearchStatus.EMPTY, query="x"))
     assert out.startswith("status: empty\n")
 
 
 def test_render_of_real_search_output_contains_the_hit_location(tiny_repo: Path) -> None:
     index_sync(tiny_repo)
     result = search(tiny_repo, "add", k=5)
-    out = render_search_result(
-        result.hits,
-        query=result.query,
-        scanned_files=result.scanned_files,
-        scanned_chunks=result.scanned_chunks,
-    )
+    out = render_search_result(result)
     assert "status: ready" in out
     assert "main.py:1-2" in out
 

@@ -7,7 +7,7 @@ that appear in model-visible payloads. It contains no behaviour.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -68,6 +68,20 @@ class Hit:
     symbol_kind: str | None = None
     symbol_name: str | None = None
     low_confidence: bool = False
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    """A search outcome: a status plus, when ready, the hits."""
+
+    status: SearchStatus
+    query: str
+    hits: list[Hit] = field(default_factory=list)
+    scanned_files: int = 0
+    scanned_chunks: int = 0
+    message: str | None = None
+    hint: str | None = None
+    code: ErrorCode | None = None
 
 
 @dataclass
