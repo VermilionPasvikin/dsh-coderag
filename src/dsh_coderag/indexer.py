@@ -21,6 +21,7 @@ from pathlib import Path
 from dsh_coderag.chunker import chunk_text
 from dsh_coderag.config import (
     DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_FILES,
     IndexConfig,
     adaptive_workers,
     next_batch_size,
@@ -146,7 +147,8 @@ def index_sync(root: Path, config: IndexConfig | None = None) -> IndexSummary:
     workers = config.workers if config is not None else adaptive_workers()
     batch_size = config.start_batch_size if config is not None else DEFAULT_BATCH_SIZE
     try:
-        entries = walk(base)
+        max_files = config.max_files if config is not None else DEFAULT_MAX_FILES
+        entries = walk(base, max_files=max_files)
         current_paths = {
             absolute.relative_to(base).as_posix() for absolute, _, _ in entries
         }
