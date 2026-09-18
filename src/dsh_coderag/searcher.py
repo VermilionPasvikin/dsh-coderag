@@ -94,12 +94,12 @@ def _search(connection: sqlite3.Connection, query: str, k: int) -> list[Hit]:
         JOIN chunks c ON c.id = chunks_fts.chunk_id
         JOIN files f ON f.id = c.file_id
         WHERE chunks_fts MATCH ?
-        ORDER BY bm25(chunks_fts)
+        ORDER BY bm25(chunks_fts), c.id
         LIMIT ?
         """,
         (match, k),
     ).fetchall()
-    return [
+    hits = [
         Hit(
             path=path,
             seq=seq,
@@ -112,6 +112,9 @@ def _search(connection: sqlite3.Connection, query: str, k: int) -> list[Hit]:
         )
         for path, seq, start_line, end_line, symbol_kind, symbol_name, text, score in rows
     ]
+    # ADR-05: selection is by score, but output follows source order.
+    hits.sort(key=lambda hit: (hit.path, hit.start_line))
+    return hits
 
 
 def _index_counts(connection: sqlite3.Connection) -> tuple[int, int]:
