@@ -27,6 +27,14 @@ def decl_repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def oversized_repo(tmp_path: Path) -> Path:
+    """Copy the oversized declaration fixture into tmp_path (T-03)."""
+    dst = tmp_path / "oversized"
+    shutil.copytree(FIXTURES / "oversized", dst)
+    return dst
+
+
+@pytest.fixture
 def index_db(tmp_path: Path) -> Path:
     """A temporary index database path; never the repository (T-04)."""
     return tmp_path / "index.sqlite3"

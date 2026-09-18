@@ -664,7 +664,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
 |---|---|---|---|
 | Python | `>=3.10,<3.13` | 运行时 | `forBSH` 已满足 |
 | `mcp` | `>=1.28,<2` | MCP 服务端 SDK | **必须加 `<2` 上界**：v2 是破坏性重构 |
-| `tree-sitter` | `>=0.23` | 解析器运行时 | |
+| `tree-sitter` | `>=0.25.2,<0.26` | 解析器运行时 | 必须与 `tree-sitter-language-pack` 0.13 的构建线一致（0.25.x）：本机实测 0.26.0 在释放大 Tree 时段错误，0.25.2 正常 |
 | `tree-sitter-language-pack` | `>=0.13,<0.14` | C / C++ / Python / TS / JS / Rust / Go 等 | 第一版只需 C/C++/Python/TS。**必须钉 `<1`**：1.x 是 Rust 重写，wheel 不含 grammar，运行时从 GitHub Release 下载（离线不可用、违反 `TESTING.md` T-02）；0.13 是最后一个打包 grammar 的 abi3 wheel |
 | `pathspec` | `>=0.12` | `.gitignore` 语法解析 | 不要自己实现 gitignore 匹配 |
 
@@ -1306,6 +1306,7 @@ T4-10  ← T4-08
 | T1-16 | 已完成 | `$ test -f docs/m1-findings.md && grep -c '^### 观察' docs/m1-findings.md`<br>`exists`<br>`8` | `7dcdb57` | 8 条具体观察 + 3 条开发期缺陷修复记录 + 已知限制 |
 | T2-01 | 已完成 | `$ python -m pytest tests/test_parser.py -q`<br>`......................                                                   [100%]`<br>（退出码 0；22 个用例通过。其中 4 例对 python/c/cpp/typescript 四种 grammar 做实际解析，断言 root 节点分别为 module / translation_unit / translation_unit / program 且 `has_error` 为 False；1 例断言 `EXTENSION_LANGUAGES` 覆盖 `walker.CODE_EXTENSIONS` 全部 7 个后缀） | `ea49999` | 新增 `parser.py`：扩展名→grammar 名映射 + `get_language`/`get_parser`；`pyproject.toml` 钉 `tree-sitter-language-pack>=0.13,<0.14`（原未钉版本装到 1.20.0，实际运行时需联网从 GitHub 下载 grammar，本机实测 `available_languages()==0`、`get_language('python')` 报 DownloadError，离线不可用） | |
 | T2-02 | 已完成 | `$ python -m pytest tests/test_chunker_decl.py -q`<br>`................                                                         [100%]`<br>（退出码 0；16 个用例通过。其中 4 个语言 fixture 各有一例断言**完整 chunk 列表**（kind/name/start/end）与人工标注逐条一致：sample.py 5 块（4 声明）/ sample.c 3 块（2 声明）/ sample.cpp 4 块（3 声明）/ sample.ts 4 块（2 声明）；另含 2 条 Hypothesis 性质测试：覆盖全文、区间不重叠） | `818ec58` | 新增 4 语言 fixture `tests/fixtures/decl/*`、`decl_repo` fixture 与 `tests/test_chunker_decl.py`；重写 `tests/test_chunker.py`（朴素定长切分被声明感知替换，仅对无 grammar 语言保留非重叠定长 fallback）；chunker.py 按 tree-sitter 声明边界切分，并对声明外非空行补 gap chunk，保证覆盖全文且不重叠 |
+| T2-03 | 已完成 | `$ python -m pytest -k "oversized" -q`<br>`......                                                                   [100%]`<br>（退出码 0；6 个用例通过。1000 行函数切成 5 片，命名 `big_function#part/1..5`，每片 ≤200 行、连续覆盖 [1,1000] 且区间不重叠；`max_chunk_lines` 可覆盖；小声明不加后缀） | `PENDING` | 新增 `tests/fixtures/oversized/big.py`（1000 行）与 `tests/test_chunker_oversized.py`；chunker.py 增加 `MAX_CHUNK_LINES=200`，按 body 直接子语句/注释边界二次切分；`pyproject.toml` 钉 `tree-sitter>=0.25.2,<0.26`（0.26.0 与 language-pack 0.13 不兼容，释放大 Tree 时段错误） | |
 | … | | | | |
 
 ---

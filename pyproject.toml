@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
   "mcp>=1.28,<2",
-  "tree-sitter>=0.23",
+  "tree-sitter>=0.25.2,<0.26",
   "tree-sitter-language-pack>=0.13,<0.14",
   "pathspec>=0.12",
 ]

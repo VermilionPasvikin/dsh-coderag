@@ -4,9 +4,11 @@ This module turns source text into indexable chunks. When the file's language
 has a declaration mapping, chunks follow tree-sitter declaration boundaries
 (functions, classes, structs, methods and namespaces); any non-whitespace
 region outside a declaration is emitted as its own chunk, so no content is
-lost and chunks never overlap. Languages without a mapping fall back to fixed
-line windows. Chunk text carries no contextual prefix yet (T2-05) and this
-module never reads or writes the database.
+lost and chunks never overlap. A declaration longer than MAX_CHUNK_LINES is
+split into consecutive parts at its internal statement boundaries and every
+part carries a "#part/N" suffix on its symbol name. Languages without a
+mapping fall back to fixed line windows. Chunk text carries no contextual
+prefix yet (T2-05) and this module never reads or writes the database.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from dsh_coderag.parser import detect_language, get_parser
 from dsh_coderag.types import Chunk
 
 FALLBACK_LINES = 80
+MAX_CHUNK_LINES = 200
 
 # Grammar name -> tree-sitter node type -> model-visible symbol kind.
 DECLARATION_KINDS: dict[str, dict[str, str]] = {
@@ -85,15 +88,21 @@ class _Declaration:
     end_line: int
     symbol_kind: str
     symbol_name: str | None
+    breaks: tuple[int, ...] = ()
 
 
-def chunk_text(text: str, path: str = "", lang: str | None = None) -> list[Chunk]:
+def chunk_text(
+    text: str,
+    path: str = "",
+    lang: str | None = None,
+    max_chunk_lines: int = MAX_CHUNK_LINES,
+) -> list[Chunk]:
     """Split text into chunks, preferring declaration boundaries.
 
     path provides the chunk's workspace-relative path and, when lang is None,
     the language to detect. Line numbers are 1-based inclusive and seq is
     0-based in source order. Every non-whitespace line falls in exactly one
-    chunk.
+    chunk. Declarations longer than max_chunk_lines are split into parts.
     """
     lines = text.splitlines()
     if not lines:
@@ -101,7 +110,7 @@ def chunk_text(text: str, path: str = "", lang: str | None = None) -> list[Chunk
     language = lang if lang is not None else detect_language(path)
     if language in DECLARATION_KINDS:
         declarations = _extract_declarations(text, language)
-        spans = _declaration_spans(lines, declarations)
+        spans = _declaration_spans(lines, declarations, max_chunk_lines)
     else:
         spans = _fallback_spans(lines)
     return [
@@ -119,16 +128,22 @@ def chunk_text(text: str, path: str = "", lang: str | None = None) -> list[Chunk
     ]
 
 
-def chunk_file(path: Path, root: Path) -> list[Chunk]:
+def chunk_file(
+    path: Path, root: Path, max_chunk_lines: int = MAX_CHUNK_LINES
+) -> list[Chunk]:
     """Read one file and label its chunks with a workspace-relative path."""
     text = path.read_text(encoding="utf-8", errors="replace")
     relative = path.resolve().relative_to(root.resolve()).as_posix()
-    return chunk_text(text, relative)
+    return chunk_text(text, relative, max_chunk_lines=max_chunk_lines)
 
 
 def _extract_declarations(text: str, language: str) -> list[_Declaration]:
     """Return the outermost declarations of text, in source order."""
-    root = get_parser(language).parse(text.encode("utf-8")).root_node
+    # tree-sitter nodes read their text from the source buffer, so both the
+    # encoded bytes and the tree must stay referenced for the whole traversal.
+    source = text.encode("utf-8")
+    tree = get_parser(language).parse(source)
+    root = tree.root_node
     kinds = DECLARATION_KINDS[language]
     wrappers = WRAPPER_NODE_TYPES.get(language, frozenset())
     declarations: list[_Declaration] = []
@@ -146,11 +161,11 @@ def _declaration_for(
     """Return the declaration node represents, unwrapping a wrapper if needed."""
     kind = kinds.get(node.type)
     if kind is not None:
-        return _make_declaration(node, kind, _symbol_name(node))
+        return _make_declaration(node, kind, _symbol_name(node), node)
     if node.type in wrappers:
         inner = _find_inner_declaration(node, kinds, wrappers)
         if inner is not None:
-            return _make_declaration(node, kinds[inner.type], _symbol_name(inner))
+            return _make_declaration(node, kinds[inner.type], _symbol_name(inner), inner)
     return None
 
 
@@ -168,12 +183,15 @@ def _find_inner_declaration(
     return None
 
 
-def _make_declaration(node: Node, symbol_kind: str, symbol_name: str | None) -> _Declaration:
+def _make_declaration(
+    node: Node, symbol_kind: str, symbol_name: str | None, declaration: Node
+) -> _Declaration:
     return _Declaration(
         start_line=node.start_point.row + 1,
         end_line=_end_line(node),
         symbol_kind=symbol_kind,
         symbol_name=symbol_name,
+        breaks=_break_lines(declaration.child_by_field_name("body")),
     )
 
 
@@ -217,25 +235,62 @@ def _node_text(node: Node) -> str:
 
 
 def _declaration_spans(
-    lines: list[str], declarations: list[_Declaration]
+    lines: list[str], declarations: list[_Declaration], max_chunk_lines: int
 ) -> list[tuple[int, int, str | None, str | None]]:
     """Combine declaration spans with chunks for uncovered non-whitespace lines."""
     covered: set[int] = set()
     spans: list[tuple[int, int, str | None, str | None]] = []
     for declaration in declarations:
-        spans.append(
-            (
-                declaration.start_line,
-                declaration.end_line,
-                declaration.symbol_kind,
-                declaration.symbol_name,
-            )
-        )
+        for start, end, name in _declaration_parts(declaration, max_chunk_lines):
+            spans.append((start, end, declaration.symbol_kind, name))
         covered.update(range(declaration.start_line, declaration.end_line + 1))
     for start, end in _uncovered_regions(lines, covered):
         spans.append((start, end, None, None))
     spans.sort(key=lambda span: (span[0], span[1]))
     return spans
+
+
+def _declaration_parts(
+    declaration: _Declaration, max_chunk_lines: int
+) -> list[tuple[int, int, str | None]]:
+    """Split one oversized declaration into (#part/N) spans, or return it whole."""
+    length = declaration.end_line - declaration.start_line + 1
+    if length <= max_chunk_lines:
+        return [(declaration.start_line, declaration.end_line, declaration.symbol_name)]
+    breaks = declaration.breaks
+    ranges: list[tuple[int, int]] = []
+    start = declaration.start_line
+    while start <= declaration.end_line:
+        limit = start + max_chunk_lines - 1
+        if limit >= declaration.end_line:
+            ranges.append((start, declaration.end_line))
+            break
+        candidates = [point for point in breaks if start < point <= limit + 1]
+        cut_end = max(candidates) - 1 if candidates else limit
+        ranges.append((start, cut_end))
+        start = cut_end + 1
+    return [
+        (start, end, _part_name(declaration.symbol_name, index))
+        for index, (start, end) in enumerate(ranges, start=1)
+    ]
+
+
+def _part_name(symbol_name: str | None, index: int) -> str | None:
+    """Return the #part/N symbol name for one split part."""
+    if symbol_name is None:
+        return None
+    return f"{symbol_name}#part/{index}"
+
+
+def _break_lines(body: Node | None) -> tuple[int, ...]:
+    """Return candidate cut lines: the body's direct statements and comments.
+
+    The node is read here, while the parsed tree is still alive; declarations
+    keep only plain line numbers so no tree-sitter node escapes the parse.
+    """
+    if body is None:
+        return ()
+    return tuple(sorted({child.start_point.row + 1 for child in body.children}))
 
 
 def _uncovered_regions(lines: list[str], covered: set[int]) -> list[tuple[int, int]]:
