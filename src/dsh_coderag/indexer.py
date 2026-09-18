@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -133,11 +134,18 @@ def open_index(db_path: Path) -> sqlite3.Connection:
     return connection
 
 
-def index_sync(root: Path, config: IndexConfig | None = None) -> IndexSummary:
+def index_sync(
+    root: Path,
+    config: IndexConfig | None = None,
+    *,
+    should_cancel: Callable[[], bool] | None = None,
+) -> IndexSummary:
     """Index a workspace synchronously and return the resulting counts.
 
     config tunes batching and concurrency; the workspace root always comes
-    from the root argument. Re-running replaces only the files whose content
+    from the root argument. should_cancel is polled at every file boundary;
+    once it returns True no further rows are written and the workspace index
+    is not marked ready. Re-running replaces only the files whose content
     hash changed, adds new files and cascade-deletes removed ones.
     """
     base = root.resolve()
@@ -146,6 +154,7 @@ def index_sync(root: Path, config: IndexConfig | None = None) -> IndexSummary:
     connection = open_index(db_path)
     workers = config.workers if config is not None else adaptive_workers()
     batch_size = config.start_batch_size if config is not None else DEFAULT_BATCH_SIZE
+    check = should_cancel if should_cancel is not None else _never_cancelled
     try:
         max_files = config.max_files if config is not None else DEFAULT_MAX_FILES
         entries = walk(base, max_files=max_files)
@@ -158,23 +167,31 @@ def index_sync(root: Path, config: IndexConfig | None = None) -> IndexSummary:
                 "SELECT path, content_hash FROM files"
             ).fetchall()
         }
-        prepared = _prepare_files(entries, base, known, workers)
+        prepared = _prepare_files(entries, base, known, workers, check)
         total_chunks = 0
         position = 0
-        while position < len(prepared):
+        while position < len(prepared) and not check():
             end = min(position + batch_size, len(prepared))
             started = time.monotonic()
             with connection:
                 for item in prepared[position:end]:
+                    if check():
+                        break
                     total_chunks += _write_prepared(connection, item)
             elapsed = time.monotonic() - started
             batch_size = next_batch_size(batch_size, elapsed)
             position = end
-        _remove_missing_files(connection, current_paths)
-        _mark_ready(connection, base)
+        if not check():
+            _remove_missing_files(connection, current_paths)
+            _mark_ready(connection, base)
         return IndexSummary(root=base, files=len(entries), chunks=total_chunks)
     finally:
         connection.close()
+
+
+def _never_cancelled() -> bool:
+    """Default cancellation check for callers that do not cancel."""
+    return False
 
 
 def _prepare_files(
@@ -182,20 +199,28 @@ def _prepare_files(
     base: Path,
     known: dict[str, str],
     workers: int,
+    should_cancel: Callable[[], bool],
 ) -> list[_PreparedFile]:
-    """Prepare every changed file, in parallel when there is more than one."""
+    """Prepare every changed file, in parallel when there is more than one.
+
+    Cancellation is polled before each file; files prepared after the flag
+    is set are dropped without being written.
+    """
     prepared: list[_PreparedFile] = []
     if workers <= 1 or len(entries) <= 1:
         for absolute, size, mtime_ns in entries:
+            if should_cancel():
+                break
             item = _prepare_file(absolute, base, size, mtime_ns, known)
             if item is not None:
                 prepared.append(item)
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [
-                pool.submit(_prepare_file, absolute, base, size, mtime_ns, known)
-                for absolute, size, mtime_ns in entries
-            ]
+            futures = []
+            for absolute, size, mtime_ns in entries:
+                if should_cancel():
+                    break
+                futures.append(pool.submit(_prepare_file, absolute, base, size, mtime_ns, known))
             for future in as_completed(futures):
                 item = future.result()
                 if item is not None:

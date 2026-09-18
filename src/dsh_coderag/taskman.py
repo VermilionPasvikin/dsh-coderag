@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
+from typing import Protocol
 
 from dsh_coderag.indexer import IndexSummary, open_index
 from dsh_coderag.types import IndexRun
@@ -40,40 +41,73 @@ class TaskStateError(Exception):
     """Raised when a transition is not allowed from the current state."""
 
 
+class IndexWorker(Protocol):
+    """A callable that indexes root and honours a cancellation check."""
+
+    def __call__(
+        self, root: Path, *, should_cancel: Callable[[], bool]
+    ) -> IndexSummary: ...
+
+
 class TaskManager:
     """Create and update indexing tasks stored in the index_runs table."""
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
+        self._events: dict[str, threading.Event] = {}
+        self._lock = threading.Lock()
 
-    def start(self, root: Path, worker: Callable[[Path], IndexSummary]) -> str:
+    def start(self, root: Path, worker: IndexWorker) -> str:
         """Create a task and run worker(root) on a daemon thread.
 
-        Returns immediately with the task id; the caller polls status().
+        Returns immediately with the task id; the caller polls status(). The
+        worker is given a should_cancel check that cancel() turns on.
         """
         task_id = self.create(root)
+        event = threading.Event()
+        with self._lock:
+            self._events[task_id] = event
         threading.Thread(
-            target=self._run_worker, args=(task_id, root, worker), daemon=True
+            target=self._run_worker, args=(task_id, root, worker, event), daemon=True
         ).start()
         return task_id
 
     def _run_worker(
-        self, task_id: str, root: Path, worker: Callable[[Path], IndexSummary]
+        self, task_id: str, root: Path, worker: IndexWorker, event: threading.Event
     ) -> None:
-        self.mark_running(task_id)
         try:
-            summary = worker(root)
+            self.mark_running(task_id)
+        except TaskStateError:
+            return
+        try:
+            summary = worker(root, should_cancel=event.is_set)
         except Exception as exc:
             _LOGGER.exception("indexing task %s failed", task_id)
-            self.mark_failed(task_id, f"{type(exc).__name__}: {exc}")
+            if not event.is_set():
+                self._mark_failed_if_active(task_id, f"{type(exc).__name__}: {exc}")
             return
-        self.mark_ready(
-            task_id,
-            total_files=summary.files,
-            done_files=summary.files,
-            total_chunks=summary.chunks,
-            done_chunks=summary.chunks,
-        )
+        finally:
+            with self._lock:
+                self._events.pop(task_id, None)
+        if event.is_set():
+            return
+        try:
+            self.mark_ready(
+                task_id,
+                total_files=summary.files,
+                done_files=summary.files,
+                total_chunks=summary.chunks,
+                done_chunks=summary.chunks,
+            )
+        except TaskStateError:
+            return
+
+    def _mark_failed_if_active(self, task_id: str, message: str) -> None:
+        """Record a failure unless a concurrent cancel already won."""
+        try:
+            self.mark_failed(task_id, message)
+        except TaskStateError:
+            return
 
     def create(self, root: Path) -> str:
         """Insert a pending task for root and return its id."""
@@ -165,7 +199,11 @@ class TaskManager:
             connection.close()
 
     def cancel(self, task_id: str) -> None:
-        """Move a pending or running task to cancelled."""
+        """Signal a running worker and move a pending or running task to cancelled."""
+        with self._lock:
+            event = self._events.get(task_id)
+        if event is not None:
+            event.set()
         connection = open_index(self._db_path)
         try:
             with connection:
