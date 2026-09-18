@@ -1,9 +1,12 @@
 """SQLite schema, connection setup and synchronous indexing for dsh_coderag.
 
 This module owns the index database layout, the connection pragmas and the
-first synchronous writer that walks a workspace, chunks each file and stores
-files, chunks and the full-text index. Incremental hash-based skipping,
-safety filtering and asynchronous task management live in later tasks.
+indexing writer that walks a workspace, prepares each file off the database
+thread (read, hash, chunk, secret scan), then writes the prepared files in
+adaptive batches. Concurrency and batch size come from IndexConfig when set
+and are otherwise derived from the machine (PROJECT.md 5.2, C8 / RL-07).
+Incremental hash-based skipping and add/modify/delete transactions live here;
+asynchronous task management lives in taskman.
 """
 
 from __future__ import annotations
@@ -11,12 +14,20 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
 from dsh_coderag.chunker import chunk_text
+from dsh_coderag.config import (
+    DEFAULT_BATCH_SIZE,
+    IndexConfig,
+    adaptive_workers,
+    next_batch_size,
+)
 from dsh_coderag.sanitize import scan_secret
 from dsh_coderag.text import to_bigrams
+from dsh_coderag.types import Chunk
 from dsh_coderag.walker import walk
 
 SCHEMA_VERSION = 1
@@ -89,6 +100,18 @@ class IndexSummary:
     chunks: int
 
 
+@dataclass(frozen=True)
+class _PreparedFile:
+    """One file prepared off the database thread, ready to be written."""
+
+    relative: str
+    size: int
+    mtime_ns: int
+    digest: str
+    chunks: tuple[Chunk, ...]
+    redacted: bool
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     """Open the index database with the pragmas this project relies on."""
     connection = sqlite3.connect(db_path)
@@ -109,23 +132,42 @@ def open_index(db_path: Path) -> sqlite3.Connection:
     return connection
 
 
-def index_sync(root: Path) -> IndexSummary:
+def index_sync(root: Path, config: IndexConfig | None = None) -> IndexSummary:
     """Index a workspace synchronously and return the resulting counts.
 
-    Re-running replaces each file's rows, so the index never accumulates
-    duplicates. Hash-based skipping of unchanged files is added in T2-08.
+    config tunes batching and concurrency; the workspace root always comes
+    from the root argument. Re-running replaces only the files whose content
+    hash changed, adds new files and cascade-deletes removed ones.
     """
     base = root.resolve()
     db_path = base / ".coderag" / "index.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = open_index(db_path)
+    workers = config.workers if config is not None else adaptive_workers()
+    batch_size = config.start_batch_size if config is not None else DEFAULT_BATCH_SIZE
     try:
         entries = walk(base)
+        current_paths = {
+            absolute.relative_to(base).as_posix() for absolute, _, _ in entries
+        }
+        known = {
+            str(row[0]): str(row[1])
+            for row in connection.execute(
+                "SELECT path, content_hash FROM files"
+            ).fetchall()
+        }
+        prepared = _prepare_files(entries, base, known, workers)
         total_chunks = 0
-        current_paths: set[str] = set()
-        for absolute, size, mtime_ns in entries:
-            current_paths.add(absolute.relative_to(base).as_posix())
-            total_chunks += _index_file(connection, base, absolute, size, mtime_ns)
+        position = 0
+        while position < len(prepared):
+            end = min(position + batch_size, len(prepared))
+            started = time.monotonic()
+            with connection:
+                for item in prepared[position:end]:
+                    total_chunks += _write_prepared(connection, item)
+            elapsed = time.monotonic() - started
+            batch_size = next_batch_size(batch_size, elapsed)
+            position = end
         _remove_missing_files(connection, current_paths)
         _mark_ready(connection, base)
         return IndexSummary(root=base, files=len(entries), chunks=total_chunks)
@@ -133,75 +175,125 @@ def index_sync(root: Path) -> IndexSummary:
         connection.close()
 
 
-def _index_file(
-    connection: sqlite3.Connection,
+def _prepare_files(
+    entries: list[tuple[Path, int, int]],
     base: Path,
+    known: dict[str, str],
+    workers: int,
+) -> list[_PreparedFile]:
+    """Prepare every changed file, in parallel when there is more than one."""
+    prepared: list[_PreparedFile] = []
+    if workers <= 1 or len(entries) <= 1:
+        for absolute, size, mtime_ns in entries:
+            item = _prepare_file(absolute, base, size, mtime_ns, known)
+            if item is not None:
+                prepared.append(item)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(_prepare_file, absolute, base, size, mtime_ns, known)
+                for absolute, size, mtime_ns in entries
+            ]
+            for future in as_completed(futures):
+                item = future.result()
+                if item is not None:
+                    prepared.append(item)
+    prepared.sort(key=lambda item: item.relative)
+    return prepared
+
+
+def _prepare_file(
     absolute: Path,
+    base: Path,
     size: int,
     mtime_ns: int,
-) -> int:
-    """Replace one file's rows; return the number of chunks written."""
+    known: dict[str, str],
+) -> _PreparedFile | None:
+    """Read, hash, chunk and secret-scan one file, or None when unchanged."""
     relative = absolute.relative_to(base).as_posix()
     raw = absolute.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
-    existing = connection.execute(
-        "SELECT id, content_hash FROM files WHERE path = ?", (relative,)
-    ).fetchone()
-    if existing is not None and existing[1] == digest:
-        return 0
-    existing_id = existing[0] if existing is not None else None
+    if known.get(relative) == digest:
+        return None
     text = raw.decode("utf-8", errors="replace")
     chunks = chunk_text(text, relative)
     # Layer 3: drop chunks whose text matches a secret pattern. A file whose
     # chunks are all redacted is not recorded at all.
-    surviving = [chunk for chunk in chunks if scan_secret(chunk.text) is None]
-    if chunks and not surviving:
-        if existing_id is not None:
-            with connection:
-                _delete_file_rows(connection, existing_id)
-        return 0
-    chunks = surviving
-    with connection:
+    surviving = tuple(chunk for chunk in chunks if scan_secret(chunk.text) is None)
+    return _PreparedFile(
+        relative=relative,
+        size=size,
+        mtime_ns=mtime_ns,
+        digest=digest,
+        chunks=surviving,
+        redacted=bool(chunks) and not surviving,
+    )
+
+
+def _write_prepared(connection: sqlite3.Connection, prepared: _PreparedFile) -> int:
+    """Replace one prepared file's rows; return the chunks written."""
+    existing = connection.execute(
+        "SELECT id FROM files WHERE path = ?", (prepared.relative,)
+    ).fetchone()
+    existing_id = existing[0] if existing is not None else None
+    if prepared.redacted:
         if existing_id is not None:
             _delete_file_rows(connection, existing_id)
-        cursor = connection.execute(
-            "INSERT INTO files (path, size, mtime_ns, content_hash, lang, indexed_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (relative, size, mtime_ns, digest, None, int(time.time())),
-        )
-        assert cursor.lastrowid is not None
-        file_id = cursor.lastrowid
-        for chunk in chunks:
-            chunk_digest = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
-            chunk_cursor = connection.execute(
-                "INSERT INTO chunks"
-                " (file_id, seq, start_line, end_line, symbol_kind, symbol_name,"
-                "  text, content_hash)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    file_id,
-                    chunk.seq,
-                    chunk.start_line,
-                    chunk.end_line,
-                    chunk.symbol_kind,
-                    chunk.symbol_name,
-                    chunk.text,
-                    chunk_digest,
-                ),
-            )
-            assert chunk_cursor.lastrowid is not None
-            connection.execute(
-                "INSERT INTO chunks_fts (text_bigram, symbol, path, chunk_id, file_id)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (
-                    to_bigrams(chunk.text),
-                    chunk.symbol_name or "",
-                    relative,
-                    chunk_cursor.lastrowid,
-                    file_id,
-                ),
-            )
-    return len(chunks)
+        return 0
+    if existing_id is not None:
+        _delete_file_rows(connection, existing_id)
+    cursor = connection.execute(
+        "INSERT INTO files (path, size, mtime_ns, content_hash, lang, indexed_at)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            prepared.relative,
+            prepared.size,
+            prepared.mtime_ns,
+            prepared.digest,
+            None,
+            int(time.time()),
+        ),
+    )
+    assert cursor.lastrowid is not None
+    file_id = cursor.lastrowid
+    for chunk in prepared.chunks:
+        _write_chunk(connection, file_id, prepared.relative, chunk)
+    return len(prepared.chunks)
+
+
+def _write_chunk(
+    connection: sqlite3.Connection, file_id: int, relative: str, chunk: Chunk
+) -> None:
+    """Insert one chunk row and its full-text row."""
+    chunk_digest = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+    chunk_cursor = connection.execute(
+        "INSERT INTO chunks"
+        " (file_id, seq, start_line, end_line, symbol_kind, symbol_name,"
+        "  text, content_hash)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            file_id,
+            chunk.seq,
+            chunk.start_line,
+            chunk.end_line,
+            chunk.symbol_kind,
+            chunk.symbol_name,
+            chunk.text,
+            chunk_digest,
+        ),
+    )
+    assert chunk_cursor.lastrowid is not None
+    connection.execute(
+        "INSERT INTO chunks_fts (text_bigram, symbol, path, chunk_id, file_id)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (
+            to_bigrams(chunk.text),
+            chunk.symbol_name or "",
+            relative,
+            chunk_cursor.lastrowid,
+            file_id,
+        ),
+    )
 
 
 def _remove_missing_files(
