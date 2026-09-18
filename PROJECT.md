@@ -391,7 +391,7 @@ code_search(query, path, limit, mode)
 | `render` | `src/dsh_coderag/render.py` | 把结果渲染成模型可见文本 | 不做检索决策 |
 | `server` | `src/dsh_coderag/server.py` | MCP 协议实现、4 个工具注册 | 不含业务逻辑（薄层） |
 | `eval` | `src/dsh_coderag/eval/` | 评测集加载、运行、指标计算、报告 | 不参与生产路径 |
-| `cli` | `src/dsh_coderag/cli.py` | 命令行入口（`index` / `search` / `status`） | 供人调试用，非模型接口 |
+| `cli` | `src/dsh_coderag/__main__.py` | 命令行入口（`index` / `search`） | 供人调试用，非模型接口 |
 
 **模块依赖方向（禁止反向依赖）**：
 
@@ -639,6 +639,23 @@ CREATE TABLE IF NOT EXISTS embeddings (
 | dsh（运行时） | **`0.1.5-rc.1`** | 经 `./scripts/dsh` 调用（§4.3.1）。**这是本项目的开发基线**——它决定实际行为 |
 | dsh（参考源码） | **`0.1.6-alpha.1`**（commit `0d1f50007f`） | 见 §4.1.1；它决定文档里的源码路径 |
 
+#### 4.1.1 dsh 运行时与参考源码
+
+本项目同时跟踪两个 dsh 版本，用途不同：
+
+- **运行时 = `0.1.5-rc.1`**：经 `./scripts/dsh` 调用（§4.3.1），它决定**实际行为**——工具契约、60s 调用超时、stdio 环境清洗等。
+- **参考源码 = `0.1.6-alpha.1`（commit `0d1f50007f`）**：只用于核实**源码路径与实现细节**；文档里的 `packages/...` 路径、README 行号等以它为准。
+
+两者暂时不同步是刻意的：运行时钉一个已验证版本保证可复现，参考源码取较新的树以便引用尚在演进的源码结构。升级运行时时一并更新参考源码（§4.1.2）。**本项目不修改参考源码中任何被 git 跟踪的文件**（RL-01）。
+
+#### 4.1.2 升级 dsh 的三步清单
+
+1. 改 `scripts/dsh` 的 `DSH_VERSION`（或临时设环境变量 `DSH_VERSION=...`）。
+2. 同步更新 §4.1 的版本号与 §4.3.1 的说明。
+3. 重跑 §4.5 环境验证清单；M3 之后还要跑 `scripts/eval-gate.sh`。
+
+**为什么钉版本而不是追 `latest`**：本机 npx 缓存里已有 `0.1.5-rc.1`，走 npx 时无需重新下载约 190 个包；且 npm 的 `latest` 在本会话期间就从 `0.1.5-rc.1` 漂到了 `0.1.5-rc.2`。钉住一个验证过的版本，比追 `latest` 可复现。
+
 ### 4.2 依赖清单
 
 **必需（M1 就要）**
@@ -689,8 +706,18 @@ assert to_bigrams('校验用户令牌') == '校验 验用 用户 户令 令牌',
 print('bigram OK')"
 
 # ── 步骤 4：启动 DSH Web（感受"没有 RAG 时模型在哪卡住"）
-npx @deepseek-ai/dsh web
+./scripts/dsh web
 ```
+
+#### 4.3.1 统一入口：`./scripts/dsh`
+
+**问题**：`dsh` 不一定在 PATH 上。它只在两种情况下可见：① 全局安装过；② 正处在某个 dsh 会话内——会话会把 npx 缓存的 `.bin` 临时注入 PATH。干净终端里实测 `env -i … zsh -lic 'which dsh'` 返回 not found。
+
+**方案**：`scripts/dsh` 包装脚本——若全局有 `dsh` 且未设 `DSH_FORCE_NPX=1`，直接 `exec dsh "$@"`；否则回退到**钉版本**的 `npx --yes @deepseek-ai/dsh@${DSH_VERSION}`。
+
+**约定**：本项目所有文档里的 `dsh X` 都读作 `./scripts/dsh X`（`AGENTS.md` E-07）。
+
+**为什么危险**：在 dsh 会话内直接敲 `dsh X` 看起来完全能用，一离开会话就 `command not found`——属于「测的时候通过、别人跑就失败」。
 
 ### 4.4 受限网络下的配置
 
