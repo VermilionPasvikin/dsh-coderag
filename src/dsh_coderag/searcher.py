@@ -56,14 +56,30 @@ class OutlineSymbol:
 
 
 def search(
-    root: Path, query: str, k: int = 5, max_tokens: int = DEFAULT_MAX_TOKENS
+    root: Path,
+    query: str,
+    k: int = 5,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    path: str | None = None,
 ) -> SearchResult:
     """Search the index under root and always return a structured status.
 
     The best k chunks are selected by bm25, re-sorted into source order and
     then trimmed to max_tokens; the number dropped is reported as omitted.
+    path restricts the search to a workspace-relative subdirectory (or file);
+    None searches the whole workspace.
     """
-    db_path = root.resolve() / ".coderag" / "index.sqlite3"
+    base = root.resolve()
+    try:
+        path_prefix = _path_prefix(base, path)
+    except ValueError as exc:
+        return SearchResult(
+            status=SearchStatus.ERROR,
+            query=query,
+            message=str(exc),
+            code=ErrorCode.SEARCH_INVALID_QUERY,
+        )
+    db_path = base / ".coderag" / "index.sqlite3"
     if not db_path.exists():
         return SearchResult(
             status=SearchStatus.INDEXING,
@@ -77,7 +93,11 @@ def search(
         files, chunks = _index_counts(connection)
         punctuation_only = _is_punctuation_only(query)
         match = None if punctuation_only else _build_match(query)
-        candidates = [] if match is None else _search(connection, match, k)
+        candidates = (
+            []
+            if match is None
+            else _search(connection, match, k, path_prefix)
+        )
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
@@ -123,20 +143,28 @@ def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
     return kept, len(hits) - len(kept)
 
 
-def _search(connection: sqlite3.Connection, match: str, k: int) -> list[Hit]:
-    rows = connection.execute(
-        """
+def _search(
+    connection: sqlite3.Connection,
+    match: str,
+    k: int,
+    path_prefix: str | None = None,
+) -> list[Hit]:
+    sql = """
         SELECT f.path, c.seq, c.start_line, c.end_line, c.symbol_kind,
                c.symbol_name, c.text, bm25(chunks_fts)
         FROM chunks_fts
         JOIN chunks c ON c.id = chunks_fts.chunk_id
         JOIN files f ON f.id = c.file_id
         WHERE chunks_fts MATCH ?
-        ORDER BY bm25(chunks_fts), c.id
-        LIMIT ?
-        """,
-        (match, k),
-    ).fetchall()
+    """
+    params: list[object] = [match]
+    if path_prefix is not None:
+        escaped = _escape_like(path_prefix)
+        sql += " AND (f.path = ? OR f.path LIKE ? ESCAPE '\\')"
+        params.extend([escaped, f"{escaped}/%"])
+    sql += " ORDER BY bm25(chunks_fts), c.id LIMIT ?"
+    params.append(k)
+    rows = connection.execute(sql, params).fetchall()
     hits = [
         Hit(
             path=path,
@@ -159,6 +187,26 @@ def _index_counts(connection: sqlite3.Connection) -> tuple[int, int]:
     files = connection.execute("SELECT count(*) FROM files").fetchone()[0]
     chunks = connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
     return int(files), int(chunks)
+
+
+def _path_prefix(base: Path, path: str | None) -> str | None:
+    """Return the workspace-relative prefix to filter on, or None for all.
+
+    Raises:
+        ValueError: If path escapes the workspace.
+    """
+    if path is None or path.strip() in ("", ".", "./"):
+        return None
+    target = (base / path).resolve()
+    if not target.is_relative_to(base):
+        raise ValueError(f"path escapes the workspace: {path}")
+    relative = target.relative_to(base).as_posix()
+    return None if relative in ("", ".") else relative
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE wildcards so a directory name matches literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _is_punctuation_only(query: str) -> bool:

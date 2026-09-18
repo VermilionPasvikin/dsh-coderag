@@ -206,7 +206,9 @@ def _code_search(arguments: dict[str, Any], root: Path) -> str:
         )
     limit = min(int(arguments.get("limit", 5)), 50)
     max_tokens = int(arguments.get("max_tokens", 4000))
-    result = search(root, query, k=limit, max_tokens=max_tokens)
+    path_arg = arguments.get("path")
+    path_filter = path_arg if isinstance(path_arg, str) and path_arg.strip() else None
+    result = search(root, query, k=limit, max_tokens=max_tokens, path=path_filter)
     if result.status is not SearchStatus.READY:
         return render_status(
             result.status,
