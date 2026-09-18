@@ -122,8 +122,11 @@ def index_sync(root: Path) -> IndexSummary:
     try:
         entries = walk(base)
         total_chunks = 0
+        current_paths: set[str] = set()
         for absolute, size, mtime_ns in entries:
+            current_paths.add(absolute.relative_to(base).as_posix())
             total_chunks += _index_file(connection, base, absolute, size, mtime_ns)
+        _remove_missing_files(connection, current_paths)
         _mark_ready(connection, base)
         return IndexSummary(root=base, files=len(entries), chunks=total_chunks)
     finally:
@@ -199,6 +202,22 @@ def _index_file(
                 ),
             )
     return len(chunks)
+
+
+def _remove_missing_files(
+    connection: sqlite3.Connection, current_paths: set[str]
+) -> None:
+    """Cascade-delete rows for files that no longer exist in the workspace."""
+    stale = [
+        file_id
+        for file_id, path in connection.execute("SELECT id, path FROM files").fetchall()
+        if path not in current_paths
+    ]
+    if not stale:
+        return
+    with connection:
+        for deleted_id in stale:
+            _delete_file_rows(connection, deleted_id)
 
 
 def _delete_file_rows(connection: sqlite3.Connection, file_id: int) -> None:
