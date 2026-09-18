@@ -123,7 +123,7 @@ def chunk_text(
             seq=seq,
             start_line=start,
             end_line=end,
-            text="\n".join(lines[start - 1 : end]),
+            text=_prefixed_text(path, lines, start, end, symbol_kind, symbol_name),
             symbol_kind=symbol_kind,
             symbol_name=symbol_name,
             lang=language,
@@ -131,6 +131,36 @@ def chunk_text(
         )
         for seq, (start, end, symbol_kind, symbol_name, low_confidence) in enumerate(spans)
     ]
+
+
+def _prefixed_text(
+    path: str,
+    lines: list[str],
+    start_line: int,
+    end_line: int,
+    symbol_kind: str | None,
+    symbol_name: str | None,
+) -> str:
+    """Prepend the contextual prefix so it is indexed alongside the code."""
+    code = "\n".join(lines[start_line - 1 : end_line])
+    prefix = _context_prefix(path, start_line, end_line, symbol_kind, symbol_name)
+    return f"{prefix}\n{code}"
+
+
+def _context_prefix(
+    path: str,
+    start_line: int,
+    end_line: int,
+    symbol_kind: str | None,
+    symbol_name: str | None,
+) -> str:
+    """Build the context line described in PROJECT.md 5.1."""
+    symbol = " ".join(part for part in (symbol_kind, symbol_name) if part)
+    segments = [f"file: {path}"]
+    if symbol:
+        segments.append(f"symbol: {symbol}")
+    segments.append(f"lines {start_line}-{end_line}")
+    return "// " + "  |  ".join(segments)
 
 
 def chunk_file(

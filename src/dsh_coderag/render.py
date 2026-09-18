@@ -9,6 +9,26 @@ from __future__ import annotations
 
 from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus
 
+_CONTEXT_PREFIX_MARKER = "// file: "
+
+
+def strip_context_prefix(text: str) -> str:
+    """Remove the chunker's contextual prefix line from one hit body.
+
+    dsh_coderag.chunker prepends a "// file: ... | ... | lines M-N" line so
+    the path, symbol and line range are searchable. The hit's location is
+    already rendered as its own line, so the body drops the prefix to avoid
+    repeating it and to keep the code body clean.
+    """
+    first_line, separator, remainder = text.partition("\n")
+    if (
+        separator
+        and first_line.startswith(_CONTEXT_PREFIX_MARKER)
+        and "  |  " in first_line
+    ):
+        return remainder
+    return text
+
 
 def render_search_result(result: SearchResult, *, omitted: int = 0) -> str:
     """Render a search result as the model-visible text.
@@ -25,7 +45,7 @@ def render_search_result(result: SearchResult, *, omitted: int = 0) -> str:
     )
     blocks = [header]
     for hit in result.hits:
-        blocks.append(f"{_format_location(hit)}\n{hit.text}")
+        blocks.append(f"{_format_location(hit)}\n{strip_context_prefix(hit.text)}")
     if omitted > 0:
         noun = "hit" if omitted == 1 else "hits"
         pronoun = "it" if omitted == 1 else "them"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dsh_coderag.chunker import chunk_file, chunk_text
+from dsh_coderag.render import strip_context_prefix
 
 
 def _normalize(text: str) -> str:
@@ -38,7 +39,8 @@ def test_fallback_marks_chunks_low_confidence() -> None:
 def test_fallback_chunks_cover_all_non_whitespace_content() -> None:
     text = "\n".join(f"token{number}" for number in range(1, 250))
     chunks = chunk_text(text, "notes.txt")
-    assert _normalize("".join(chunk.text for chunk in chunks)) == _normalize(text)
+    joined = "".join(strip_context_prefix(chunk.text) for chunk in chunks)
+    assert _normalize(joined) == _normalize(text)
 
 
 def test_fallback_chunks_do_not_overlap() -> None:

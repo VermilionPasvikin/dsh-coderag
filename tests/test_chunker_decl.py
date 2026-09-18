@@ -9,6 +9,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from dsh_coderag.chunker import chunk_file, chunk_text
+from dsh_coderag.render import strip_context_prefix
 from dsh_coderag.types import Chunk
 
 # (symbol_kind, symbol_name, start_line, end_line) for every chunk, in source
@@ -76,7 +77,8 @@ def test_chunks_cover_content_without_overlap(decl_repo: Path, filename: str) ->
     path = decl_repo / filename
     source = path.read_text(encoding="utf-8")
     chunks = chunk_text(source, filename)
-    assert _normalize("".join(chunk.text for chunk in chunks)) == _normalize(source)
+    joined = "".join(strip_context_prefix(chunk.text) for chunk in chunks)
+    assert _normalize(joined) == _normalize(source)
     spans = sorted((chunk.start_line, chunk.end_line) for chunk in chunks)
     assert all(later[0] > earlier[1] for earlier, later in zip(spans, spans[1:], strict=False))
 
@@ -138,7 +140,8 @@ _LINE_TEXT = st.text(
 @given(_LINE_TEXT)
 def test_chunker_never_loses_content(text: str) -> None:
     chunks = chunk_text(text, lang="python")
-    assert _normalize("".join(chunk.text for chunk in chunks)) == _normalize(text)
+    joined = "".join(strip_context_prefix(chunk.text) for chunk in chunks)
+    assert _normalize(joined) == _normalize(text)
 
 
 @settings(max_examples=100, deadline=None)
