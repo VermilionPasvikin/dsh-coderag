@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dsh_coderag.chunker import FALLBACK_LINES, chunk_file, chunk_text
+from dsh_coderag.chunker import chunk_file, chunk_text
 
 
 def _normalize(text: str) -> str:
@@ -21,29 +21,30 @@ def test_language_is_detected_from_the_path() -> None:
         ("function", "add", 1, 2)
     ]
     assert chunks[0].lang == "python"
+    assert chunks[0].low_confidence is False
 
 
-def test_unknown_language_falls_back_to_line_windows() -> None:
-    text = "\n".join(f"line {number}" for number in range(1, 200))
-    chunks = chunk_text(text, "notes.txt")
-    assert [c.start_line for c in chunks] == [
-        1,
-        FALLBACK_LINES + 1,
-        2 * FALLBACK_LINES + 1,
-    ]
-    assert all(c.symbol_kind is None for c in chunks)
+def test_fallback_splits_paragraphs_on_blank_lines() -> None:
+    chunks = chunk_text("alpha\nbeta\n\ngamma\n\n\ndelta\n", "notes.txt")
+    assert [(chunk.start_line, chunk.end_line) for chunk in chunks] == [(1, 2), (4, 4), (7, 7)]
+
+
+def test_fallback_marks_chunks_low_confidence() -> None:
+    chunks = chunk_text("alpha\n\ngamma\n", "notes.txt")
+    assert all(chunk.low_confidence for chunk in chunks)
+    assert all(chunk.symbol_kind is None for chunk in chunks)
 
 
 def test_fallback_chunks_cover_all_non_whitespace_content() -> None:
-    text = "\n".join(f"token{number}" for number in range(1, 200))
+    text = "\n".join(f"token{number}" for number in range(1, 250))
     chunks = chunk_text(text, "notes.txt")
-    assert _normalize("".join(c.text for c in chunks)) == _normalize(text)
+    assert _normalize("".join(chunk.text for chunk in chunks)) == _normalize(text)
 
 
 def test_fallback_chunks_do_not_overlap() -> None:
-    text = "\n".join(f"token{number}" for number in range(1, 200))
+    text = "\n".join(f"token{number}" for number in range(1, 250))
     chunks = chunk_text(text, "notes.txt")
-    spans = sorted((c.start_line, c.end_line) for c in chunks)
+    spans = sorted((chunk.start_line, chunk.end_line) for chunk in chunks)
     assert all(later[0] > earlier[1] for earlier, later in zip(spans, spans[1:], strict=False))
 
 

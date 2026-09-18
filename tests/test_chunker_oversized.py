@@ -9,7 +9,7 @@ from dsh_coderag.types import Chunk
 
 
 def _declarations(chunks: list[Chunk]) -> list[Chunk]:
-    return [chunk for chunk in chunks if chunk.symbol_kind is not None]
+    return [chunk for chunk in chunks if chunk.symbol_kind not in (None, "module")]
 
 
 def test_oversized_function_is_split_into_at_least_five_parts(oversized_repo: Path) -> None:

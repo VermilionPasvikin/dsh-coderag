@@ -15,25 +15,25 @@ from dsh_coderag.types import Chunk
 # order. Annotated by hand from tests/fixtures/decl/*.
 EXPECTED_CHUNKS: dict[str, list[tuple[str | None, str | None, int, int]]] = {
     "sample.py": [
-        (None, None, 1, 1),
+        ("module", None, 1, 1),
         ("function", "add", 4, 5),
         ("function", "decorator", 8, 9),
         ("function", "run", 12, 14),
         ("class", "Pool", 17, 19),
     ],
     "sample.c": [
-        (None, None, 1, 1),
+        ("module", None, 1, 1),
         ("struct", "Point", 3, 6),
         ("function", "add", 8, 10),
     ],
     "sample.cpp": [
-        (None, None, 1, 1),
+        ("module", None, 1, 1),
         ("class", "Pool", 3, 6),
         ("struct", "Point", 8, 11),
         ("function", "add", 13, 15),
     ],
     "sample.ts": [
-        (None, None, 1, 1),
+        ("module", None, 1, 1),
         ("function", "add", 3, 5),
         ("class", "Pool", 7, 11),
         (None, None, 13, 13),
@@ -67,7 +67,7 @@ def test_declaration_chunks_match_manual_annotation(decl_repo: Path, filename: s
 def test_declaration_count_matches_manual_annotation(decl_repo: Path, filename: str) -> None:
     path = decl_repo / filename
     chunks = chunk_text(path.read_text(encoding="utf-8"), filename)
-    declarations = [c for c in chunks if c.symbol_kind is not None]
+    declarations = [c for c in chunks if c.symbol_kind not in (None, "module")]
     assert len(declarations) == EXPECTED_DECLARATION_COUNTS[filename]
 
 
@@ -94,6 +94,32 @@ def test_chunk_file_matches_chunk_text_on_a_declaration_fixture(decl_repo: Path)
 def test_lang_argument_overrides_path_detection() -> None:
     chunks = chunk_text("int add(int a, int b) { return a + b; }\n", "notes.txt", lang="c")
     assert _spans(chunks) == [("function", "add", 1, 1)]
+
+
+def test_module_header_labels_the_leading_block(decl_repo: Path) -> None:
+    path = decl_repo / "sample.c"
+    chunks = chunk_text(path.read_text(encoding="utf-8"), "sample.c")
+    assert (chunks[0].symbol_kind, chunks[0].start_line, chunks[0].end_line) == (
+        "module",
+        1,
+        1,
+    )
+
+
+def test_module_header_is_capped_at_forty_lines() -> None:
+    text = "".join(f"# comment {number}\n" for number in range(1, 101))
+    text += "def f():\n    return 1\n"
+    chunks = chunk_text(text, "big.py")
+    assert chunks[0].symbol_kind == "module"
+    assert (chunks[0].start_line, chunks[0].end_line) == (1, 40)
+    assert chunks[1].symbol_kind is None
+    assert (chunks[1].start_line, chunks[1].end_line) == (41, 100)
+    assert chunks[-1].symbol_kind == "function"
+
+
+def test_module_header_absent_when_file_starts_with_a_declaration() -> None:
+    chunks = chunk_text("def f():\n    return 1\n", "small.py")
+    assert [chunk.symbol_kind for chunk in chunks] == ["function"]
 
 
 # tree-sitter counts rows by newline, while str.splitlines() also breaks on

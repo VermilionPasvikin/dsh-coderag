@@ -2,13 +2,14 @@
 
 This module turns source text into indexable chunks. When the file's language
 has a declaration mapping, chunks follow tree-sitter declaration boundaries
-(functions, classes, structs, methods and namespaces); any non-whitespace
-region outside a declaration is emitted as its own chunk, so no content is
-lost and chunks never overlap. A declaration longer than MAX_CHUNK_LINES is
-split into consecutive parts at its internal statement boundaries and every
-part carries a "#part/N" suffix on its symbol name. Languages without a
-mapping fall back to fixed line windows. Chunk text carries no contextual
-prefix yet (T2-05) and this module never reads or writes the database.
+(functions, classes, structs, methods and namespaces). The leading
+non-declaration block becomes a symbol_kind="module" header chunk of at most
+MODULE_HEADER_LINES lines, other non-declaration content is emitted as gap
+chunks, and a declaration longer than MAX_CHUNK_LINES is split into
+consecutive "#part/N" parts at its internal statement boundaries. Languages
+without a grammar fall back to blank-line paragraphs and mark every chunk
+low_confidence. Chunks never overlap and cover all non-whitespace content.
+Chunk text carries no contextual prefix yet (T2-05).
 """
 
 from __future__ import annotations
@@ -21,8 +22,8 @@ from tree_sitter import Node
 from dsh_coderag.parser import detect_language, get_parser
 from dsh_coderag.types import Chunk
 
-FALLBACK_LINES = 80
 MAX_CHUNK_LINES = 200
+MODULE_HEADER_LINES = 40
 
 # Grammar name -> tree-sitter node type -> model-visible symbol kind.
 DECLARATION_KINDS: dict[str, dict[str, str]] = {
@@ -79,6 +80,9 @@ _NAME_NODE_TYPES = frozenset(
     }
 )
 
+# (start_line, end_line, symbol_kind, symbol_name, low_confidence)
+Span = tuple[int, int, str | None, str | None, bool]
+
 
 @dataclass(frozen=True)
 class _Declaration:
@@ -123,8 +127,9 @@ def chunk_text(
             symbol_kind=symbol_kind,
             symbol_name=symbol_name,
             lang=language,
+            low_confidence=low_confidence,
         )
-        for seq, (start, end, symbol_kind, symbol_name) in enumerate(spans)
+        for seq, (start, end, symbol_kind, symbol_name, low_confidence) in enumerate(spans)
     ]
 
 
@@ -234,20 +239,48 @@ def _node_text(node: Node) -> str:
     return (node.text or b"").decode("utf-8", "replace")
 
 
+def _break_lines(body: Node | None) -> tuple[int, ...]:
+    """Return candidate cut lines: the body's direct statements and comments.
+
+    The node is read here, while the parsed tree is still alive; declarations
+    keep only plain line numbers so no tree-sitter node escapes the parse.
+    """
+    if body is None:
+        return ()
+    return tuple(sorted({child.start_point.row + 1 for child in body.children}))
+
+
 def _declaration_spans(
     lines: list[str], declarations: list[_Declaration], max_chunk_lines: int
-) -> list[tuple[int, int, str | None, str | None]]:
-    """Combine declaration spans with chunks for uncovered non-whitespace lines."""
+) -> list[Span]:
+    """Combine declaration, module header and gap spans without overlap."""
     covered: set[int] = set()
-    spans: list[tuple[int, int, str | None, str | None]] = []
+    spans: list[Span] = []
     for declaration in declarations:
         for start, end, name in _declaration_parts(declaration, max_chunk_lines):
-            spans.append((start, end, declaration.symbol_kind, name))
+            spans.append((start, end, declaration.symbol_kind, name, False))
         covered.update(range(declaration.start_line, declaration.end_line + 1))
+    header = _module_header(lines, declarations)
+    if header is not None:
+        spans.append((header[0], header[1], "module", None, False))
+        covered.update(range(header[0], header[1] + 1))
     for start, end in _uncovered_regions(lines, covered):
-        spans.append((start, end, None, None))
+        spans.append((start, end, None, None, False))
     spans.sort(key=lambda span: (span[0], span[1]))
     return spans
+
+
+def _module_header(
+    lines: list[str], declarations: list[_Declaration]
+) -> tuple[int, int] | None:
+    """Return the leading module header span (first non-whitespace block)."""
+    first_declaration = declarations[0].start_line if declarations else len(lines) + 1
+    limit = min(MODULE_HEADER_LINES, first_declaration - 1)
+    end = 0
+    for line_number in range(1, limit + 1):
+        if lines[line_number - 1].strip() != "":
+            end = line_number
+    return (1, end) if end >= 1 else None
 
 
 def _declaration_parts(
@@ -282,17 +315,6 @@ def _part_name(symbol_name: str | None, index: int) -> str | None:
     return f"{symbol_name}#part/{index}"
 
 
-def _break_lines(body: Node | None) -> tuple[int, ...]:
-    """Return candidate cut lines: the body's direct statements and comments.
-
-    The node is read here, while the parsed tree is still alive; declarations
-    keep only plain line numbers so no tree-sitter node escapes the parse.
-    """
-    if body is None:
-        return ()
-    return tuple(sorted({child.start_point.row + 1 for child in body.children}))
-
-
 def _uncovered_regions(lines: list[str], covered: set[int]) -> list[tuple[int, int]]:
     """Group uncovered non-whitespace lines into consecutive regions."""
     regions: list[tuple[int, int]] = []
@@ -309,13 +331,29 @@ def _uncovered_regions(lines: list[str], covered: set[int]) -> list[tuple[int, i
     return regions
 
 
-def _fallback_spans(lines: list[str]) -> list[tuple[int, int, str | None, str | None]]:
-    """Split a file with no declaration mapping into non-overlapping windows."""
-    spans: list[tuple[int, int, str | None, str | None]] = []
+def _fallback_spans(lines: list[str]) -> list[Span]:
+    """Split a file without a grammar into low-confidence blank-line paragraphs."""
+    spans: list[Span] = []
+    index = 1
     total = len(lines)
-    start = 1
-    while start <= total:
-        end = min(start + FALLBACK_LINES - 1, total)
-        spans.append((start, end, None, None))
-        start = end + 1
+    while index <= total:
+        if lines[index - 1].strip() == "":
+            index += 1
+            continue
+        start = index
+        while index <= total and lines[index - 1].strip() != "":
+            index += 1
+        for window_start, window_end in _windows(start, index - 1):
+            spans.append((window_start, window_end, None, None, True))
     return spans
+
+
+def _windows(start: int, end: int) -> list[tuple[int, int]]:
+    """Split [start, end] into non-overlapping windows of MAX_CHUNK_LINES lines."""
+    windows: list[tuple[int, int]] = []
+    current = start
+    while current <= end:
+        stop = min(current + MAX_CHUNK_LINES - 1, end)
+        windows.append((current, stop))
+        current = stop + 1
+    return windows
