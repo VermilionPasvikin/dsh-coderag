@@ -15,6 +15,7 @@ from pathlib import Path
 from tree_sitter import Node
 
 from dsh_coderag.chunker import DECLARATION_KINDS, WRAPPER_NODE_TYPES
+from dsh_coderag.config import DEFAULT_MAX_TOKENS
 from dsh_coderag.indexer import connect
 from dsh_coderag.parser import detect_language, get_parser
 from dsh_coderag.text import to_bigrams
@@ -45,8 +46,14 @@ class OutlineSymbol:
     children: tuple[OutlineSymbol, ...] = ()
 
 
-def search(root: Path, query: str, k: int = 5) -> SearchResult:
-    """Search the index under root and always return a structured status."""
+def search(
+    root: Path, query: str, k: int = 5, max_tokens: int = DEFAULT_MAX_TOKENS
+) -> SearchResult:
+    """Search the index under root and always return a structured status.
+
+    The best k chunks are selected by bm25, re-sorted into source order and
+    then trimmed to max_tokens; the number dropped is reported as omitted.
+    """
     db_path = root.resolve() / ".coderag" / "index.sqlite3"
     if not db_path.exists():
         return SearchResult(
@@ -59,11 +66,11 @@ def search(root: Path, query: str, k: int = 5) -> SearchResult:
     connection = connect(db_path)
     try:
         files, chunks = _index_counts(connection)
-        hits = _search(connection, query, k)
+        candidates = _search(connection, query, k)
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
-    if not hits:
+    if not candidates:
         return SearchResult(
             status=SearchStatus.EMPTY,
             query=query,
@@ -72,6 +79,7 @@ def search(root: Path, query: str, k: int = 5) -> SearchResult:
             hint="No matches. Try different keywords, or use grep for exact identifiers.",
             skipped=skipped,
         )
+    hits, omitted = _trim_to_budget(candidates, max_tokens)
     return SearchResult(
         status=SearchStatus.READY,
         query=query,
@@ -79,7 +87,24 @@ def search(root: Path, query: str, k: int = 5) -> SearchResult:
         scanned_files=files,
         scanned_chunks=chunks,
         skipped=skipped,
+        omitted=omitted,
     )
+
+
+def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
+    """Keep hits in output order until len(text)/3.5 exceeds max_tokens.
+
+    The first hit is always kept so a non-empty result never renders as empty.
+    """
+    kept: list[Hit] = []
+    used = 0.0
+    for hit in hits:
+        estimate = len(hit.text) / 3.5
+        if kept and used + estimate > max_tokens:
+            break
+        kept.append(hit)
+        used += estimate
+    return kept, len(hits) - len(kept)
 
 
 def _search(connection: sqlite3.Connection, query: str, k: int) -> list[Hit]:

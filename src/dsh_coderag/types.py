@@ -99,6 +99,7 @@ class SearchResult:
     hint: str | None = None
     code: ErrorCode | None = None
     skipped: SkipReport = field(default_factory=SkipReport)
+    omitted: int = 0
 
 
 @dataclass

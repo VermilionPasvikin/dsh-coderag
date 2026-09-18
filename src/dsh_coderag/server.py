@@ -205,7 +205,8 @@ def _code_search(arguments: dict[str, Any], root: Path) -> str:
             code=ErrorCode.SEARCH_INVALID_QUERY,
         )
     limit = min(int(arguments.get("limit", 5)), 50)
-    result = search(root, query, k=limit)
+    max_tokens = int(arguments.get("max_tokens", 4000))
+    result = search(root, query, k=limit, max_tokens=max_tokens)
     if result.status is not SearchStatus.READY:
         return render_status(
             result.status,

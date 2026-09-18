@@ -30,7 +30,7 @@ def strip_context_prefix(text: str) -> str:
     return text
 
 
-def render_search_result(result: SearchResult, *, omitted: int = 0) -> str:
+def render_search_result(result: SearchResult) -> str:
     """Render a search result as the model-visible text.
 
     Any change to the output must be reflected in tests/test_render.py.
@@ -47,11 +47,11 @@ def render_search_result(result: SearchResult, *, omitted: int = 0) -> str:
     blocks = [header]
     for hit in result.hits:
         blocks.append(f"{_format_location(hit)}\n{strip_context_prefix(hit.text)}")
-    if omitted > 0:
-        noun = "hit" if omitted == 1 else "hits"
-        pronoun = "it" if omitted == 1 else "them"
+    if result.omitted > 0:
+        noun = "hit" if result.omitted == 1 else "hits"
+        pronoun = "it" if result.omitted == 1 else "them"
         blocks.append(
-            f"[{omitted} more {noun} omitted by token budget;"
+            f"[{result.omitted} more {noun} omitted by token budget;"
             f" raise max_tokens to see {pronoun}]"
         )
     return "\n\n".join(blocks) + "\n"

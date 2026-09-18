@@ -70,8 +70,8 @@ def test_render_includes_symbol_and_omitted_note() -> None:
             hits=hits,
             scanned_files=1284,
             scanned_chunks=9632,
-        ),
-        omitted=1,
+            omitted=1,
+        )
     )
     assert out == snapshot("""\
 status: ready
