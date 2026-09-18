@@ -32,18 +32,6 @@
   两者都 0 才 empty。
 - 建议：实现召回模式（放宽 AND / 子串命中），中文自然语言查询才有机会命中。
 
-## 缺口 P1：单文件大小上限 `maxFileBytes` 未实现（文档一致性审查）
-
-- 文档承诺：PROJECT §5.2「`maxFileBytes` 默认 1 MiB，超过则跳过并记入 `skipped`」；
-  PROJECT §3.5 与 AGENTS §4.2 的 `skipped` 示例都含 `too_large`。
-- 实际：**无任何任务行实现它**；`config.py` 无 `max_file_bytes`；`indexer._prepare_file`
-  用 `absolute.read_bytes()` 整文件读入、`chunk_text()` 返回全部 chunk 后再写库（indexer.py:286）。
-- 风险：生成的/压缩的超大单文件会一次性占用等量内存并产生超长 chunk 列表；DSH 语料最大
-  文件 489 KB、>1 MiB 的 0 个，本语料暂不触发。
-- 建议方案：`IndexConfig` 加 `max_file_bytes`（env `CODERAG_MAX_FILE_BYTES`，默认 1 MiB）；
-  `walk_with_report` 用已有的 `stat` 大小在**读内容前**跳过并计 `reason="too_large"`；
-  indexer 传入 `config.max_file_bytes`；补测试与 §6.6 验收。估时 1–2h。
-
 ## 缺口 P2：FTS5 能力探测未实现、`FTS5_UNAVAILABLE` 从不发出（文档一致性审查）
 
 - 文档承诺：TESTING §4.2「FTS5 能力探测（**必须做**）」并给出 `sqlite_caps.fts5_available()`；

@@ -17,9 +17,11 @@ ENV_MAX_FILES = "CODERAG_MAX_FILES"
 ENV_MAX_TOKENS = "CODERAG_MAX_TOKENS"
 ENV_BATCH_SIZE = "CODERAG_BATCH_SIZE"
 ENV_MAX_WORKERS = "CODERAG_MAX_WORKERS"
+ENV_MAX_FILE_BYTES = "CODERAG_MAX_FILE_BYTES"
 
 DEFAULT_MAX_FILES = 20000
 DEFAULT_MAX_TOKENS = 4000
+DEFAULT_MAX_FILE_BYTES = 1024 * 1024
 
 # Adaptive concurrency and batching (PROJECT.md 5.2, constraints C8 / RL-07).
 DEFAULT_BATCH_SIZE = 64
@@ -42,6 +44,7 @@ class IndexConfig:
     root: Path
     max_files: int = DEFAULT_MAX_FILES
     max_tokens: int = DEFAULT_MAX_TOKENS
+    max_file_bytes: int = DEFAULT_MAX_FILE_BYTES
     batch_size: int | None = None
     max_workers: int | None = None
 
@@ -77,6 +80,7 @@ def load_config(environ: Mapping[str, str] | None = None) -> IndexConfig:
         root=Path(root_value),
         max_files=_read_positive_int(env, ENV_MAX_FILES, DEFAULT_MAX_FILES),
         max_tokens=_read_positive_int(env, ENV_MAX_TOKENS, DEFAULT_MAX_TOKENS),
+        max_file_bytes=_read_positive_int(env, ENV_MAX_FILE_BYTES, DEFAULT_MAX_FILE_BYTES),
         batch_size=_read_optional_positive_int(env, ENV_BATCH_SIZE),
         max_workers=_read_optional_positive_int(env, ENV_MAX_WORKERS),
     )

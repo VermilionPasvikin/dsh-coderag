@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pathspec
 
-from dsh_coderag.config import DEFAULT_MAX_FILES
+from dsh_coderag.config import DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_FILES
 from dsh_coderag.sanitize import is_secret_path
 from dsh_coderag.types import ErrorCode
 
@@ -74,21 +74,25 @@ class WalkReport:
 
 
 def walk(
-    root: Path, max_files: int = DEFAULT_MAX_FILES
+    root: Path,
+    max_files: int = DEFAULT_MAX_FILES,
+    max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
 ) -> list[tuple[Path, int, int]]:
     """Collect whitelisted, non-secret, non-ignored files below root."""
-    return walk_with_report(root, max_files=max_files).files
+    return walk_with_report(root, max_files=max_files, max_file_bytes=max_file_bytes).files
 
 
 def walk_with_report(
-    root: Path, max_files: int = DEFAULT_MAX_FILES
+    root: Path,
+    max_files: int = DEFAULT_MAX_FILES,
+    max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
 ) -> WalkReport:
     """Collect code files under root and count why others were skipped.
 
     Returns (absolute path, size in bytes, mtime in nanoseconds) for every
     regular file whose suffix is in CODE_EXTENSIONS, sorted by path, plus the
-    number of code files dropped per reason (secret_file, gitignored). A file
-    that is not a code extension at all is not a skip.
+    number of code files dropped per reason (secret_file, gitignored,
+    too_large). A file that is not a code extension at all is not a skip.
 
     Raises:
         TooManyFilesError: If more than max_files indexable files exist. The
@@ -110,6 +114,9 @@ def walk_with_report(
             _count(report.reasons, "gitignored")
             continue
         stat = candidate.stat()
+        if stat.st_size > max_file_bytes:
+            _count(report.reasons, "too_large")
+            continue
         report.files.append((candidate, stat.st_size, stat.st_mtime_ns))
     report.files.sort(key=lambda entry: str(entry[0]))
     if len(report.files) > max_files:

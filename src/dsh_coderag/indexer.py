@@ -22,6 +22,7 @@ from pathlib import Path
 from dsh_coderag.chunker import chunk_text
 from dsh_coderag.config import (
     DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_FILE_BYTES,
     DEFAULT_MAX_FILES,
     IndexConfig,
     adaptive_workers,
@@ -162,7 +163,12 @@ def index_sync(
     try:
         started = time.monotonic()
         max_files = config.max_files if config is not None else DEFAULT_MAX_FILES
-        report = walk_with_report(base, max_files=max_files)
+        max_file_bytes = (
+            config.max_file_bytes if config is not None else DEFAULT_MAX_FILE_BYTES
+        )
+        report = walk_with_report(
+            base, max_files=max_files, max_file_bytes=max_file_bytes
+        )
         entries = report.files
         phase_ms["walk"] = _ms(started)
         current_paths = {
