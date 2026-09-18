@@ -233,8 +233,8 @@ def test_search_order_is_deterministic(indexed_workspace):
 
 def test_output_ordered_by_source_position_not_score(indexed_workspace):
     """M7 / ADR-05：输出按 (path, start_line) 升序，而不是按分数降序。"""
-    hits = search(indexed_workspace, "handler", k=10)
-    keys = [(h.path, h.start_line) for h in hits]
+    result = search(indexed_workspace, "handler", k=10)
+    keys = [(h.path, h.start_line) for h in result.hits]
     assert keys == sorted(keys), "输出未按源码顺序排列"
 ```
 
@@ -351,18 +351,18 @@ def test_bigrams_are_symmetric_between_index_and_query():
 
 def test_two_char_cjk_word_is_retrievable(indexed_cjk_repo):
     """M2：2 字中文词必须能检索到 —— 这是 trigram 方案失败、改用 bigram 的直接原因。"""
-    hits = search(indexed_cjk_repo, "令牌", k=5)
-    assert any("token" in h.path for h in hits), f"2 字词召回失败: {[h.path for h in hits]}"
+    result = search(indexed_cjk_repo, "令牌", k=5)
+    assert any("token" in h.path for h in result.hits), f"2 字词召回失败: {[h.path for h in result.hits]}"
 
 def test_precision_mode_matches_exact_substring(indexed_cjk_repo):
     """M2：精度模式（连续 bigram 短语）等价于精确子串匹配。"""
-    hits = search(indexed_cjk_repo, "用户令牌", k=5)
-    assert [h.path for h in hits] == ["src/auth/token.py"]
+    result = search(indexed_cjk_repo, "用户令牌", k=5)
+    assert [h.path for h in result.hits] == ["src/auth/token.py"]
 
 def test_recall_mode_used_when_precision_returns_nothing(indexed_cjk_repo):
     """M2：精度模式返回 0 时必须自动降级到召回模式，而不是直接返回空。"""
-    hits = search(indexed_cjk_repo, "认证令牌方式", k=5)
-    assert len(hits) > 0
+    result = search(indexed_cjk_repo, "认证令牌方式", k=5)
+    assert len(result.hits) > 0
 
 def test_latin_identifier_is_not_bigrammed():
     """M2：拉丁标识符不能被切碎。"""
@@ -477,10 +477,10 @@ def fast_index_config():
 ```python
 @pytest.mark.parametrize("task", load_tasks("eval/tasks.jsonl"), ids=lambda t: t["id"])
 def test_recall_at_5(task, indexed_eval_corpus):
-    hits = search(indexed_eval_corpus, task["query"], k=5)
-    assert any(h.path in task["expect_paths"] for h in hits), (
+    result = search(indexed_eval_corpus, task["query"], k=5)
+    assert any(h.path in task["expect_paths"] for h in result.hits), (
         f"{task['id']} ({task['class']}) 未命中。"
-        f"query={task['query']!r} 实际返回={[h.path for h in hits]}"
+        f"query={task['query']!r} 实际返回={[h.path for h in result.hits]}"
     )
 ```
 
@@ -704,6 +704,8 @@ dev = [
   "pytest>=8",
   "pytest-cov",
   "pytest-anyio",           # MCP SDK 的 async 测试需要
+  "pytest-asyncio",         # 提供 §4.3 的 asyncio_mode
+  "pytest-timeout",         # 提供 §4.3 的 timeout / session_timeout
   "anyio",
   "inline-snapshot",        # MCP 官方 SDK 文档推荐
   "hypothesis",             # 属性测试
