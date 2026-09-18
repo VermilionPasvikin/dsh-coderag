@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dsh_coderag.chunker import chunk_text
+from dsh_coderag.sanitize import scan_secret
 from dsh_coderag.text import to_bigrams
 from dsh_coderag.walker import walk
 
@@ -142,6 +143,12 @@ def _index_file(
     digest = hashlib.sha256(raw).hexdigest()
     text = raw.decode("utf-8", errors="replace")
     chunks = chunk_text(text, relative)
+    # Layer 3: drop chunks whose text matches a secret pattern. A file whose
+    # chunks are all redacted is not recorded at all.
+    surviving = [chunk for chunk in chunks if scan_secret(chunk.text) is None]
+    if chunks and not surviving:
+        return 0
+    chunks = surviving
     with connection:
         existing = connection.execute(
             "SELECT id FROM files WHERE path = ?", (relative,)

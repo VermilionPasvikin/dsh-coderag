@@ -35,6 +35,14 @@ def oversized_repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def secrets_repo(tmp_path: Path) -> Path:
+    """Copy the fake-secret fixtures into tmp_path (T-03, RL-02)."""
+    dst = tmp_path / "secrets"
+    shutil.copytree(FIXTURES / "secrets", dst)
+    return dst
+
+
+@pytest.fixture
 def index_db(tmp_path: Path) -> Path:
     """A temporary index database path; never the repository (T-04)."""
     return tmp_path / "index.sqlite3"
