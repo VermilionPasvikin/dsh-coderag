@@ -27,10 +27,11 @@ from dsh_coderag.config import (
     adaptive_workers,
     next_batch_size,
 )
+from dsh_coderag.log import build_audit_record, log_event, write_audit_dump
 from dsh_coderag.sanitize import scan_secret
 from dsh_coderag.text import to_bigrams
 from dsh_coderag.types import Chunk
-from dsh_coderag.walker import walk
+from dsh_coderag.walker import walk_with_report
 
 SCHEMA_VERSION = 1
 
@@ -111,7 +112,7 @@ class _PreparedFile:
     mtime_ns: int
     digest: str
     chunks: tuple[Chunk, ...]
-    redacted: bool
+    redacted: int
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -155,9 +156,15 @@ def index_sync(
     workers = config.workers if config is not None else adaptive_workers()
     batch_size = config.start_batch_size if config is not None else DEFAULT_BATCH_SIZE
     check = should_cancel if should_cancel is not None else _never_cancelled
+    phase_ms = {"walk": 0.0, "prepare": 0.0, "write": 0.0, "cleanup": 0.0}
+    run_started = time.monotonic()
+    log_event("index_start", root=str(base))
     try:
+        started = time.monotonic()
         max_files = config.max_files if config is not None else DEFAULT_MAX_FILES
-        entries = walk(base, max_files=max_files)
+        report = walk_with_report(base, max_files=max_files)
+        entries = report.files
+        phase_ms["walk"] = _ms(started)
         current_paths = {
             absolute.relative_to(base).as_posix() for absolute, _, _ in entries
         }
@@ -167,7 +174,10 @@ def index_sync(
                 "SELECT path, content_hash FROM files"
             ).fetchall()
         }
+        started = time.monotonic()
         prepared = _prepare_files(entries, base, known, workers, check)
+        phase_ms["prepare"] = _ms(started)
+        redacted = sum(item.redacted for item in prepared)
         total_chunks = 0
         position = 0
         while position < len(prepared) and not check():
@@ -178,15 +188,50 @@ def index_sync(
                     if check():
                         break
                     total_chunks += _write_prepared(connection, item)
-            elapsed = time.monotonic() - started
-            batch_size = next_batch_size(batch_size, elapsed)
+            batch_ms = _ms(started)
+            phase_ms["write"] += batch_ms
+            batch_size = next_batch_size(batch_size, batch_ms / 1000.0)
             position = end
+        started = time.monotonic()
         if not check():
             _remove_missing_files(connection, current_paths)
             _mark_ready(connection, base)
+        phase_ms["cleanup"] = _ms(started)
+        total_ms = _ms(run_started)
+        record = build_audit_record(
+            root=str(base),
+            task_id=None,
+            files=len(entries),
+            chunks=total_chunks,
+            skipped=dict(report.reasons),
+            redacted=redacted,
+            duration_ms={**phase_ms, "total": total_ms},
+        )
+        write_audit_dump(base, record)
+        log_event(
+            "index_done",
+            duration_ms=total_ms,
+            files=len(entries),
+            chunks=total_chunks,
+            skipped=sum(report.reasons.values()),
+            redacted=redacted,
+        )
         return IndexSummary(root=base, files=len(entries), chunks=total_chunks)
+    except Exception as exc:
+        log_event(
+            "index_error",
+            level="error",
+            duration_ms=_ms(run_started),
+            error=type(exc).__name__,
+        )
+        raise
     finally:
         connection.close()
+
+
+def _ms(started: float) -> float:
+    """Return milliseconds elapsed since a time.monotonic() reading."""
+    return (time.monotonic() - started) * 1000.0
 
 
 def _never_cancelled() -> bool:
@@ -246,14 +291,20 @@ def _prepare_file(
     chunks = chunk_text(text, relative)
     # Layer 3: drop chunks whose text matches a secret pattern. A file whose
     # chunks are all redacted is not recorded at all.
-    surviving = tuple(chunk for chunk in chunks if scan_secret(chunk.text) is None)
+    surviving: list[Chunk] = []
+    redacted = 0
+    for chunk in chunks:
+        if scan_secret(chunk.text) is None:
+            surviving.append(chunk)
+        else:
+            redacted += 1
     return _PreparedFile(
         relative=relative,
         size=size,
         mtime_ns=mtime_ns,
         digest=digest,
-        chunks=surviving,
-        redacted=bool(chunks) and not surviving,
+        chunks=tuple(surviving),
+        redacted=redacted,
     )
 
 
@@ -263,7 +314,7 @@ def _write_prepared(connection: sqlite3.Connection, prepared: _PreparedFile) -> 
         "SELECT id FROM files WHERE path = ?", (prepared.relative,)
     ).fetchone()
     existing_id = existing[0] if existing is not None else None
-    if prepared.redacted:
+    if prepared.redacted > 0 and not prepared.chunks:
         if existing_id is not None:
             _delete_file_rows(connection, existing_id)
         return 0
