@@ -480,6 +480,19 @@ message: ...
 }
 ```
 
+**返回格式（模型可见）**：
+
+```
+status: ready
+path: src/auth/token.py
+symbols: 3
+
+class TokenService  lines 10-40
+  method verify_token  lines 12-20
+  method issue_token  lines 22-30
+function helper  lines 42-44
+```
+
 #### 工具 3：`code_index`
 
 ```jsonc
@@ -1317,6 +1330,7 @@ T4-10  ← T4-08
 | T2-10 | 已完成 | `$ python -m pytest -k "adaptive_concurrency" -q`<br>`.........                                                                [100%]`<br>（退出码 0；9 个用例通过：`adaptive_workers(cpu_count=1/4/16)` 得 1/3/8，内存上限把 8 压到 2/1；`next_batch_size` 慢批减半、快批翻倍、中间不变且封顶 512；`IndexConfig(batch_size=7, max_workers=2)` 覆盖生效；env `CODERAG_BATCH_SIZE`/`CODERAG_MAX_WORKERS` 生效；`index_sync(config=...)` 跑通） | `ae0083a` | config.py 新增 `adaptive_workers`/`next_batch_size` 与常量，`IndexConfig` 增可选 `batch_size`/`max_workers` 及 `workers`/`start_batch_size` 属性；indexer.py 重构为「并行 prepare（读+hash+chunk+密钥扫描）→ 自适应批量串行写库」；本机 workers=8，50 文件并发索引实测 files/chunks 均 50，全量套件重复 5 次稳定 | |
 | T2-11 | 已完成 | `$ python -m pytest -k "too_many_files" -q`<br>`....                                                                     [100%]`<br>（退出码 0；4 个用例通过：3 个可索引文件 + `max_files=2` 时抛 `TooManyFilesError`，`actual_count==3`、`max_files==2`、`code==INDEX_TOO_MANY_FILES`，`payload` 为 `{code, actual_count, max_files, message}`；恰好等于上限不报错；非代码扩展名与密钥文件不计入上限；`index_sync` 超限时在写任何 `files` 行前失败，DB files 计数为 0，绝不静默截断） | `c2d7300` | walker.py 新增 `TooManyFilesError(actual_count, max_files)`（带 `code` 与 `payload`）及 `walk`/`walk_with_report` 的 `max_files` 参数，走完全部文件后超限即抛；indexer.py 把 `IndexConfig.max_files` 传给 walk（无 config 时用默认 20000）；异常 message 含实际数量，异步索引失败时经 `index_status` 可见 | |
 | T2-12 | 已完成 | `$ python -m pytest -k "cancel" -q`<br>`.....                                                                    [100%]`<br>（退出码 0；5 个用例通过：`TaskManager.start` 为每个任务建 `threading.Event` 并把 `should_cancel` 传给 worker，`cancel()` 置位并写 `cancelled`；worker 取消后不再 `mark_ready`（状态保持 cancelled）；`index_sync(should_cancel=...)` 在每个文件/批次边界轮询，取消后不写库、不 mark ready；取消前已提交的批次保留） | `366dc8d` | taskman.py 新增 `IndexWorker` Protocol 与每任务 `threading.Event`，`cancel` 置位事件，`_run_worker` 取消后跳过 mark_ready 并容忍 `TaskStateError`；indexer.py `index_sync` 新增关键字参数 `should_cancel`，prepare 与写库循环在每个文件边界轮询 | |
+| T2-13 | 已完成 | `$ python -m pytest tests/test_outline.py -q`<br>`......                                                                   [100%]`<br>（退出码 0；6 个用例通过：`outline(sample.py)` 返回 4 个顶层符号 + `class Pool` 下的 `method acquire`（行号 4-5 / 8-9 / 12-14 / 17-19 / 18-19）；`max_depth=1` 不展开方法；未知语言返回空；路径越界抛 `ValueError`；MCP `code_outline` 精确渲染符号树；缺失文件返回 `status: empty`） | `PENDING` | searcher.py 新增 `OutlineSymbol` 与 `outline()`（复用 chunker 的 `DECLARATION_KINDS`/`WRAPPER_NODE_TYPES`，按 body 递归，类内函数标 `method`，wrapper 取外层 span）；server.py 用真实实现替换 T1-11 占位并渲染缩进树；§3.5 增加 code_outline 返回示例；更新原占位断言 | |
 | … | | | | |
 
 ---

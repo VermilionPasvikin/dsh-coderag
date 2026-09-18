@@ -95,7 +95,7 @@ async def test_code_outline_returns_a_structured_status(client: ClientSession) -
     result = await client.call_tool("code_outline", {"path": "a.py"})
     text = result.content[0].text
     assert text.startswith("status: empty")
-    assert "not implemented" in text
+    assert "no such file" in text
 
 
 @pytest.mark.anyio

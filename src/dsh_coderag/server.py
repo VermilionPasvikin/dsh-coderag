@@ -22,7 +22,7 @@ from dsh_coderag import __version__
 from dsh_coderag.config import ConfigError, load_config
 from dsh_coderag.indexer import index_sync, open_index
 from dsh_coderag.render import render_search_result, render_status
-from dsh_coderag.searcher import search
+from dsh_coderag.searcher import OutlineSymbol, outline, search
 from dsh_coderag.taskman import TaskManager, TaskNotFoundError
 from dsh_coderag.types import ErrorCode, SearchStatus
 from dsh_coderag.walker import walk_with_report
@@ -171,7 +171,7 @@ def _dispatch(
         if name == "code_search":
             return _code_search(arguments, root)
         if name == "code_outline":
-            return _code_outline()
+            return _code_outline(arguments, root)
         if name == "code_index":
             return _code_index(arguments, root)
         if name == "index_status":
@@ -217,12 +217,52 @@ def _code_search(arguments: dict[str, Any], root: Path) -> str:
     return render_search_result(result)
 
 
-def _code_outline() -> str:
-    return render_status(
-        SearchStatus.EMPTY,
-        message="code_outline is not implemented yet.",
-        hint="Use code_search to locate the symbol, then read the file directly.",
-    )
+def _code_outline(arguments: dict[str, Any], root: Path) -> str:
+    path = arguments.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return render_status(
+            SearchStatus.ERROR,
+            message="path is required",
+            code=ErrorCode.SEARCH_INVALID_QUERY,
+        )
+    max_depth = max(1, int(arguments.get("max_depth", 2)))
+    try:
+        symbols = outline(root, path, max_depth=max_depth)
+    except FileNotFoundError:
+        return render_status(
+            SearchStatus.EMPTY,
+            message=f"no such file: {path}",
+            hint="Use code_search to locate the file, then retry.",
+        )
+    except ValueError as exc:
+        return render_status(
+            SearchStatus.ERROR,
+            message=str(exc),
+            code=ErrorCode.INDEX_READ_FAILED,
+        )
+    return _render_outline(path, symbols)
+
+
+def _render_outline(path: str, symbols: list[OutlineSymbol]) -> str:
+    """Render a symbol tree as model-visible plain text."""
+    lines = ["status: ready", f"path: {path}", f"symbols: {_count_symbols(symbols)}"]
+    if symbols:
+        lines.append("")
+        _append_outline(lines, symbols, 0)
+    return "\n".join(lines) + "\n"
+
+
+def _append_outline(
+    lines: list[str], symbols: list[OutlineSymbol], depth: int
+) -> None:
+    for symbol in symbols:
+        label = " ".join(part for part in (symbol.kind, symbol.name) if part)
+        lines.append(f"{'  ' * depth}{label}  lines {symbol.start_line}-{symbol.end_line}")
+        _append_outline(lines, list(symbol.children), depth + 1)
+
+
+def _count_symbols(symbols: list[OutlineSymbol]) -> int:
+    return sum(1 + _count_symbols(list(symbol.children)) for symbol in symbols)
 
 
 def _code_index(arguments: dict[str, Any], root: Path) -> str:
