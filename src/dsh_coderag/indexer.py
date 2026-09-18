@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
+from dsh_coderag import sqlite_caps
 from dsh_coderag.chunker import chunk_text
 from dsh_coderag.config import (
     DEFAULT_BATCH_SIZE,
@@ -150,6 +151,8 @@ def index_sync(
     is not marked ready. Re-running replaces only the files whose content
     hash changed, adds new files and cascade-deletes removed ones.
     """
+    if not sqlite_caps.fts5_available():
+        raise sqlite_caps.Fts5UnavailableError(sqlite_caps.FTS5_HINT)
     base = root.resolve()
     db_path = base / ".coderag" / "index.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)

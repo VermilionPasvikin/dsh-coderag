@@ -15,6 +15,7 @@ from pathlib import Path
 
 from tree_sitter import Node
 
+from dsh_coderag import sqlite_caps
 from dsh_coderag.chunker import DECLARATION_KINDS, WRAPPER_NODE_TYPES
 from dsh_coderag.config import DEFAULT_MAX_TOKENS
 from dsh_coderag.indexer import connect
@@ -69,6 +70,14 @@ def search(
     path restricts the search to a workspace-relative subdirectory (or file);
     None searches the whole workspace.
     """
+    if not sqlite_caps.fts5_available():
+        return SearchResult(
+            status=SearchStatus.ERROR,
+            query=query,
+            message="SQLite FTS5 is not available in this Python build.",
+            code=ErrorCode.FTS5_UNAVAILABLE,
+            hint=sqlite_caps.FTS5_HINT,
+        )
     base = root.resolve()
     try:
         path_prefix = _path_prefix(base, path)

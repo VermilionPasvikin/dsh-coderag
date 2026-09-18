@@ -18,7 +18,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from dsh_coderag import __version__
+from dsh_coderag import __version__, sqlite_caps
 from dsh_coderag.config import ConfigError, load_config
 from dsh_coderag.indexer import index_sync, open_index
 from dsh_coderag.render import render_search_result, render_status
@@ -191,6 +191,13 @@ def _dispatch(
         return render_status(
             SearchStatus.ERROR, message=str(exc), code=ErrorCode.TASK_NOT_FOUND
         )
+    except Exception as exc:
+        # RL-09: never let an unexpected failure surface as an MCP isError.
+        return render_status(
+            SearchStatus.ERROR,
+            message=f"{type(exc).__name__}: {exc}",
+            code=ErrorCode.SEARCH_FAILED,
+        )
     return render_status(
         SearchStatus.ERROR, message=f"unknown tool: {name}", code=ErrorCode.SEARCH_FAILED
     )
@@ -269,6 +276,13 @@ def _count_symbols(symbols: list[OutlineSymbol]) -> int:
 
 
 def _code_index(arguments: dict[str, Any], root: Path) -> str:
+    if not sqlite_caps.fts5_available():
+        return render_status(
+            SearchStatus.ERROR,
+            message="SQLite FTS5 is not available in this Python build.",
+            code=ErrorCode.FTS5_UNAVAILABLE,
+            hint=sqlite_caps.FTS5_HINT,
+        )
     target = root
     relative = arguments.get("path")
     if isinstance(relative, str) and relative:
@@ -287,6 +301,13 @@ def _code_index(arguments: dict[str, Any], root: Path) -> str:
 
 
 def _index_status(arguments: dict[str, Any], root: Path) -> str:
+    if not sqlite_caps.fts5_available():
+        return render_status(
+            SearchStatus.ERROR,
+            message="SQLite FTS5 is not available in this Python build.",
+            code=ErrorCode.FTS5_UNAVAILABLE,
+            hint=sqlite_caps.FTS5_HINT,
+        )
     db_path = root.resolve() / ".coderag" / "index.sqlite3"
     task_id = arguments.get("task_id")
     if isinstance(task_id, str) and task_id:

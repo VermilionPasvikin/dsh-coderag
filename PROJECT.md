@@ -387,6 +387,7 @@ code_search(query, path, limit, mode)
 | `parser` | `src/dsh_coderag/parser.py` | 按扩展名探测语言、提供 tree-sitter grammar/parser | 不解析语法树、不遍历工作区 |
 | `text` | `src/dsh_coderag/text.py` | 中文 bigram 预转换（索引与查询两侧共用） | 不做分词决策 |
 | `sanitize` | `src/dsh_coderag/sanitize.py` | 密钥文件名/路径黑名单与内容正则扫描 | 不遍历、不读文件、不写库 |
+| `sqlite_caps` | `src/dsh_coderag/sqlite_caps.py` | FTS5 能力探测 | 不打开索引数据库 |
 | `walker` | `src/dsh_coderag/walker.py` | 遍历工作区、应用忽略规则与密钥黑名单、上报 skip 原因与文件数上限 | 不读文件内容 |
 | `chunker` | `src/dsh_coderag/chunker.py` | tree-sitter 声明感知分块、超大符号拆分、module 头、无 grammar 降级、上下文前缀 | 不写数据库 |
 | `indexer` | `src/dsh_coderag/indexer.py` | SQLite schema、增量写入、幂等、三类变更、批量写库、内容级 redact、审计转储 | 不做检索 |
@@ -1015,7 +1016,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | `TASK_NOT_FOUND` | taskId 不存在 |
 | `CANCELLED` | 任务被取消 |
 
-> **当前发出状态**（2026-09-17，T2 收口）：已实际发出的 code 是 `INDEX_NOT_FOUND`、`SEARCH_INVALID_QUERY`、`TASK_NOT_FOUND`、`SEARCH_FAILED`、`INDEX_READ_FAILED`；`INDEX_TOO_MANY_FILES` 目前只作为 `TooManyFilesError.code` 经任务 `message` 暴露，尚未以 `code:` 字段返回；`INDEX_RUNNING`、`INDEX_WRITE_FAILED`、`CANCELLED` 尚无发出路径。这是**契约先行**，不是已实现清单。
+> **当前发出状态**（2026-09-17，T2 收口）：已实际发出的 code 是 `INDEX_NOT_FOUND`、`SEARCH_INVALID_QUERY`、`TASK_NOT_FOUND`、`SEARCH_FAILED`（含 `_dispatch` 异常兜底）、`INDEX_READ_FAILED`、`FTS5_UNAVAILABLE`（FTS5 缺失时由 `code_search`/`code_index`/`index_status` 返回）；`INDEX_TOO_MANY_FILES` 目前只作为 `TooManyFilesError.code` 经任务 `message` 暴露，尚未以 `code:` 字段返回；`INDEX_RUNNING`、`INDEX_WRITE_FAILED`、`CANCELLED` 尚无发出路径。这是**契约先行**，不是已实现清单。
 
 **铁律**：任何内部异常都**不得**向上冒泡成 MCP 的 `isError` 而丢失结构。必须转成带 `status` 与 `code` 的**正常返回值**，让模型能据此决策。
 
@@ -1167,6 +1168,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | **T2-19** | **实现标点查询路由（ADR-13）**：`code_search` 检测短标点序列，去掉标点后无可检索词时返回 `status: empty` + 指向 `grep` 的结构化提示；同时确认**未使用 `porter` tokenizer** | `src/dsh_coderag/searcher.py`, `tests/test_tokenizer_semantics.py` | `python -m pytest tests/test_tokenizer_semantics.py -q` | **三条语义测试全绿**：标点路由、无词干化、停用词可检索 | T2-14 | 2h |
 | T2-20 | 实现 `code_search` 的 `path` 参数：把检索范围限定到工作区内的子目录 | `searcher.py`, `server.py` | `python -m pytest -k "path_filter" -q` | 传入子目录时只返回该目录下的命中；省略时行为不变 | T1-08 | 1h |
 | T2-21 | 实现单文件大小上限（§5.2）：`maxFileBytes` 默认 1 MiB，超过则在读内容前跳过并记 `too_large`；可被 `IndexConfig` / `CODERAG_MAX_FILE_BYTES` 覆盖 | `walker.py`, `config.py` | `python -m pytest -k "too_large" -q` | 超限文件不入库，`skipped.reasons["too_large"]` 与实际数量一致；覆盖值生效 | T2-11 | 1.5h |
+| T2-22 | 实现 FTS5 能力探测（TESTING §4.2）与 MCP `_dispatch` 异常兜底（RL-09）：FTS5 不可用时 `index`/`search` 返回 `status: error, code: FTS5_UNAVAILABLE` + 可操作 hint | `sqlite_caps.py`, `indexer.py`, `searcher.py`, `server.py` | `python -m pytest -k "fts5_unavailable" -q` | 模拟不可用时返回结构化错误且不冒泡 `isError`；可用时行为不变 | T1-06 | 2h |
 
 **M2 出口判据**：`T2-06`（安全）、`T2-14`（顺序）、`T2-17`（端到端）、**`T2-19`（分词器语义）** 通过，`T2-18` 抽检无严重问题。
 
@@ -1282,6 +1284,7 @@ T2-18  ← T2-03
 T2-19  ← T2-14
 T2-20  ← T1-08
 T2-21  ← T2-11
+T2-22  ← T1-06
 T3-00  ← T2-17
 T3-01  ← T2-17
 T3-02a  ← T3-01
@@ -1356,6 +1359,7 @@ T4-10  ← T4-08
 | T2-19 | 已完成 | `$ python -m pytest tests/test_tokenizer_semantics.py -q`<br>`................                                                         [100%]`<br>（退出码 0；16 个用例全绿，覆盖三条语义：**标点路由** 7 个纯标点查询返回 `status: empty` 且 hint 含 `grep`，而 `self.authenticate`/`std::vector` 正常 READY；**无词干化** `connection` 不命中 `connect_only.py`，且 `chunks_fts` schema 为 `unicode61`、不含 `porter`；**停用词可检索** `for/if/and/in/not` 均命中 `stopwords.py`） | `5f02646` | searcher.py 新增 `_is_punctuation_only`（无标识符/CJK 即路由）与 `PUNCTUATION_QUERY_HINT`，`_build_match` 保持 `to_bigrams` 两侧对称；`tests/test_tokenizer_semantics.py` 在 tmp_path 内建语料。**取舍**：ADR-13 的规则是「去掉标点后无可检索词才路由」，故 `self.(`/`std::` 仍会正常检索（TESTING §3.11 的示例参数与此冲突，以 PROJECT/ADR-13 为准）；按 AGENTS §9 把「精度/召回双模式未实现」记入 `docs/backlog.md` |
 | T2-20 | 已完成 | `$ python -m pytest -k "path_filter" -q`<br>`......                                                                   [100%]`<br>（退出码 0；6 个用例通过：`path="pkg"` 只返回 `pkg/a.py`；省略 path 时四个目录都返回（行为不变）；`path` 可指向单个文件；`my_pkg` 不会因 `_` 通配误匹配 `myXpkg`（LIKE 转义）；`../outside` 返回 `status: error` + `SEARCH_INVALID_QUERY`；MCP `code_search` 传 `path` 生效） | `4c555ee` | searcher.py `search` 新增 `path` 参数与 `_path_prefix`（resolve 后必须仍在工作区内）+ `_escape_like`；`_search` 加 `f.path = ? OR f.path LIKE ? ESCAPE '\'` 过滤；server.py 把工具 `path` 参数传入 search |
 | T2-21 | 已完成 | `$ python -m pytest -k "too_large" -q`<br>`......                                                                   [100%]`<br>（退出码 0；6 个用例通过：超过 `max_file_bytes` 的文件在读内容前被跳过并计入 `skipped.reasons["too_large"]`；`index_sync` 后 `files` 表只含小文件；审计转储含 `too_large`；恰好等于上限的文件保留；`DEFAULT_MAX_FILE_BYTES == 1 MiB`；env `CODERAG_MAX_FILE_BYTES` 覆盖生效） | `8cab6ed` | config.py 新增 `max_file_bytes`（默认 1 MiB）+ env；walker.py `walk_with_report` 用 `stat` 大小在读内容前跳过并记 `too_large`；indexer.py 传入 `config.max_file_bytes`；新增 `tests/test_file_size_limit.py` | |
+| T2-22 | 已完成 | `$ python -m pytest -k "fts5_unavailable" -q`<br>`......                                                                   [100%]`<br>（退出码 0；6 个用例通过：本机 `fts5_available()` 为 True；mock 不可用时 `search()` 返回 `status: error` + `code: FTS5_UNAVAILABLE` + 可操作 hint；`index_sync` 抛 `Fts5UnavailableError`；MCP `code_search`/`code_index` 均返回结构化错误且 `isError` 不为 True；`_dispatch` 兜底把未预期异常转成 `SEARCH_FAILED`） | `PENDING` | 新增 `sqlite_caps.py`（`fts5_available()` + `Fts5UnavailableError` + `FTS5_HINT`）；searcher/indexer 开库前探测；server 的 `_code_index`/`_index_status` 加 FTS5 守卫、`_dispatch` 加 `except Exception` 兜底（RL-09）；新增 `tests/test_fts5_unavailable.py` | |
 | … | | | | |
 
 ---
@@ -1405,7 +1409,7 @@ T4-10  ← T4-08
 | RL-06 | T1-13 | 禁止用空列表代替状态 |
 | RL-07 | T2-10 | 禁止硬编码资源参数 |
 | RL-08 | T2-11, T2-21 | 禁止静默截断 |
-| RL-09 | T1-13 | 禁止让异常冒泡成 `isError` |
+| RL-09 | T1-13, T2-22 | 禁止让异常冒泡成 `isError` |
 | RL-10 | T3-07 | 禁止在决策门前引入向量依赖 |
 | RL-11 | *全局* | 提交纪律：工作区干净、一任务一提交 |
 | S1 | T3-04, T3-06 | 成功标准：检索本身有效（Success@5 ≥ 0.80） |

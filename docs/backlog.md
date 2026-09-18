@@ -32,17 +32,3 @@
   两者都 0 才 empty。
 - 建议：实现召回模式（放宽 AND / 子串命中），中文自然语言查询才有机会命中。
 
-## 缺口 P2：FTS5 能力探测未实现、`FTS5_UNAVAILABLE` 从不发出（文档一致性审查）
-
-- 文档承诺：TESTING §4.2「FTS5 能力探测（**必须做**）」并给出 `sqlite_caps.fts5_available()`；
-  PROJECT §5.6 列 `FTS5_UNAVAILABLE`（须给可操作提示）。
-- 实际：无 `src/dsh_coderag/sqlite_caps.py`；`init_schema` 直接 `executescript`（indexer.py:126-128）；
-  `server._dispatch` 只捕获 `ConfigError/FileNotFoundError/TaskNotFoundError`（server.py:179-194）。
-- 风险：FTS5 缺失的发行版（2025-07 前的 uv CPython、某些 macOS 系统 python）上，
-  `CREATE VIRTUAL TABLE ... USING fts5` 抛 `sqlite3.OperationalError` → 可能冒泡成 MCP
-  `isError`，违反 RL-09；测试也无法 skip。
-- 建议方案：(1) 新增 `sqlite_caps.fts5_available()`（TESTING §4.2 已给实现）；
-  (2) `index_sync`/`search` 开库前探测，不可用则返回
-  `status: error, code: FTS5_UNAVAILABLE` + 可操作 hint；(3) `server._dispatch` 加兜底
-  `except Exception` → `SEARCH_FAILED`（RL-09 纵深防御）；(4) 可用时测试正常跑、
-  不可用时 `pytest.skip`。估时 1.5–2h。
