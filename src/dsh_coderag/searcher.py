@@ -8,6 +8,7 @@ and does not render model-visible text.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,14 @@ from dsh_coderag.parser import detect_language, get_parser
 from dsh_coderag.text import to_bigrams
 from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus, SkipReport
 from dsh_coderag.walker import walk_with_report
+
+PUNCTUATION_QUERY_HINT = (
+    "This looks like an exact code search. Use the grep tool instead"
+    " — it matches punctuation."
+)
+
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_CJK = re.compile(r"[\u4e00-\u9fff]")
 
 _TYPE_KINDS = frozenset({"class", "struct", "union", "interface"})
 _NAME_NODE_TYPES = frozenset(
@@ -66,17 +75,24 @@ def search(
     connection = connect(db_path)
     try:
         files, chunks = _index_counts(connection)
-        candidates = _search(connection, query, k)
+        punctuation_only = _is_punctuation_only(query)
+        match = None if punctuation_only else _build_match(query)
+        candidates = [] if match is None else _search(connection, match, k)
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
     if not candidates:
+        hint = (
+            PUNCTUATION_QUERY_HINT
+            if punctuation_only
+            else "No matches. Try different keywords, or use grep for exact identifiers."
+        )
         return SearchResult(
             status=SearchStatus.EMPTY,
             query=query,
             scanned_files=files,
             scanned_chunks=chunks,
-            hint="No matches. Try different keywords, or use grep for exact identifiers.",
+            hint=hint,
             skipped=skipped,
         )
     hits, omitted = _trim_to_budget(candidates, max_tokens)
@@ -107,10 +123,7 @@ def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
     return kept, len(hits) - len(kept)
 
 
-def _search(connection: sqlite3.Connection, query: str, k: int) -> list[Hit]:
-    match = _build_match(query)
-    if match is None:
-        return []
+def _search(connection: sqlite3.Connection, match: str, k: int) -> list[Hit]:
     rows = connection.execute(
         """
         SELECT f.path, c.seq, c.start_line, c.end_line, c.symbol_kind,
@@ -146,6 +159,17 @@ def _index_counts(connection: sqlite3.Connection) -> tuple[int, int]:
     files = connection.execute("SELECT count(*) FROM files").fetchone()[0]
     chunks = connection.execute("SELECT count(*) FROM chunks").fetchone()[0]
     return int(files), int(chunks)
+
+
+def _is_punctuation_only(query: str) -> bool:
+    """True when the query has no identifier or CJK character to search.
+
+    Short punctuation sequences cannot be matched by FTS5, so these queries
+    route to grep instead of scanning (ADR-13).
+    """
+    if not query.strip():
+        return False
+    return _IDENTIFIER.search(query) is None and _CJK.search(query) is None
 
 
 def _build_match(query: str) -> str | None:
