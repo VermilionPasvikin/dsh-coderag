@@ -102,11 +102,29 @@ class FailureEvidence:
     indexed_paths: tuple[str, ...]
     index_file_count: int
     probe_rank: int | None
+    """1-based position of a target inside the probe's **source-ordered** hits.
+
+    This is NOT a relevance rank: `searcher.search` returns hits in source
+    order (ADR-05), so the number itself carries no ranking meaning. Only
+    `is None` is meaningful — it says no target file was among the probe's
+    top-`probe_k` candidates at all. Use `target_in_probe` instead of
+    comparing this number to `run_k`.
+    """
+
     target_tokens_present: tuple[str, ...]
     target_tokens_missing: tuple[str, ...]
     corpus_tokens_missing: tuple[str, ...]
     symbol_missing: bool
     must_not_hits: tuple[str, ...]
+
+    @property
+    def target_in_probe(self) -> bool:
+        """Whether a target was retrievable within `probe_k` (hence ranked too low).
+
+        A failing task whose target still shows up in the wider probe was
+        retrieved but placed beyond the run's k, which is A4.
+        """
+        return self.probe_rank is not None
 
 
 @dataclass(frozen=True)
@@ -141,11 +159,11 @@ def classify(evidence: FailureEvidence) -> tuple[AttributionCode, str]:
             AttributionCode.A4,
             f"must_not_paths 落入前 k 条：{list(evidence.must_not_hits)}",
         )
-    if evidence.probe_rank is not None and evidence.probe_rank > evidence.run_k:
+    if evidence.target_in_probe:
         return (
             AttributionCode.A4,
-            f"目标在 k={evidence.run_k} 之外可检索到（probe_k={evidence.probe_k} 名次 "
-            f"{evidence.probe_rank}）",
+            f"目标在 probe_k={evidence.probe_k} 的候选集内可检索到，但不在 k={evidence.run_k} 内"
+            "（命中但排名过低）",
         )
     if evidence.symbol_missing and evidence.indexed_paths:
         return (AttributionCode.A4, "目标文件已收录但声明的 expect_symbols 未出现在返回 chunk 中")

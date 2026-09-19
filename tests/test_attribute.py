@@ -28,6 +28,7 @@ from dsh_coderag.eval.attribute import (
 from dsh_coderag.eval.runner import EvalResult, run_eval
 from dsh_coderag.eval.tasks import EvalTask
 from dsh_coderag.indexer import index_sync
+from dsh_coderag.searcher import search
 
 CORPUS_FILES = {
     "src/alpha.py": "def alpha_one():\n    return 1\n\n\ndef beta_two():\n    return 2\n",
@@ -37,6 +38,12 @@ SHARED_FILES = {
     "src/a.py": "def shared_word():\n    return 1\n",
     "src/b.py": "def shared_word():\n    return 1\n",
     "src/c.py": "def shared_word():\n    return 1\n",
+}
+# Target sorts first by path but is the weakest bm25 match: one occurrence
+# against twenty in each competitor. See test_a4_survives_the_source_order...
+LOW_RANK_FILES = {
+    "src/a_target.py": "# needle_symbol\n",
+    **{f"src/z{index}.py": "# needle_symbol\n" * 20 for index in range(1, 6)},
 }
 
 
@@ -156,6 +163,17 @@ def test_a4_when_target_is_only_retrievable_beyond_k() -> None:
     assert code is AttributionCode.A4
 
 
+def test_a4_uses_probe_membership_not_the_source_order_position() -> None:
+    """Regression: `probe_rank` is a source-order index, not a bm25 rank.
+
+    A target that sorts first in the probe's source-ordered hits but is
+    ranked outside k by bm25 used to be misread as 'not an A4'.
+    """
+    code, reason = classify(evidence(probe_rank=1, run_k=5))
+    assert code is AttributionCode.A4
+    assert "排名过低" in reason
+
+
 def test_a4_when_declared_symbol_is_missing_from_returned_chunks() -> None:
     code, _ = classify(evidence(symbol_missing=True))
     assert code is AttributionCode.A4
@@ -249,27 +267,33 @@ def test_collect_and_classify_a5_on_real_index(corpus: Path) -> None:
     assert attribution.code is AttributionCode.A5
 
 
-def test_collect_and_classify_a1_for_a_mixed_cjk_query(corpus: Path) -> None:
-    """The tokenizer gap that recall fallback cannot rescue still reads as A1.
+def test_collect_evidence_splits_tokens_present_and_missing_in_the_target(
+    corpus: Path,
+) -> None:
+    """Collector-level check: a mixed query's CJK bigrams are absent from the target.
 
-    The retrieval itself now hits this query (see tests/test_cjk_recall.py), so
-    the failing result is supplied explicitly: this test pins the collector and
-    classifier, not the searcher.
+    The final code for such a query is A4 when the wider probe still finds the
+    target (see test_a4_survives_the_source_order_of_the_probe); A1 only
+    applies when even the probe cannot retrieve it, which pure `classify`
+    tests cover.
     """
     task = make_task("verify_token未知词汇", ("src/other.py",))
     failed = make_result(rank=None, status="empty")
-    attribution = describe(task, failed, corpus)
-    assert attribution.code is AttributionCode.A1
-    assert "未知" in attribution.reason
+    collected = collect_evidence(task, failed, corpus, run_k=5)
+    assert "verify_token" in collected.target_tokens_present
+    assert set(collected.target_tokens_missing) == {"未知", "知词", "词汇"}
+    assert collected.target_in_probe is True
 
 
-def test_collect_and_classify_a3_when_terms_span_chunks(corpus: Path) -> None:
-    """Same explicit-failure shape: all tokens in the target, none in one chunk."""
+def test_collect_evidence_reports_all_tokens_present_in_the_target(
+    corpus: Path,
+) -> None:
+    """`alpha_one` and `beta_two` both live in alpha.py, just in different chunks."""
     task = make_task("alpha_one beta_two", ("src/alpha.py",))
     failed = make_result(rank=None, status="empty")
-    attribution = describe(task, failed, corpus)
-    assert attribution.code is AttributionCode.A3
-    assert attribution.evidence.target_tokens_present == ("alpha_one", "beta_two")
+    collected = collect_evidence(task, failed, corpus, run_k=5)
+    assert collected.target_tokens_present == ("alpha_one", "beta_two")
+    assert collected.target_tokens_missing == ()
 
 
 def test_collect_and_classify_a1_for_a_punctuation_only_query(corpus: Path) -> None:
@@ -316,8 +340,26 @@ def test_collect_and_classify_a4_when_target_ranks_past_k(tmp_path: Path) -> Non
     run = run_eval([task], root, k=1)
     attribution = attribute_run(run, [task], root)[0]
     assert attribution.code is AttributionCode.A4
-    assert attribution.evidence.probe_rank is not None
-    assert attribution.evidence.probe_rank > 1
+    assert attribution.evidence.target_in_probe is True
+
+
+def test_a4_survives_the_source_order_of_the_probe(tmp_path: Path) -> None:
+    """End-to-end regression for the probe-position bug.
+
+    `src/a_target.py` sorts first in source order but carries the token once,
+    while `src/z*.py` repeat it: at k=1 the bm25 winner is a z-file, so the
+    task fails, yet the probe (source-ordered) starts with the target.
+    """
+    root = make_corpus(tmp_path / "low-rank", LOW_RANK_FILES)
+    index_sync(root)
+    task = make_task("needle_symbol", ("src/a_target.py",))
+    run = run_eval([task], root, k=1)
+    assert run.results[0].hit is False
+    probe = search(root, "needle_symbol", k=50, max_tokens=10**9)
+    assert probe.hits[0].path == "src/a_target.py"
+    attribution = attribute_run(run, [task], root)[0]
+    assert attribution.code is AttributionCode.A4
+    assert attribution.evidence.probe_rank == 1
 
 
 # ── distribution and report ─────────────────────────────────────────────
