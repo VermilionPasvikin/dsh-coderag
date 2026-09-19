@@ -431,28 +431,34 @@ dsh plugin --profile eval-coderag   add .        # 加上我们的 bundle
 
 **写少一点，写准一点。** L2 每条都要真跑一次 Agent，比 L1 贵一个数量级。
 
-`cases/*.yml` 示例：
+`cases/*.json` 示例（**格式说明见 §3.6：自建 runner 用 JSON，不用 YAML**）：
 
-```yaml
-name: locate-token-validation
-prompt: "用户令牌是在哪里校验的？给我文件路径和函数名就行。"
-tags: [locate, fast]
-assert:
-  turn_end: completed
-  output_contains: ["token"]          # 宽松：只验证答到了正确的主题
-  max_steps: 6
+```json
+{
+  "name": "locate-token-validation",
+  "prompt": "用户令牌是在哪里校验的？给我文件路径和函数名就行。",
+  "tags": ["locate", "fast"],
+  "assert": {
+    "turn_end": "completed",
+    "output_contains": ["token"],
+    "max_steps": 6
+  }
+}
 ```
 
-```yaml
-name: crossfile-error-code
-prompt: "CONTEXT_WINDOW_EXCEEDED 这个错误码定义在哪、在哪里被抛出、在哪里被处理？"
-tags: [crossfile]
-assert:
-  turn_end: completed
-  tools_called: [code_search]         # ⭐ 关键：断言检索工具被调用
-  output_matches: ["(?i)token"]       # 至少提到一个正确文件
-  max_steps: 8
-  no_tool_errors: true
+```json
+{
+  "name": "crossfile-error-code",
+  "prompt": "CONTEXT_WINDOW_EXCEEDED 这个错误码定义在哪、在哪里被抛出、在哪里被处理？",
+  "tags": ["crossfile"],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": ["code_search"],
+    "output_matches": ["(?i)token"],
+    "max_steps": 8,
+    "no_tool_errors": true
+  }
+}
 ```
 
 **三条设计要领**：
@@ -478,20 +484,42 @@ eval_gate(baseline="eval/runs/a-v1/report.json", current="eval/runs/b-v1/report.
 
 **S3 的判定**：比较 A 组与 B 组的 `taskSuccess` 率。**S3 成立 = B 组比 A 组高 ≥ 10 个百分点。**
 
-### 3.6 降级方案（若 3.2 的兼容性验证不通过）
+### 3.6 降级方案（**已被 T3-00 触发并落地**）
 
-自己写一个约 100 行的 A/B runner：
+> **状态：已实现。** `T3-00` 实测 `dsh-eval-harness` 0.4.0 的 trace 采集器只认
+> `session.jsonl(.zstd)`，而本机 DSH 写的是 `session.v3.jsonl.zstd`，因此按本节走自建路线。
+> 实现见 `src/dsh_coderag/eval/ab.py`（全部逻辑）与 `scripts/ab_eval.py`（CLI），
+> 测试见 `tests/test_ab_eval.py`。**本节的原始骨架已被下面的实际实现取代。**
 
-```python
-# scripts/ab_eval.py  (骨架)
-# 1. 对每个 case × 每个 group，fork 一个 dsh --profile headless --patch <group.yml> "<prompt>"
-# 2. 等进程结束，读落盘的 session.jsonl
-# 3. 提取：tool/call 名字序列、最终 assistant 文本、总 token
-# 4. 用同一套断言判定 pass/fail
-# 5. 输出 JSON + Markdown 报告
+实际实现与骨架的差异（都是**有意**的，不是简化）：
+
+| 骨架 | 实际实现 | 为什么 |
+|---|---|---|
+| 读落盘的 `session.jsonl` | 读 `session.v{version}.jsonl`（**未压缩**） | 文件名带格式代际（T3-00）；runner 通过 overlay 把 `session-persistence-jsonl` 配成 `compression: none`，**因此不需要任何 zstd 解码依赖**。日志格式 = 首行 header + 逐行 `{type, seq, time, data}` |
+| `cases/*.yml`（YAML） | `cases/*.json`（JSON） | 本项目**未声明且测试环境没有** YAML 依赖；为了一个用例格式引入依赖不划算（`AGENTS.md` §9：新增依赖先问）。JSON 同样是纯数据，且 `json` 在标准库 |
+| “用同一套断言” | 实现 §3.4 的 **9 类**机械断言 | `output_judge` 需要模型评审，**runner 直接报错拒绝**而不是静默忽略——静默忽略会让用例看起来更严、实际更松 |
+| 提取 tool/最终文本/token | 另加：步数、`turn_end` 原因、`interrupted`、tool 结果错误 | §3.4/§3.5 的 `max_steps`、`turn_end`、`no_tool_errors` 需要它们 |
+
+**保持不变的口径**：`trials` 与 `pass@k` / `pass^k`（`C(c,k)/C(n,k)` 无偏估计，不是 `(c/n)^k`）；
+门禁**看回归条数**而不只看均值（§2.7）；每条用例 ≥3 trials。
+
+用法：
+
+```sh
+python scripts/ab_eval.py run --cases cases --group eval-coderag \
+    --out eval/runs/b-v1 --profile headless --patch cordis.patch.yml \
+    --workspace <DSH 副本> --trials 3
+python scripts/ab_eval.py gate --baseline eval/runs/a-v1/report.json \
+    --current eval/runs/b-v1/report.json --markdown eval/runs/gate.md
 ```
 
 **这个降级方案是有意保留的**：它不依赖任何第三方插件，只依赖 DSH 自己的会话日志格式（`packages/session/session-format-*`）。**如果你打算长期维护这个项目，自己写反而更可控。** 用现成工具是为了省 M3 那两天的时间，不是因为它更好。
+
+### 3.6.1 离线验证（**不需要 API key**）
+
+runner 的每一次 fork 都由测试用**假 dsh** 替代：它按真实格式写一份 `session.v3.jsonl`，
+于是 会话发现 → 日志解析 → 断言判定 → `pass@k` → 报告 → 门禁 全链路都能在**无网络、无模型**
+的条件下跑（`TESTING.md` T-02）。真实 A/B 才需要 key，那是 `T3-05`/`T3-06` 的事。
 
 ---
 
