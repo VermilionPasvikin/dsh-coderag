@@ -1194,8 +1194,8 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | **T3-04c** | 实现**逐 query diff**：报告列出每条 query 的前后对比，并计算**回归条数** | `src/dsh_coderag/eval/report.py` | `python -m pytest tests/test_report_diff.py -q` | 门禁以回归条数为判据，不只看均值 | T3-04 | 2h |
 | **T3-04d** | 实现 `golden_version` 校验：不匹配时**直接失败**，除非显式 `--rebaseline` | `src/dsh_coderag/eval/runner.py` | `python -m pytest tests/test_golden_version.py -q` | 版本不符时报错退出 | T3-03 | 1h |
 | **T3-02b** | 补足 **B 批 +20 条**（8 exact / 7 crossfile / 5 natural）。**A 批跑出第一组数字后再做，按结果决定重点补哪类** | `eval/tasks.jsonl` | 同 T3-02a 的校验命令 | 30 条全部通过校验 | T3-04c | 3h |
-| T3-05 | A 组基线：用 `dsh-eval-harness` 在 `eval-baseline` profile 上跑（`EVAL.md` §3.3） | `eval/runs/a-v1/` | `eval_run(cases_dir="cases", profile="eval-baseline", trials=3)` | 产出基线报告 | T3-00, T3-02a | 2h |
-| T3-06 | B 组：在 `eval-coderag` profile 上跑，产出对照报告 | `docs/eval-report-m3.md` | `eval_run(..., profile="eval-coderag", trials=3)` | 报告含**分层指标 + 归因分布 + 逐条 diff** | T3-04d, T3-05, T3-13, T3-14 | 2h |
+| T3-05 | A 组基线：在 `eval-baseline` 组上跑（`EVAL.md` §3.3），产出基线报告 | `eval/runs/a-v1/` | `python scripts/ab_eval.py run --group eval-baseline ...` | 产出基线报告 | T3-00, T3-02a, T3-15 | 2h |
+| T3-06 | B 组：在 `eval-coderag` 组上跑，产出对照报告 | `docs/eval-report-m3.md` | `python scripts/ab_eval.py run --group eval-coderag ...` | 报告含**分层指标 + 归因分布 + 逐条 diff** | T3-04d, T3-05, T3-13, T3-14 | 2h |
 | **T3-07** | **决策门 M3-DECIDE**：按 `EVAL.md` §2.8 的**精确 R2 条件**裁决（见下） | `docs/adr/ADR-14-semantic-retrieval.md` | 文档含明确结论 + 支撑数据 + 归因分布 | 三条规则之一被明确命中 | T3-06 | 1h |
 | T3-08 | （条件）若 T3-07 判定需要：Ollama + `bge-m3`，实现 embedding 生成与缓存 | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 同一文本两次调用返回相同向量（缓存生效） | T3-07 = R2 | 3h |
 | T3-09 | （条件）实现向量存储与暴力余弦检索（numpy，≤10 万 chunk 不引入向量库） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "vector_search" -q` | top-k 与暴力计算一致 | T3-08 | 2h |
@@ -1204,6 +1204,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T3-12 | 回归门禁脚本：L1（pytest）+ L2（`eval_gate`）一键重跑 | `scripts/eval-gate.sh` | `bash scripts/eval-gate.sh` | 退出码 0/1；输出四项指标 + 回归条数 | T3-02b, T3-06 | 1h |
 | **T3-13** | **R3 的 A1 修复**：实现 §5.3.1 早已规定的**精度→召回降级**（精度模式 AND 落空时用 OR 重试一次） | `src/dsh_coderag/searcher.py`, `tests/test_cjk_recall.py` | `python -m pytest tests/test_cjk_recall.py -q` | M2 三条中文语义全绿；「标识符 + 中文」混合查询命中；两种模式都空时仍返回 `status: empty` | T3-04b | 1h |
 | **T3-14** | **R3 的 A4 修复**：落实 §3.3 第 3 步**结构化加分**——候选池放宽后按「测试路径降级 + `symbol_name` 完全匹配加权」重选 top-k（输出仍按源码顺序，ADR-05 不变） | `src/dsh_coderag/searcher.py`, `tests/test_ranking_signals.py` | `python -m pytest tests/test_ranking_signals.py -q` | 定义处不再被 `tests/`、`*.spec.*` 挤出 top-5；exact 桶 S@5 ≥ 0.90 | T3-04b | 2h |
+| **T3-15** | **L2 自建薄 runner**（`EVAL.md` §3.6 降级方案，因 T3-00 判定 harness 不兼容）：fork headless DSH、解析会话日志、执行 §3.4 断言、算 `pass@k`/`pass^k`、与基线做回归门禁 | `src/dsh_coderag/eval/ab.py`, `scripts/ab_eval.py`, `tests/test_ab_eval.py` | `python -m pytest tests/test_ab_eval.py -q` | 离线（无 API key、无网络）覆盖：会话日志解析、9 类断言、`pass@k`/`pass^k` 无偏估计、门禁回归条数；用**假 dsh** 跑通端到端 | T3-00 | 3h |
 
 **T3-07 的三条判定规则（事先写下，避免事后找理由）**
 
@@ -1297,7 +1298,7 @@ T3-04  ← T3-03
 T3-04b  ← T3-04
 T3-04c  ← T3-04
 T3-04d  ← T3-03
-T3-05  ← T3-00, T3-02a
+T3-05  ← T3-00, T3-02a, T3-15
 T3-06  ← T3-04d, T3-05, T3-13, T3-14
 T3-07  ← T3-06
 T3-08  ← T3-07
@@ -1307,6 +1308,7 @@ T3-11  ← T3-10
 T3-12  ← T3-02b, T3-06
 T3-13  ← T3-04b
 T3-14  ← T3-04b
+T3-15  ← T3-00
 T4-01  ← T2-17
 T4-02  ← T4-01
 T4-03  ← T4-01
@@ -1375,6 +1377,7 @@ T4-10  ← T4-08
 | **T3-02b** | 已完成 | `$ python3 scripts/verify-tasks.py eval/tasks.jsonl /Users/vermi/projects/dsh`<br>`解析到 30 条任务（exact 12 / crossfile 11 / natural 7）`<br>`[V1 ] 读取与解析            PASS  30 条有效任务`<br>`[V2 ] schema           PASS  30/30 条通过 schema.json`<br>`[V3 ] 唯一 ID            PASS  30 个唯一 ID / 30 条`<br>`[V4 ] 路径格式             PASS  46 条路径`<br>`[V5 ] 路径存在             PASS  46/46 条路径存在`<br>`[V6 ] 无答案泄漏            PASS  30 条 query`<br>`[V7 ] exact 标识符存在      PASS  12 条 exact`<br>`[V8 ] natural 无标识符     PASS  7 条 natural`<br>`[V9 ] class 配比         PASS  exact/crossfile/natural = 12/11/7，目标比例 12:11:7（±1）`<br>`[V10] 任务数下限            PASS  30 ≥ 10`<br>`PASS: 30 条任务全部通过 10 项检查`<br>（退出码 0，被评测仓库 `/Users/vermi/projects/dsh`） | `43a2b65` | 新增 **L-011..L-030**（8 exact / 7 crossfile / 5 natural），凑齐 12/11/7。**每行的 `notes` 都写了出处（`file:line` + 原文片段）与选取理由**；crossfile 全部改成「定义处 → 使用/写入处 → 复用/封锁处」的三文件链路。**按用户指示提前执行**：任务表原依赖 `T3-04c`（尚未完成），此处按 A 批已暴露的 crossfile/natural 缺口定重点，未使用 `T3-04c` 的 diff。**未跑 L1 评测**——用户要先人工排查 query 是否泄漏答案，在其复核前不对评测集调参（EVAL §2.9 陷阱 3/14）。⚠️ `eval/tasks.meta.json` 尚未创建（属 T3-04d），**T3-04d 必须把初始 `golden_version` 定为本次 B 批后的状态**，否则踩 EVAL §2.9 陷阱 15。golden 集改动已按 EVAL §2.7 单独成一个提交（`43a2b65`） |
 | **T3-14** | 已完成 | `$ python -m pytest tests/test_ranking_signals.py -q`（forBSH 环境）<br>`..........                                                               [100%]`<br>（10 passed，退出码 0：先断言**原始 bm25 冠军确实是 spec**、再断言选中 impl；四种测试路径形态（`tests/`、`__tests__/`、`*.spec.*`、`*.test.*`）都被降级，而 `tests_helper.py` 不被降级；输出仍按源码顺序、结果可重复；`symbol_name` 完全匹配可在 SQL 中被加权、部分匹配不加权）<br>30 条 golden 集复测（同一语料，查询侧改动**无需重建索引**）：<br>`exact     S@5 0.833 -> 1.000 [0.76,1.00]   MRR 0.582 -> 0.700`<br>`crossfile S@5 0.000 -> 0.091 [0.02,0.38]   MRR 0.000 -> 0.091`<br>`natural   S@5 0.000 -> 0.000`<br>`overall   S@5 0.333 -> 0.433 [0.27,0.61]   MRR 0.233 -> 0.313`<br>逐条：L-013 `未命中 -> rank 1`、L-018 `未命中 -> rank 3`、**L-005 `未命中 -> rank 1`**；L-003 名次 5→3<br>归因：`{"A4":2,"A1":2,"A5":16} -> {"A5":16,"A1":1}`，**A4 清零** | `1559cf3`, `0d269d1` | 两轮迭代。**第一轮**（`1559cf3`）：候选池放宽到 `max(4k,20)` 后按 `selection_key` 重排，测试路径整体降到非测试之后（无魔数），`symbol_name` 完全匹配减 `SYMBOL_MATCH_BOOST=2.0`。**第二轮**（`0d269d1`）：(a) 把测试路径降级**移进 SQL 的 ORDER BY 第一层**——原来的池 20 会被 `*_spec/*.e2e` 打满、目标根本进不了池（L-005 正是这样漏的），放进 SQL 后 `LIMIT k` 直接看到最终排序，候选池常量随之删除；(b) 召回从两级改为**三级**（精度 AND → 仅标识符 OR → 含 CJK bigram 的 OR），因为中文 bigram 精度极低，在带 `locales.ts` 的仓库里会以超高 bm25 压掉真正的代码。输出顺序始终 `(path, start_line)`（ADR-05 不变）。**未实现** §3.3 的「同文件局部性加权」与「声明定义处加权」——数据不支持，未引入。全量 326 例通过，ruff / `mypy --strict src/` 干净 |
 | **T3-07** | 已完成 | `$ test -f docs/adr/ADR-14-semantic-retrieval.md && echo "ADR-14 exists" && wc -l < docs/adr/ADR-14-semantic-retrieval.md`<br>`ADR-14 exists`<br>`168`<br>`$ grep -n "R2 命中\|natural_a5_share = 1.0\|\"A5\": 16\|裁决：R2" docs/adr/ADR-14-semantic-retrieval.md`<br>`54:overall   {"A5": 16, "A1": 1}`<br>`58:natural_a5_share = 1.0`<br>`88:| R2 | S@5 < 0.80 且 natural 失败中 A5 ≥ 50% | 0.433 < 0.80 ✅；natural_a5_share = 1.0 ≥ 0.50 ✅ | ✅ **命中** |`<br>`91:**裁决：R2 命中 → 引入向量检索。**`<br>（文档含明确结论 + 分层指标与 Wilson CI + 归因分布 + 30 条逐条结果 + R1/R2/R3 对账 + 6 条限制） | `8842a38` | 新增 `docs/adr/ADR-14-semantic-retrieval.md`（`docs/adr/` 此前不存在，这是第一个 ADR 文件）。**裁决：R2 命中 → 引入向量**（执行 T3-08..T3-11），并明确"**只补齐、不替换**"——exact 已 1.000，替换只会回退。**执行偏差**：`T3-07` 原依赖 `T3-06`（B 组 L2 对照），本次在 `T3-06` 未完成时裁决，原因与边界写在 ADR §9——R2 只看 L1 指标，而 **S3 未测量**，所以结论只覆盖"词法够不到中文自然语言"，**不等于"向量能提升端到端"**。ADR §4 记录了决策前按 §2.8 但书修完 A1（T3-13）与 A4（T3-14）、避免踩 §2.9 陷阱 8；§7 列出 6 条必须与结论同时引用的限制（30 条 CI 宽 [0.274,0.608]、诊断配比非真实流量、L-008 判据偏差、第二轮对比需把 α 收紧到 0.025 等） |
+| **T3-15** | 已完成 | `$ python -m pytest tests/test_ab_eval.py -q`（forBSH 环境）<br>`........................................                                 [100%]`<br>（40 passed，退出码 0，**全程离线**：无网络、无 API key。覆盖用例加载与 4 类非法输入、会话日志解析（tool/最终文本/步数/turn_end/usage/interrupted/错误结果）、会话发现（版本化文件名、跳过子代理日志、压缩日志给出可操作报错、多根歧义）、9 类断言的通过与失败、`pass@k`/`pass^k` 的**无偏**组合数定义、命令构造、门禁回归条数与 delta、两种 Markdown 报告，以及用**假 dsh** 跑通的端到端）<br>`$ python scripts/ab_eval.py --help`<br>`usage: ab_eval.py [-h] {run,gate} ...`<br>`L2 end-to-end A/B runner for dsh-coderag.`<br>`$ python scripts/ab_eval.py gate --baseline ... --current ...` 退出码 0/1 = 门禁是否无回归 | `adbcdbb` | 新增 `src/dsh_coderag/eval/ab.py`（全部逻辑）、`scripts/ab_eval.py`（薄 CLI）、`tests/test_ab_eval.py`（40 例）。补齐了 `T3-00` 判定失败后 `EVAL.md` §3.6 一直悬空的自建 runner。**三处与骨架的有意差异**（已同步进 `EVAL.md` §3.6 表）：① 读 `session.v{version}.jsonl`，通过 overlay 把 `session-persistence-jsonl` 配成 `compression: none`，**因此不需要 zstd 依赖**；② 用例是 **JSON 不是 YAML**（项目未声明 YAML 依赖、`mypy`/测试环境也没有，不为一个用例格式加依赖）；③ 实现 §3.4 的 9 类断言，`output_judge` **显式报错拒绝**而不是静默忽略。`pass@k`/`pass^k` 用 `C(c,k)/C(n,k)` 无偏估计，门禁看**回归条数**。**未运行真实 A/B**（需要模型 API key，且要先把 DSH 副本索引好）——那是 `T3-05`/`T3-06`。同时更新了 `T3-05`/`T3-06` 的验收命令（不再引用不可用的 `dsh-eval-harness`）。全量 366 例通过，ruff / `mypy --strict src/` 干净 |
 
 ---
 
