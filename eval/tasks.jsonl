@@ -1,0 +1,10 @@
+{"id": "L-001", "class": "exact", "query": "DEFAULT_TOOL_CALL_TIMEOUT_MS", "expect_paths": ["packages/mcp/mcp-client/src/index.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 exact #1"}
+{"id": "L-002", "class": "exact", "query": "CONTEXT_WINDOW_EXCEEDED_CODE定义在哪？", "expect_paths": ["packages/llm/llm/src/error.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 exact #2"}
+{"id": "L-003", "class": "exact", "query": "delegationDepthOf定义在哪？", "expect_paths": ["packages/subagent/subagent/src/depth.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 exact #3"}
+{"id": "L-004", "class": "exact", "query": "SANDBOX_MODES的定义", "expect_paths": ["packages/sandbox/sandbox-policy/src/session-mode.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 exact #4"}
+{"id": "L-005", "class": "crossfile", "query": "MCP 工具调用的超时时间在哪里配置、又在哪里真正生效？", "expect_paths": ["packages/mcp/mcp-client/src/index.ts","packages/mcp/mcp-client/src/tools.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 crossfile #5"}
+{"id": "L-006", "class": "crossfile", "query": "会话级沙箱模式覆盖如何持久化并在重启后恢复？", "expect_paths": ["packages/sandbox/sandbox-policy/src/session-mode.ts", "packages/sandbox/sandbox-policy/src/index.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 crossfile #6"}
+{"id": "L-007", "class": "crossfile", "query": "子代理的递归深度限制如何跨重启保留下来", "expect_paths": ["packages/core/session/src/types.ts","packages/subagent/subagent/src/depth.ts","packages/subagent/subagent/src/child-agent.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 crossfile #7"}
+{"id": "L-008", "class": "crossfile", "query": "stdio 子进程会继承哪些环境变量，哪些会被过滤掉？", "expect_paths": ["packages/subprocess/subprocess/src/index.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 crossfile #8"}
+{"id": "L-009", "class": "natural", "query": "模型请求失败以后默认会重试哪些错误？", "expect_paths": ["packages/llm/llm/src/retry-policy.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 natural #9"}
+{"id": "L-010", "class": "natural", "query": "上下文窗口超限以后，系统会先裁剪还是先摘要？", "expect_paths": ["packages/compaction/compaction-basic/src/index.ts"], "added": "2026-09-19", "notes": "T3-02a A 批 natural #10"}
