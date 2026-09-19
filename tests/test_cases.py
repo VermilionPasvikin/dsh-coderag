@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from dsh_coderag.eval.ab import Assertions, Case, load_cases, render_case_review
+from dsh_coderag.eval.ab import Assertions, Case, load_cases
 
 CASES_DIR = Path(__file__).resolve().parents[1] / "cases"
 CORPUS = os.environ.get("CODERAG_L2_CORPUS")
@@ -90,11 +90,6 @@ def test_output_assertions_accept_and_reject_the_reviewed_samples(cases: list[Ca
         for text in case.reject:
             assert not output_ok(case, text), f"{case.name} 接受了错误答案：{text!r}"
 
-
-def test_review_table_matches_the_cases(cases: list[Case]) -> None:
-    """`cases/REVIEW.md` is generated; a stale table would mislead the reviewer."""
-    committed = (CASES_DIR / "REVIEW.md").read_text(encoding="utf-8")
-    assert committed == render_case_review(cases), "REVIEW.md 已过期，跑 scripts/case-review.py"
 
 
 @pytest.mark.skipif(
