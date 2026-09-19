@@ -10,7 +10,7 @@
       "code_search"
     ],
     "output_matches": [
-      "DEFAULT_TOOL_CALL_TIMEOUT_MS"
+      "DEFAULT_TOOL_CALL_TIMEOUT_MS|mcp-client/src/index"
     ],
     "no_tool_errors": true,
     "max_steps": 10
@@ -18,5 +18,13 @@
   "answer_paths": [
     "packages/mcp/mcp-client/src/index.ts"
   ],
-  "notes": "出处：packages/mcp/mcp-client/src/index.ts:37 `const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000`。理由：刻意把 MCP 这个英文线索拿掉，只留中文『工具调用超时』，考验检索能否补上标识符缺口。"
+  "notes": "出处：packages/mcp/mcp-client/src/index.ts:37 `const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000`。理由：刻意把 MCP 这个英文线索拿掉，只留中文『工具调用超时』，考验检索能否补上标识符缺口。",
+  "accept": [
+    "默认 60 秒，定义在 packages/mcp/mcp-client/src/index.ts（DEFAULT_TOOL_CALL_TIMEOUT_MS）。",
+    "DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000，在 mcp-client/src/index.ts。"
+  ],
+  "reject": [
+    "默认 30 秒，在 packages/web/tool-web/src/index.ts。",
+    "没有默认超时时间。"
+  ]
 }

@@ -8,7 +8,7 @@
   "assert": {
     "turn_end": "completed",
     "output_matches": [
-      "error\\.ts|llm/llm"
+      "llm/llm/src/error"
     ],
     "no_tool_errors": true,
     "max_steps": 8
@@ -16,5 +16,13 @@
   "answer_paths": [
     "packages/llm/llm/src/error.ts"
   ],
-  "notes": "出处：packages/llm/llm/src/error.ts:25。理由：同上的回归题；这条同时是 L1 里 T3-13 修过的『标识符 + 中文』形态，用来确认端到端层面也不回退。"
+  "notes": "出处：packages/llm/llm/src/error.ts:25。理由：同上的回归题；这条同时是 L1 里 T3-13 修过的『标识符 + 中文』形态，用来确认端到端层面也不回退。",
+  "accept": [
+    "定义在 packages/llm/llm/src/error.ts:25。",
+    "llm/llm/src/error.ts（CONTEXT_WINDOW_EXCEEDED_CODE）。"
+  ],
+  "reject": [
+    "在 packages/llm/llm/src/retry-policy.ts。",
+    "没有这个常量。"
+  ]
 }

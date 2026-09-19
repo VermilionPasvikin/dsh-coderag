@@ -21,5 +21,13 @@
     "packages/todo/tool-todo/src/index.ts",
     "packages/session-query/session-query/src/extraction.ts"
   ],
-  "notes": "出处：tool-todo/src/types.ts:31 `'todo/write'`（事件载荷）＋ tool-todo/src/index.ts:210 `session.append('todo/write', ...)`（写入）＋ session-query/src/extraction.ts:29 `case 'todo/write':`（检索提取）。理由：跨『写会话』与『被检索』两侧，且两个包名都要说出来。"
+  "notes": "出处：tool-todo/src/types.ts:31 `'todo/write'`（事件载荷）＋ tool-todo/src/index.ts:210 `session.append('todo/write', ...)`（写入）＋ session-query/src/extraction.ts:29 `case 'todo/write':`（检索提取）。理由：跨『写会话』与『被检索』两侧，且两个包名都要说出来。",
+  "accept": [
+    "写入在 packages/todo/tool-todo/src/index.ts（session.append('todo/write')），检索提取在 packages/session-query/session-query/src/extraction.ts。",
+    "tool-todo 负责写入会话，session-query 的 extraction 把它转成可搜索文本。"
+  ],
+  "reject": [
+    "只在 packages/todo/tool-todo/src/index.ts 里，就这一个文件。",
+    "待办清单不落盘。"
+  ]
 }

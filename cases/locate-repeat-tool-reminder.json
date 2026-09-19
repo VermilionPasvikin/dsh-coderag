@@ -18,5 +18,13 @@
   "answer_paths": [
     "packages/guard/repeat-tool-reminder/src/index.ts"
   ],
-  "notes": "出处：packages/guard/repeat-tool-reminder/src/index.ts:63 `GENTLE_REMINDER`、:199-202 阈值判定与 `detailedReminder`。理由：纯中文行为描述，代码里的词是 reminder/remind，中文『提醒』猜不到；配 tools_called 同时测检索质量与工具采纳意愿。"
+  "notes": "出处：packages/guard/repeat-tool-reminder/src/index.ts:63 `GENTLE_REMINDER`、:199-202 阈值判定与 `detailedReminder`。理由：纯中文行为描述，代码里的词是 reminder/remind，中文『提醒』猜不到；配 tools_called 同时测检索质量与工具采纳意愿。",
+  "accept": [
+    "实现在 `packages/guard/repeat-tool-reminder/src/index.ts`，达到阈值后会在工具结果后面追加提醒。",
+    "The reminder lives in packages/guard/repeat-tool-reminder/src/index.ts."
+  ],
+  "reject": [
+    "在 packages/guard/timeout-policy/src/index.ts。",
+    "不确定，仓库里似乎没有相关实现。"
+  ]
 }

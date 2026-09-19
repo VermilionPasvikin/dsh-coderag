@@ -11,7 +11,7 @@
     ],
     "output_matches": [
       "skill-filesystem",
-      "BUNDLED_SKILL_RANK"
+      "BUNDLED_SKILL_RANK|skill/skill/src/index"
     ],
     "no_tool_errors": true,
     "max_steps": 12
@@ -20,5 +20,13 @@
     "packages/skill/skill-filesystem/src/index.ts",
     "packages/skill/skill/src/index.ts"
   ],
-  "notes": "出处：skill-filesystem/src/index.ts:723 `discoverRoot`（发现）＋ skill/src/index.ts:28 `BUNDLED_SKILL_RANK`、:78 `readonly rank`（同层同名按 rank 决胜）。理由：『发现』与『谁生效』分属两个包，单文件检索答不全；两个正则分别对应两处证据。"
+  "notes": "出处：skill-filesystem/src/index.ts:723 `discoverRoot`（发现）＋ skill/src/index.ts:28 `BUNDLED_SKILL_RANK`、:78 `readonly rank`（同层同名按 rank 决胜）。理由：『发现』与『谁生效』分属两个包，单文件检索答不全；两个正则分别对应两处证据。",
+  "accept": [
+    "发现逻辑在 packages/skill/skill-filesystem/src/index.ts 的 discoverRoot；同名覆盖由 packages/skill/skill/src/index.ts 的 BUNDLED_SKILL_RANK 决定。",
+    "skill-filesystem 负责发现；skill/skill/src/index.ts 里的 rank 决定谁生效。"
+  ],
+  "reject": [
+    "都在 packages/skill/skill/src/index.ts 一个文件里。",
+    "技能是按文件名字母序加载的。"
+  ]
 }

@@ -21,5 +21,13 @@
     "packages/core/agent-loop/src/tool-calls.ts",
     "packages/session/session-checkpoint-policy/src/index.ts"
   ],
-  "notes": "出处：core/tools/src/index.ts:469 `TOOL_ABORTED_BEFORE_DISPATCH`（定义）＋ core/agent-loop/src/tool-calls.ts:257（写进结果）＋ session-checkpoint-policy/src/index.ts:47（复用）。理由：『定义处 + 使用处』三文件链，是跨文件理解的标准形态。"
+  "notes": "出处：core/tools/src/index.ts:469 `TOOL_ABORTED_BEFORE_DISPATCH`（定义）＋ core/agent-loop/src/tool-calls.ts:257（写进结果）＋ session-checkpoint-policy/src/index.ts:47（复用）。理由：『定义处 + 使用处』三文件链，是跨文件理解的标准形态。",
+  "accept": [
+    "错误码 TOOL_ABORTED_BEFORE_DISPATCH 定义在 packages/core/tools/src/index.ts，写进结果在 packages/core/agent-loop/src/tool-calls.ts，检查点策略复用见 session-checkpoint-policy。",
+    "core/tools 定义，agent-loop 写入结果。"
+  ],
+  "reject": [
+    "定义在 packages/session/session-checkpoint-policy/src/index.ts。",
+    "没有这样的错误码。"
+  ]
 }

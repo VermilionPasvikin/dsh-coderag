@@ -96,6 +96,10 @@ class Case:
     `answer_paths` names the files a correct answer should be based on, which
     lets a test check they are inside the indexed corpus (a case whose answer
     is filtered out of the index would be unfair to the retrieval group).
+    `accept` / `reject` are reviewed sample answers: the output assertions must
+    accept every `accept` string and reject every `reject` string, so an
+    over-tight (false failure) or over-loose (false pass) regex is caught
+    before the set is ever run against a model.
     """
 
     name: str
@@ -104,9 +108,13 @@ class Case:
     expect: Assertions
     answer_paths: tuple[str, ...] = ()
     notes: str | None = None
+    accept: tuple[str, ...] = ()
+    reject: tuple[str, ...] = ()
 
 
-CASE_KEYS = frozenset({"name", "prompt", "tags", "assert", "answer_paths", "notes"})
+CASE_KEYS = frozenset(
+    {"name", "prompt", "tags", "assert", "answer_paths", "notes", "accept", "reject"}
+)
 """Top-level case fields; anything else is a typo and fails the load."""
 
 
@@ -158,6 +166,8 @@ def _load_case(path: Path) -> Case:
         expect=expect,
         answer_paths=tuple(_string_list(payload.get("answer_paths", []), path, "answer_paths")),
         notes=notes,
+        accept=tuple(_string_list(payload.get("accept", []), path, "accept")),
+        reject=tuple(_string_list(payload.get("reject", []), path, "reject")),
     )
 
 
@@ -804,6 +814,78 @@ def _average(values: Sequence[int]) -> str:
 
 def _pp(value: float | None) -> str:
     return "n/a" if value is None else f"{value:+.1f}pp"
+
+
+def render_case_review(cases: Sequence[Case]) -> str:
+    """Render the human review table for the committed cases.
+
+    The table carries everything a reviewer needs to judge ambiguity and
+    realism, plus the accept/reject samples that pin what each assertion
+    accepts. It is generated (never hand-edited) so it cannot drift from the
+    case files.
+    """
+    lines = [
+        "# L2 用例审核表",
+        "",
+        f"> 共 **{len(cases)}** 条。本文件由 `python scripts/case-review.py` 从 "
+        "`cases/*.json` 生成，",
+        "> **请勿手改**；改用例请改 JSON 后重新生成（有测试守着一致性）。",
+        "",
+        "## 怎么审：5 个性质，其中 3 个已机械核查",
+        "",
+        "| 性质 | 谁查 | 怎么查 |",
+        "|---|---|---|",
+        "| 答案文件在索引里（否则检索组永远赢不了） | 机械 ✅ | "
+        "`CODERAG_L2_CORPUS=<副本> pytest tests/test_cases.py` |",
+        "| prompt 不泄漏答案路径 | 机械 ✅ | "
+        "`leak_candidates` 扫描 + `tests/test_cases.py` |",
+        "| 断言不误杀正确答案 / 不放过错误答案 | 机械 ✅ | "
+        "每条下方的「应接受 / 应拒绝」样例，逐条真跑正则 |",
+        "| 问题真实、且只有一个合理答案 | **人** | "
+        "读每条「问」与「出处」：我会这么问吗？别人会不会答到别的文件？ |",
+        "| 配比与 `max_steps` 合理 | **人** | "
+        "看桶的分布；`max_steps` 是拍的（10/12/8），冒烟后可能要调 |",
+        "",
+        "**桶的意图**：`locate`/`crossfile` 断言 `tools_called: [code_search]`"
+        "（同时测检索质量与工具采纳）；",
+        "`regression` **不**断言工具被调用，用来验证「检索不该让简单题变差」；",
+        "`negative` 是反臆造控制组（`A`/`B` 都该过，测『没有就直说』"
+        "而不是测区分度）。",
+        "",
+        "---",
+        "",
+    ]
+    for index, case in enumerate(cases, 1):
+        expect = case.expect
+        asserts: list[str] = []
+        if expect.tools_called:
+            asserts.append(f"`tools_called={list(expect.tools_called)}`")
+        if expect.tools_not_called:
+            asserts.append(f"`tools_not_called={list(expect.tools_not_called)}`")
+        if expect.output_contains:
+            asserts.append(f"`output_contains={list(expect.output_contains)}`")
+        if expect.output_matches:
+            asserts.append(f"`output_matches={list(expect.output_matches)}`")
+        if expect.max_steps is not None:
+            asserts.append(f"`max_steps={expect.max_steps}`")
+        if expect.no_tool_errors:
+            asserts.append("`no_tool_errors`")
+        asserts.append(f"`turn_end={expect.turn_end}`")
+        answers = "、".join(f"`{path}`" for path in case.answer_paths) or "（控制组：无答案文件）"
+        lines += [
+            f"### {index}. `{case.name}` — {', '.join(case.tags)}",
+            "",
+            f"- **问**：{case.prompt}",
+            f"- **答案文件**：{answers}",
+            f"- **断言**：{'；'.join(asserts)}",
+            f"- **出处 / 理由**：{case.notes}",
+            f"- **应接受**（{len(case.accept)}）",
+            *[f"  - {text}" for text in case.accept],
+            f"- **应拒绝**（{len(case.reject)}）",
+            *[f"  - {text}" for text in case.reject],
+            "",
+        ]
+    return "\n".join(lines)
 
 
 def write_json(payload: Mapping[str, Any], path: Path) -> None:

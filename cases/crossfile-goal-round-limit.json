@@ -21,5 +21,13 @@
     "packages/goal/goal/src/fold.ts",
     "packages/goal/goal-round-driver/src/index.ts"
   ],
-  "notes": "出处：goal/goal/src/index.ts:244 `defaultMaxGoalRounds: z.number().default(256)` ＋ fold.ts:112（随状态持久化）＋ goal-round-driver/src/index.ts:166（触发封锁）。理由：默认值 → 持久化 → 封锁三处，且要求报出具体数字 256，答案可机械判定。"
+  "notes": "出处：goal/goal/src/index.ts:244 `defaultMaxGoalRounds: z.number().default(256)` ＋ fold.ts:112（随状态持久化）＋ goal-round-driver/src/index.ts:166（触发封锁）。理由：默认值 → 持久化 → 封锁三处，且要求报出具体数字 256，答案可机械判定。",
+  "accept": [
+    "默认 256 轮，配置在 packages/goal/goal/src/index.ts，随状态持久化在 fold.ts，封锁在 packages/goal/goal-round-driver/src/index.ts。",
+    "默认值是 256；goal-round-driver 达到上限时把目标标记为 blocked。"
+  ],
+  "reject": [
+    "默认 100 轮，在 goal 里。",
+    "没有轮次上限。"
+  ]
 }

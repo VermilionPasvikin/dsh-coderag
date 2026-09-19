@@ -10,7 +10,7 @@
       "code_search"
     ],
     "output_matches": [
-      "DEFAULT_MAX_IMAGES_PER_MESSAGE"
+      "DEFAULT_MAX_IMAGES_PER_MESSAGE|attachment-local/src/index"
     ],
     "no_tool_errors": true,
     "max_steps": 10
@@ -18,5 +18,13 @@
   "answer_paths": [
     "packages/attachment/attachment-local/src/index.ts"
   ],
-  "notes": "出处：packages/attachment/attachment-local/src/index.ts:36 `export const DEFAULT_MAX_IMAGES_PER_MESSAGE = 20`。理由：先要找出常量名（中文问句里没有任何标识符），再定位文件；答案含具体数字，可机械断言。"
+  "notes": "出处：packages/attachment/attachment-local/src/index.ts:36 `export const DEFAULT_MAX_IMAGES_PER_MESSAGE = 20`。理由：先要找出常量名（中文问句里没有任何标识符），再定位文件；答案含具体数字，可机械断言。",
+  "accept": [
+    "上限是 20 张，定义在 packages/attachment/attachment-local/src/index.ts。",
+    "常量是 DEFAULT_MAX_IMAGES_PER_MESSAGE，见 attachment-local/src/index.ts。"
+  ],
+  "reject": [
+    "上限是 10，定义在 packages/attachment/attachment/src/index.ts。",
+    "没有数量限制。"
+  ]
 }

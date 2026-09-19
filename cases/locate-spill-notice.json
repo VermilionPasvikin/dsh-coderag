@@ -10,7 +10,7 @@
       "code_search"
     ],
     "output_matches": [
-      "notice"
+      "spill-policy/src/notice|formatSpillNotice"
     ],
     "no_tool_errors": true,
     "max_steps": 10
@@ -18,5 +18,13 @@
   "answer_paths": [
     "packages/spill/spill-policy/src/notice.ts"
   ],
-  "notes": "出处：packages/spill/spill-policy/src/notice.ts:20 `formatSpillNotice`。理由：中文问『提示文本』，代码里是 notice/format…，词形不重叠；答案是一个小而专一的文件，适合 locate。"
+  "notes": "出处：packages/spill/spill-policy/src/notice.ts:20 `formatSpillNotice`。理由：中文问『提示文本』，代码里是 notice/format…，词形不重叠；答案是一个小而专一的文件，适合 locate。",
+  "accept": [
+    "提示文本由 `formatSpillNotice` 生成，定义在 packages/spill/spill-policy/src/notice.ts。",
+    "见 packages/spill/spill-policy/src/notice.ts:20 的 formatSpillNotice。"
+  ],
+  "reject": [
+    "在 packages/compaction/compaction-basic/src/index.ts。",
+    "没有这样的提示文本，输出是被直接截断的。"
+  ]
 }

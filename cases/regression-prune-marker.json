@@ -8,7 +8,7 @@
   "assert": {
     "turn_end": "completed",
     "output_matches": [
-      "PRUNE_MARKER|config"
+      "compaction-tool-result-pruner|config\\.ts"
     ],
     "no_tool_errors": true,
     "max_steps": 8
@@ -16,5 +16,13 @@
   "answer_paths": [
     "packages/compaction/compaction-tool-result-pruner/src/config.ts"
   ],
-  "notes": "出处：packages/compaction/compaction-tool-result-pruner/src/config.ts:7。理由：**不给 tools_called 断言**——这是一条『检索不该让简单题变差』的回归题。标识符可直接 grep，预期 A 组也能过；若 B 组反而失败，说明检索干扰了基线。"
+  "notes": "出处：packages/compaction/compaction-tool-result-pruner/src/config.ts:7。理由：**不给 tools_called 断言**——这是一条『检索不该让简单题变差』的回归题。标识符可直接 grep，预期 A 组也能过；若 B 组反而失败，说明检索干扰了基线。",
+  "accept": [
+    "`PRUNE_MARKER` 定义在 packages/compaction/compaction-tool-result-pruner/src/config.ts。",
+    "compaction-tool-result-pruner/src/config.ts:7"
+  ],
+  "reject": [
+    "在 packages/compaction/compaction-basic/src/index.ts。",
+    "不存在这个常量。"
+  ]
 }

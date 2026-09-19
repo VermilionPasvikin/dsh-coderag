@@ -11,7 +11,7 @@
       "code_search"
     ],
     "output_matches": [
-      "subprocess"
+      "subprocess/subprocess/src/index|scrubbedParentEnv|SENSITIVE_ENV_PATTERN"
     ],
     "no_tool_errors": true,
     "max_steps": 12
@@ -19,5 +19,13 @@
   "answer_paths": [
     "packages/subprocess/subprocess/src/index.ts"
   ],
-  "notes": "出处：packages/subprocess/subprocess/src/index.ts `scrubbedParentEnv` 与 `SENSITIVE_ENV_PATTERN`。理由：L1 的 L-008 已证明这是典型的『中文意图 vs 英文代码』零词法重叠案例（环境变量/过滤 ↔ env/scrub）。作为 L2 里的语义缺口探针：若 A/B 都失败，说明词法检索在这类问题上确实无能为力（对应 ADR-14 的 R2）。"
+  "notes": "出处：packages/subprocess/subprocess/src/index.ts `scrubbedParentEnv` 与 `SENSITIVE_ENV_PATTERN`。理由：L1 的 L-008 已证明这是典型的『中文意图 vs 英文代码』零词法重叠案例（环境变量/过滤 ↔ env/scrub）。作为 L2 里的语义缺口探针：若 A/B 都失败，说明词法检索在这类问题上确实无能为力（对应 ADR-14 的 R2）。",
+  "accept": [
+    "规则在 packages/subprocess/subprocess/src/index.ts 的 scrubbedParentEnv（SENSITIVE_ENV_PATTERN 加 DSH_ 前缀）。",
+    "subprocess/subprocess/src/index.ts；名字匹配敏感模式的变量不会传给子进程。"
+  ],
+  "reject": [
+    "在 packages/subprocess/subprocess-local/src/index.ts。",
+    "所有环境变量都会被继承。"
+  ]
 }
