@@ -124,19 +124,6 @@ def make_result(rank: int | None, *, status: str = "ready") -> EvalResult:
     )
 
 
-def describe(task: EvalTask, result: EvalResult, corpus: Path) -> Attribution:
-    """Run the collector + classifier for one explicit failing result."""
-    collected = collect_evidence(task, result, corpus, run_k=5)
-    code, reason = classify(collected)
-    return Attribution(
-        task_id=task.id,
-        task_class=task.task_class,
-        code=code,
-        reason=reason,
-        evidence=collected,
-    )
-
-
 # ── query tokenization ──────────────────────────────────────────────────
 def test_query_tokens_mix_identifier_and_cjk_bigrams() -> None:
     tokens = query_tokens("verify_token未知词汇")
