@@ -1,0 +1,17 @@
+{
+  "name": "negative-elasticsearch",
+  "prompt": "项目里用了 Elasticsearch 做检索吗？没有的话直接说没有。",
+  "tags": [
+    "negative"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "output_matches": [
+      "(?i)(没有|不存在|未找到|找不到|no such|not found|does not|no kafka|no elasticsearch)"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 8
+  },
+  "answer_paths": [],
+  "notes": "出处：全副本 grep `elasticsearch` **0 命中**。理由：同上的反臆造控制组，但这一条更贴近本项目的领域——被问『你们是不是也用 ES』时最容易顺着答。"
+}

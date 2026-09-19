@@ -1,0 +1,23 @@
+{
+  "name": "crossfile-subprocess-env-scrub",
+  "prompt": "启动子进程时，父进程的环境变量哪些会被过滤掉？这套规则写在哪个文件？",
+  "tags": [
+    "crossfile",
+    "semantic-gap"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "subprocess"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 12
+  },
+  "answer_paths": [
+    "packages/subprocess/subprocess/src/index.ts"
+  ],
+  "notes": "出处：packages/subprocess/subprocess/src/index.ts `scrubbedParentEnv` 与 `SENSITIVE_ENV_PATTERN`。理由：L1 的 L-008 已证明这是典型的『中文意图 vs 英文代码』零词法重叠案例（环境变量/过滤 ↔ env/scrub）。作为 L2 里的语义缺口探针：若 A/B 都失败，说明词法检索在这类问题上确实无能为力（对应 ADR-14 的 R2）。"
+}

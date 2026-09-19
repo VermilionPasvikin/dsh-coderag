@@ -1,0 +1,22 @@
+{
+  "name": "locate-tool-timeout-default",
+  "prompt": "工具调用默认多久算超时？这个默认值定义在哪个文件？",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "DEFAULT_TOOL_CALL_TIMEOUT_MS"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 10
+  },
+  "answer_paths": [
+    "packages/mcp/mcp-client/src/index.ts"
+  ],
+  "notes": "出处：packages/mcp/mcp-client/src/index.ts:37 `const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000`。理由：刻意把 MCP 这个英文线索拿掉，只留中文『工具调用超时』，考验检索能否补上标识符缺口。"
+}

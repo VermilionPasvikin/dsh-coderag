@@ -1,0 +1,24 @@
+{
+  "name": "crossfile-skill-precedence",
+  "prompt": "项目自带的技能是怎么被发现的？如果两个技能重名，谁生效？请把相关的文件都列出来。",
+  "tags": [
+    "crossfile"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "skill-filesystem",
+      "BUNDLED_SKILL_RANK"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 12
+  },
+  "answer_paths": [
+    "packages/skill/skill-filesystem/src/index.ts",
+    "packages/skill/skill/src/index.ts"
+  ],
+  "notes": "出处：skill-filesystem/src/index.ts:723 `discoverRoot`（发现）＋ skill/src/index.ts:28 `BUNDLED_SKILL_RANK`、:78 `readonly rank`（同层同名按 rank 决胜）。理由：『发现』与『谁生效』分属两个包，单文件检索答不全；两个正则分别对应两处证据。"
+}

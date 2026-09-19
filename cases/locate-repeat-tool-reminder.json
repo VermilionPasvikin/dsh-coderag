@@ -1,0 +1,22 @@
+{
+  "name": "locate-repeat-tool-reminder",
+  "prompt": "助手连续好几次用完全一样的参数调用同一个工具时，系统会怎么提醒它？给我实现这个提醒的文件路径就行。",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "repeat-tool-reminder"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 10
+  },
+  "answer_paths": [
+    "packages/guard/repeat-tool-reminder/src/index.ts"
+  ],
+  "notes": "出处：packages/guard/repeat-tool-reminder/src/index.ts:63 `GENTLE_REMINDER`、:199-202 阈值判定与 `detailedReminder`。理由：纯中文行为描述，代码里的词是 reminder/remind，中文『提醒』猜不到；配 tools_called 同时测检索质量与工具采纳意愿。"
+}

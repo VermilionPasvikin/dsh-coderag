@@ -1,0 +1,25 @@
+{
+  "name": "crossfile-tool-cancel-code",
+  "prompt": "工具还没真正执行就被取消时用的那个错误码，在哪定义、在哪写进结果、又被哪个检查点策略复用？列文件。",
+  "tags": [
+    "crossfile"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "core/tools",
+      "agent-loop"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 12
+  },
+  "answer_paths": [
+    "packages/core/tools/src/index.ts",
+    "packages/core/agent-loop/src/tool-calls.ts",
+    "packages/session/session-checkpoint-policy/src/index.ts"
+  ],
+  "notes": "出处：core/tools/src/index.ts:469 `TOOL_ABORTED_BEFORE_DISPATCH`（定义）＋ core/agent-loop/src/tool-calls.ts:257（写进结果）＋ session-checkpoint-policy/src/index.ts:47（复用）。理由：『定义处 + 使用处』三文件链，是跨文件理解的标准形态。"
+}

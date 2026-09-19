@@ -1,0 +1,25 @@
+{
+  "name": "crossfile-goal-round-limit",
+  "prompt": "目标模式里轮次上限的默认值是多少？它存在哪、又在哪儿触发封锁？列文件。",
+  "tags": [
+    "crossfile"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "256",
+      "goal"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 12
+  },
+  "answer_paths": [
+    "packages/goal/goal/src/index.ts",
+    "packages/goal/goal/src/fold.ts",
+    "packages/goal/goal-round-driver/src/index.ts"
+  ],
+  "notes": "出处：goal/goal/src/index.ts:244 `defaultMaxGoalRounds: z.number().default(256)` ＋ fold.ts:112（随状态持久化）＋ goal-round-driver/src/index.ts:166（触发封锁）。理由：默认值 → 持久化 → 封锁三处，且要求报出具体数字 256，答案可机械判定。"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "locate-spill-notice",
+  "prompt": "工具输出太长被存到磁盘以后，模型看到的那段提示文本是谁生成的？给我文件路径。",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "notice"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 10
+  },
+  "answer_paths": [
+    "packages/spill/spill-policy/src/notice.ts"
+  ],
+  "notes": "出处：packages/spill/spill-policy/src/notice.ts:20 `formatSpillNotice`。理由：中文问『提示文本』，代码里是 notice/format…，词形不重叠；答案是一个小而专一的文件，适合 locate。"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "locate-image-count-limit",
+  "prompt": "一条消息里最多能附几张图片？这个上限定义在哪个文件？",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "DEFAULT_MAX_IMAGES_PER_MESSAGE"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 10
+  },
+  "answer_paths": [
+    "packages/attachment/attachment-local/src/index.ts"
+  ],
+  "notes": "出处：packages/attachment/attachment-local/src/index.ts:36 `export const DEFAULT_MAX_IMAGES_PER_MESSAGE = 20`。理由：先要找出常量名（中文问句里没有任何标识符），再定位文件；答案含具体数字，可机械断言。"
+}

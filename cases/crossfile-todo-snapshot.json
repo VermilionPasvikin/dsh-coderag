@@ -1,0 +1,25 @@
+{
+  "name": "crossfile-todo-snapshot",
+  "prompt": "整份待办清单是怎么被存进会话里的？以后检索会话时它又是怎么变成可搜索文本的？列文件。",
+  "tags": [
+    "crossfile"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "tool-todo",
+      "session-query"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 12
+  },
+  "answer_paths": [
+    "packages/todo/tool-todo/src/types.ts",
+    "packages/todo/tool-todo/src/index.ts",
+    "packages/session-query/session-query/src/extraction.ts"
+  ],
+  "notes": "出处：tool-todo/src/types.ts:31 `'todo/write'`（事件载荷）＋ tool-todo/src/index.ts:210 `session.append('todo/write', ...)`（写入）＋ session-query/src/extraction.ts:29 `case 'todo/write':`（检索提取）。理由：跨『写会话』与『被检索』两侧，且两个包名都要说出来。"
+}

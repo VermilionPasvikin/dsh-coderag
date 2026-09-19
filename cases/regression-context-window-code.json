@@ -1,0 +1,20 @@
+{
+  "name": "regression-context-window-code",
+  "prompt": "`CONTEXT_WINDOW_EXCEEDED_CODE` 定义在哪个文件？",
+  "tags": [
+    "regression",
+    "identifier"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "output_matches": [
+      "error\\.ts|llm/llm"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 8
+  },
+  "answer_paths": [
+    "packages/llm/llm/src/error.ts"
+  ],
+  "notes": "出处：packages/llm/llm/src/error.ts:25。理由：同上的回归题；这条同时是 L1 里 T3-13 修过的『标识符 + 中文』形态，用来确认端到端层面也不回退。"
+}

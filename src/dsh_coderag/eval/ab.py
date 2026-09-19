@@ -90,12 +90,24 @@ class Assertions:
 
 @dataclass(frozen=True)
 class Case:
-    """One L2 case: a prompt plus the assertions its run must satisfy."""
+    """One L2 case: a prompt plus the assertions its run must satisfy.
+
+    `answer_paths` and `notes` are review metadata: they never affect scoring.
+    `answer_paths` names the files a correct answer should be based on, which
+    lets a test check they are inside the indexed corpus (a case whose answer
+    is filtered out of the index would be unfair to the retrieval group).
+    """
 
     name: str
     prompt: str
     tags: tuple[str, ...]
     expect: Assertions
+    answer_paths: tuple[str, ...] = ()
+    notes: str | None = None
+
+
+CASE_KEYS = frozenset({"name", "prompt", "tags", "assert", "answer_paths", "notes"})
+"""Top-level case fields; anything else is a typo and fails the load."""
 
 
 def load_cases(directory: Path) -> list[Case]:
@@ -123,7 +135,7 @@ def _load_case(path: Path) -> Case:
         raise AbError(f"{path}: 无法解析：{exc}") from exc
     if not isinstance(payload, dict):
         raise AbError(f"{path}: 顶层必须是 JSON 对象")
-    unknown = sorted(set(payload) - {"name", "prompt", "tags", "assert"})
+    unknown = sorted(set(payload) - CASE_KEYS)
     if unknown:
         raise AbError(f"{path}: 未知字段 {unknown}")
     name = payload.get("name")
@@ -135,8 +147,18 @@ def _load_case(path: Path) -> Case:
     tags_payload = payload.get("tags", [])
     if not isinstance(tags_payload, list) or not all(isinstance(t, str) for t in tags_payload):
         raise AbError(f"{path}: tags 必须是字符串数组")
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        raise AbError(f"{path}: notes 必须是字符串")
     expect = _parse_assertions(payload.get("assert", {}), path)
-    return Case(name=name, prompt=prompt, tags=tuple(tags_payload), expect=expect)
+    return Case(
+        name=name,
+        prompt=prompt,
+        tags=tuple(tags_payload),
+        expect=expect,
+        answer_paths=tuple(_string_list(payload.get("answer_paths", []), path, "answer_paths")),
+        notes=notes,
+    )
 
 
 def _parse_assertions(payload: Any, path: Path) -> Assertions:
@@ -645,6 +667,8 @@ def _case_result(case: Case, attempts: list[dict[str, Any]], trials: int) -> dic
         "name": case.name,
         "tags": list(case.tags),
         "prompt": case.prompt,
+        "answer_paths": list(case.answer_paths),
+        "notes": case.notes,
         "attempts": attempts,
         "successes": successes,
         "trials": trials,

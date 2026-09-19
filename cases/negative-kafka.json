@@ -1,0 +1,17 @@
+{
+  "name": "negative-kafka",
+  "prompt": "这个仓库里有 Kafka 相关的集成代码吗？如果没有就直说没有，不要臆造。",
+  "tags": [
+    "negative"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "output_matches": [
+      "(?i)(没有|不存在|未找到|找不到|no such|not found|does not|no kafka|no elasticsearch)"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 8
+  },
+  "answer_paths": [],
+  "notes": "出处：全副本 grep（排除 .git/node_modules/.coderag）`kafka` **0 命中**。理由：反臆造控制组（EVAL §2.9 与 RL-06 的同一个根因：空结果会被读成『不存在』，也可能被读成『我再编一个』）。断言只要求出现『没有/not found』一类措辞。"
+}
