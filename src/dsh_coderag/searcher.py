@@ -34,6 +34,51 @@ PUNCTUATION_QUERY_HINT = (
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 
+# ── 结构化加分（PROJECT.md §3.3 第 3 步）─────────────────────────────────
+# Selection is by score, output stays in source order (ADR-05).
+CANDIDATE_POOL_FACTOR = 4
+"""Fetch k * this many candidates before re-ranking, so a demoted result can
+still be promoted into the top k. Must not be smaller than the longest
+demotion chain we expect to undo."""
+
+CANDIDATE_POOL_MIN = 20
+"""Absolute floor for the candidate pool, so a small k still sees the field."""
+
+SYMBOL_MATCH_BOOST = 2.0
+"""bm25 delta subtracted when a chunk's symbol_name matches a query identifier.
+
+Exact symbol equality is a strong, cheap signal (PROJECT.md §3.3). The value
+is deliberately small: it should break near-ties, not override a much better
+lexical match."""
+
+_TEST_PATH = re.compile(r"(^|/)(tests?|__tests__)/|\.(spec|test)\.[^/]*$")
+"""Paths whose matches are demoted: a test asserts on a symbol, it rarely
+defines it. A magnitude-free demotion (see selection_key) is used instead of a
+tuned penalty, because bm25's scale is corpus-dependent."""
+
+
+def _is_test_path(path: str) -> bool:
+    """Whether a workspace-relative path lives in a test tree or test file."""
+    return _TEST_PATH.search(path) is not None
+
+
+def query_symbols(query: str) -> frozenset[str]:
+    """ASCII identifiers in a query, used for exact `symbol_name` matching."""
+    return frozenset(_IDENTIFIER.findall(query))
+
+
+def selection_key(hit: Hit, symbols: frozenset[str]) -> tuple[bool, float]:
+    """Sort key used to pick the top k candidates before source ordering.
+
+    Non-test chunks always precede test chunks (``False`` < ``True``); within a
+    tier the bm25 score decides, with an exact `symbol_name` match subtracting
+    ``SYMBOL_MATCH_BOOST``. Lower is better, matching SQLite's bm25.
+    """
+    score = hit.score
+    if hit.symbol_name is not None and hit.symbol_name in symbols:
+        score -= SYMBOL_MATCH_BOOST
+    return (_is_test_path(hit.path), score)
+
 _TYPE_KINDS = frozenset({"class", "struct", "union", "interface"})
 _NAME_NODE_TYPES = frozenset(
     {
@@ -67,8 +112,10 @@ def search(
 ) -> SearchResult:
     """Search the index under root and always return a structured status.
 
-    The best k chunks are selected by bm25, re-sorted into source order and
-    then trimmed to max_tokens; the number dropped is reported as omitted.
+    Candidates are ranked by bm25, then re-ranked by `selection_key` (test
+    paths demoted, exact `symbol_name` matches boosted, PROJECT.md 3.3) before
+    the best k are chosen; the survivors are re-sorted into source order and
+    trimmed to max_tokens, with the number dropped reported as omitted.
     path restricts the search to a workspace-relative subdirectory (or file);
     None searches the whole workspace.
     """
@@ -104,15 +151,16 @@ def search(
         files, chunks = _index_counts(connection)
         punctuation_only = _is_punctuation_only(query)
         match = None if punctuation_only else _build_match(query)
+        symbols = query_symbols(query)
         candidates = (
             []
             if match is None
-            else _search(connection, match, k, path_prefix)
+            else _search(connection, match, k, path_prefix, symbols)
         )
         if not candidates and match is not None:
             recall = _build_recall_match(query)
             if recall is not None:
-                candidates = _search(connection, recall, k, path_prefix)
+                candidates = _search(connection, recall, k, path_prefix, symbols)
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
@@ -163,7 +211,14 @@ def _search(
     match: str,
     k: int,
     path_prefix: str | None = None,
+    symbols: frozenset[str] = frozenset(),
 ) -> list[Hit]:
+    """Select the k best chunks, then return them in source order (ADR-05).
+
+    A wider candidate pool than k is fetched first so structural demotion or
+    an exact symbol match can promote a chunk that bm25 alone would drop.
+    """
+    pool = max(k * CANDIDATE_POOL_FACTOR, CANDIDATE_POOL_MIN)
     sql = """
         SELECT f.path, c.seq, c.start_line, c.end_line, c.symbol_kind,
                c.symbol_name, c.text, bm25(chunks_fts)
@@ -178,7 +233,7 @@ def _search(
         sql += " AND (f.path = ? OR f.path LIKE ? ESCAPE '\\')"
         params.extend([escaped, f"{escaped}/%"])
     sql += " ORDER BY bm25(chunks_fts), c.id LIMIT ?"
-    params.append(k)
+    params.append(pool)
     rows = connection.execute(sql, params).fetchall()
     hits = [
         Hit(
@@ -193,6 +248,10 @@ def _search(
         )
         for path, seq, start_line, end_line, symbol_kind, symbol_name, text, score in rows
     ]
+    # Stable sort: ties keep the SQL order (bm25, then c.id), so selection stays
+    # deterministic (TESTING.md 3.4).
+    hits.sort(key=lambda hit: selection_key(hit, symbols))
+    del hits[k:]
     # ADR-05: selection is by score, but output follows source order.
     hits.sort(key=lambda hit: (hit.path, hit.start_line))
     return hits
