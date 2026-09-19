@@ -44,14 +44,23 @@
 - **仍未实现**：§5.3.1 的单字中文查询退化为 `LIKE` + `low_confidence: true`（当前单字走普通
   FTS 短语，命中率未验证）。
 
-## 检索：exact 查询的定义处被使用处与测试文件压过（发现于 T3-03）
+## 检索：exact 查询的定义处被使用处与测试文件压过（发现于 T3-03，T3-02b 复测）
 
 - 现象：裸标识符查询能命中，但**定义处排在第 3–5 名**。例：`CONTEXT_WINDOW_EXCEEDED_CODE`
   的前 4 条全是 `*.spec.ts`（compaction-basic、llm-pi-ai 的测试），定义处
   `packages/llm/llm/src/error.ts` 第 5；`SANDBOX_MODES` 前 3 条是 `invariant.ts`，
   定义处 `session-mode.ts` 第 4。
-- 后果：`k=5` 时 exact 桶在 rank 边缘压线，任何轻微打分变化就会翻成未命中；EVAL.md §2.7
-  对 exact 的阈值是 0.90，这个排名分布没有余量。
+- **30 条 golden 集复测（T3-02b，修正 A4 判据后）**：exact 桶 S@5 = **0.833 (10/12)**，
+  未达 EVAL.md §2.7 的 0.90。两条失败经归因均为 **A4（排名过低）**：
+  - `L-013 ANONYMOUS_USER_ID_FILE_NAME` → `k=5` 返回的 5 条**全部**是
+    `packages/identity/anonymous-user-id/tests/anonymous-user-id.spec.ts`，定义处
+    `src/index.ts` 不在其中；`k=50` 才把定义处纳入候选集。
+  - `L-018 DEFAULT_FILE_SEARCH_EXCLUDED_DIRECTORIES` → `k=5` 返回 2 条
+    `file-reference-local/src/index.ts`（使用方）+ 3 条 `tests/search.spec.ts`，
+    定义处 `src/search.ts` 被挤出前 5。
+- 后果：`k=5` 时 exact 桶在 rank 边缘压线，任何轻微打分变化就会翻成未命中。因为失败是
+  **排序**而非分词/索引/分块，修它不需要向量（EVAL.md §2.8 的 `A4`）。
 - 建议：路径/符号信号加权——测试路径（`tests/`、`*.spec.*`）降权，声明定义处加权
   （§3.3 第 3 步「结构化加分」目前未实现）。
+- 关联：本条与 `A4` 的判据修正（`bd9fd8d`）相互独立——修好判据才看见 A4。
 
