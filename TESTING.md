@@ -346,7 +346,7 @@ def test_filter_does_not_swallow_environment_module(tmp_path):
 这是我在 PoC 中实际踩到的坑（`PROJECT.md` §5.3.1）。
 
 ```python
-# tests/test_text.py
+# tests/test_text.py（对称性）+ tests/test_cjk_recall.py（精度/召回；T3-13 落地）
 from dsh_coderag.text import to_bigrams
 
 def test_bigrams_are_symmetric_between_index_and_query():
@@ -354,19 +354,19 @@ def test_bigrams_are_symmetric_between_index_and_query():
     text = "校验用户令牌的有效性"
     assert to_bigrams(text) == "校验 验用 用户 户令 令牌 牌的 的有 有效 效性"
 
-def test_two_char_cjk_word_is_retrievable(indexed_cjk_repo):
+def test_two_char_cjk_word_is_retrievable(cjk_corpus):
     """M2：2 字中文词必须能检索到 —— 这是 trigram 方案失败、改用 bigram 的直接原因。"""
-    result = search(indexed_cjk_repo, "令牌", k=5)
+    result = search(cjk_corpus, "令牌", k=5)
     assert any("token" in h.path for h in result.hits), f"2 字词召回失败: {[h.path for h in result.hits]}"
 
-def test_precision_mode_matches_exact_substring(indexed_cjk_repo):
+def test_precision_mode_matches_exact_substring(cjk_corpus):
     """M2：精度模式（连续 bigram 短语）等价于精确子串匹配。"""
-    result = search(indexed_cjk_repo, "用户令牌", k=5)
+    result = search(cjk_corpus, "用户令牌", k=5)
     assert [h.path for h in result.hits] == ["src/auth/token.py"]
 
-def test_recall_mode_used_when_precision_returns_nothing(indexed_cjk_repo):
+def test_recall_mode_used_when_precision_returns_nothing(cjk_corpus):
     """M2：精度模式返回 0 时必须自动降级到召回模式，而不是直接返回空。"""
-    result = search(indexed_cjk_repo, "认证令牌方式", k=5)
+    result = search(cjk_corpus, "认证令牌方式", k=5)
     assert len(result.hits) > 0
 
 def test_latin_identifier_is_not_bigrammed():

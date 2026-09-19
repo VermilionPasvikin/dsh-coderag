@@ -1194,13 +1194,14 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | **T3-04d** | 实现 `golden_version` 校验：不匹配时**直接失败**，除非显式 `--rebaseline` | `src/dsh_coderag/eval/runner.py` | `python -m pytest tests/test_golden_version.py -q` | 版本不符时报错退出 | T3-03 | 1h |
 | **T3-02b** | 补足 **B 批 +20 条**（8 exact / 7 crossfile / 5 natural）。**A 批跑出第一组数字后再做，按结果决定重点补哪类** | `eval/tasks.jsonl` | 同 T3-02a 的校验命令 | 30 条全部通过校验 | T3-04c | 3h |
 | T3-05 | A 组基线：用 `dsh-eval-harness` 在 `eval-baseline` profile 上跑（`EVAL.md` §3.3） | `eval/runs/a-v1/` | `eval_run(cases_dir="cases", profile="eval-baseline", trials=3)` | 产出基线报告 | T3-00, T3-02a | 2h |
-| T3-06 | B 组：在 `eval-coderag` profile 上跑，产出对照报告 | `docs/eval-report-m3.md` | `eval_run(..., profile="eval-coderag", trials=3)` | 报告含**分层指标 + 归因分布 + 逐条 diff** | T3-04d, T3-05 | 2h |
+| T3-06 | B 组：在 `eval-coderag` profile 上跑，产出对照报告 | `docs/eval-report-m3.md` | `eval_run(..., profile="eval-coderag", trials=3)` | 报告含**分层指标 + 归因分布 + 逐条 diff** | T3-04d, T3-05, T3-13 | 2h |
 | **T3-07** | **决策门 M3-DECIDE**：按 `EVAL.md` §2.8 的**精确 R2 条件**裁决（见下） | `docs/adr/ADR-14-semantic-retrieval.md` | 文档含明确结论 + 支撑数据 + 归因分布 | 三条规则之一被明确命中 | T3-06 | 1h |
 | T3-08 | （条件）若 T3-07 判定需要：Ollama + `bge-m3`，实现 embedding 生成与缓存 | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 同一文本两次调用返回相同向量（缓存生效） | T3-07 = R2 | 3h |
 | T3-09 | （条件）实现向量存储与暴力余弦检索（numpy，≤10 万 chunk 不引入向量库） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "vector_search" -q` | top-k 与暴力计算一致 | T3-08 | 2h |
 | T3-10 | （条件）实现 RRF 融合（k=60，见 §5.3） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "rrf" -q` | 用已知输入验证融合分数 | T3-09 | 1.5h |
 | T3-11 | （条件）跑 C 组（混合），与 B 组对比 | `docs/eval-report-m3c.md` | `eval_run(..., profile="eval-coderag-vector")` | 报告含三组对照表 | T3-10 | 2h |
 | T3-12 | 回归门禁脚本：L1（pytest）+ L2（`eval_gate`）一键重跑 | `scripts/eval-gate.sh` | `bash scripts/eval-gate.sh` | 退出码 0/1；输出四项指标 + 回归条数 | T3-02b, T3-06 | 1h |
+| **T3-13** | **R3 的 A1 修复**：实现 §5.3.1 早已规定的**精度→召回降级**（精度模式 AND 落空时用 OR 重试一次） | `src/dsh_coderag/searcher.py`, `tests/test_cjk_recall.py` | `python -m pytest tests/test_cjk_recall.py -q` | M2 三条中文语义全绿；「标识符 + 中文」混合查询命中；两种模式都空时仍返回 `status: empty` | T3-04b | 1h |
 
 **T3-07 的三条判定规则（事先写下，避免事后找理由）**
 
@@ -1295,13 +1296,14 @@ T3-04b  ← T3-04
 T3-04c  ← T3-04
 T3-04d  ← T3-03
 T3-05  ← T3-00, T3-02a
-T3-06  ← T3-04d, T3-05
+T3-06  ← T3-04d, T3-05, T3-13
 T3-07  ← T3-06
 T3-08  ← T3-07
 T3-09  ← T3-08
 T3-10  ← T3-09
 T3-11  ← T3-10
 T3-12  ← T3-02b, T3-06
+T3-13  ← T3-04b
 T4-01  ← T2-17
 T4-02  ← T4-01
 T4-03  ← T4-01
@@ -1366,6 +1368,7 @@ T4-10  ← T4-08
 | T3-03 | 已完成 | `$ python -m pytest tests/test_eval.py -q`（forBSH 环境）<br>`...........................s                                             [100%]`<br>（27 passed / 1 skipped；跳过的 1 条是需 `CODERAG_EVAL_CORPUS` 门控的 A 批集成用例）<br>`$ CODERAG_EVAL_CORPUS=/tmp/dsh-coderag-t3-03-corpus python -m pytest tests/test_eval.py -q`<br>`............................                                             [100%]`<br>（28 passed，A 批集成用例实跑）<br>被评测语料（DSH checkout 的 rsync 副本，遵守 RL-01/S-03 不原地索引）：<br>`$ python -m dsh_coderag index /tmp/dsh-coderag-t3-03-corpus`<br>`indexed 3967 files, 63046 chunks into /private/tmp/dsh-coderag-t3-03-corpus/.coderag/index.sqlite3`<br>`$ python -m dsh_coderag.eval run --tasks eval/tasks.jsonl --root /tmp/dsh-coderag-t3-03-corpus --k 5`<br>`task_count=10 hit_count=1 k=5`<br>`class_counts: {"exact": {"total": 4, "hit": 1}, "crossfile": {"total": 4, "hit": 0}, "natural": {"total": 2, "hit": 0}}`<br>`L-001  exact     hit=True  rank=1    status=ready   matched=packages/mcp/mcp-client/src/index.ts`<br>`L-002  exact     hit=False rank=None status=empty   matched=None`<br>`L-003  exact     hit=False rank=None status=empty   matched=None`<br>`L-004  exact     hit=False rank=None status=empty   matched=None`<br>`L-005  crossfile hit=False rank=None status=empty   matched=None`<br>`L-006  crossfile hit=False rank=None status=empty   matched=None`<br>`L-007  crossfile hit=False rank=None status=empty   matched=None`<br>`L-008  crossfile hit=False rank=None status=empty   matched=None`<br>`L-009  natural   hit=False rank=None status=empty   matched=None`<br>`L-010  natural   hit=False rank=None status=empty   matched=None`<br>（逐条结果 JSON 由 `build_report`/`write_report` 产出；A 批全部 10 条跑通） | `84b1c4e` | 新增 `src/dsh_coderag/eval/`：`tasks.py`（`load_tasks`/`validate_tasks`）、`runner.py`（`run_eval`，直接复用生产 `searcher.search`，k=5 按 EVAL §2.5 选项 A）、`report.py`（逐 query JSON）、`__main__.py`（CLI）、`__init__.py`。**纯 Python、不调 LLM**。测试 27 例用 tmp_path 合成语料（T-03/T-04），1 条 A 批集成用例由环境变量门控。**重要发现**：A 批仅 1/10 命中——9 条含中文 query 全部 `status: empty`，根因是 `_build_match` 把 CJK bigram 一并 AND（裸标识符可回到 top-5：名次 5/3/4）；且 exact 定义处在裸查询下也只排 3–5（被 spec/使用处压过）。二者均**不在 T3-03 范围内**，按 AGENTS §9 记入 `docs/backlog.md`，未顺手修。ruff / `mypy --strict src/` 干净，全量 249 例通过 |
 | T3-04 | 已完成 | `$ python -m pytest tests/test_metrics.py -q`（forBSH 环境）<br>`............................                                             [100%]`<br>（28 passed，退出码 0。期望值全部在测试里**手工算出**、不复用实现：Wilson `24/30 → low=0.626943 high=0.904949`，与 EVAL §2.6 的「≈[0.63, 0.90]」一致；边界 `0/10 → [0, 0.277533]`、`10/10 → [0.722467, 1.0]` 不越界；MRR ranks `[1,2,None,4] → 0.4375`；`must_not` 只在 k 前缀内判负；空桶的 success / interval / MRR / token 一律报 `None` 而非 `0.0`；分层测试证明 overall 是「每条 query 等权」的 1/4，而不是类均值 (1.0+0.0)/2）<br>附：同模块跑真实 A 批（`/tmp/dsh-coderag-t3-03-corpus`）得到第一组分层数字：<br>`overall    n=10  S@1=0.100 [0.02,0.40]  S@3=0.100 [0.02,0.40]  S@5=0.100 [0.02,0.40]  MRR=0.100  tokens_med=0`<br>`exact      n=4   S@1=0.250 [0.05,0.70]  S@3=0.250 [0.05,0.70]  S@5=0.250 [0.05,0.70]  MRR=0.250  tokens_med=0`<br>`crossfile  n=4   S@1=0.000 [0.00,0.49]  S@3=0.000 [0.00,0.49]  S@5=0.000 [0.00,0.49]  MRR=0.000  tokens_med=0`<br>`natural    n=2   S@1=0.000 [0.00,0.66]  S@3=0.000 [0.00,0.66]  S@5=0.000 [0.00,0.66]  MRR=0.000  tokens_med=0` | `f238f09` | 新增 `src/dsh_coderag/eval/metrics.py`：`count_hits`/`is_hit_at`/`success_at_k`、`mean_reciprocal_rank`、`median_tokens`、`wilson_interval`（用 `statistics.NormalDist`，**零新依赖**）、`compute_metrics`、`layered_metrics`（overall + 3 桶，宏平均）。`must_not_paths` 与 `expect_symbols` 在**每个 k 的前缀上**判定；空桶显式报 `None`。**未改 `__init__.py` / `report.py`**——指标接线属 T3-04c/T3-06。全量 277 例通过，ruff / `mypy --strict src/` 干净 |
 | **T3-04b** | 已完成 | `$ python -m pytest tests/test_attribute.py -q`（forBSH 环境）<br>`..............................                                           [100%]`<br>（30 passed，退出码 0。`classify` 对 7 个码各有一条纯样例，A1/A3 的判据是**目标文件**而非全语料——全语料判据会误标 L-004）<br>A 批真实归因（`/tmp/dsh-coderag-t3-03-corpus`，9 条失败）：<br>`L-002 exact     A1  query 要求命中目标文件里不存在的词 ['定义','义在','在哪']；其中 ['义在','在哪'] 在整个索引中也不存在`<br>`L-003 exact     A1  同上`<br>`L-004 exact     A1  query 要求命中目标文件里不存在的词 ['的定','定义']`<br>`L-005 crossfile A1  目标文件缺少 18 个词，其中 10 个全索引皆无`<br>`L-006 crossfile A5  query 的任何一个词都不出现在目标文件的索引文本中`<br>`L-007 crossfile A5  同上`<br>`L-008 crossfile A1  目标文件缺少 16 个词，其中 11 个全索引皆无`<br>`L-009 natural   A5  同上`<br>`L-010 natural   A5  同上`<br>`distribution: {"overall": {"A1": 5, "A5": 4}, "exact": {"A1": 3}, "crossfile": {"A1": 2, "A5": 2}, "natural": {"A5": 2}}`<br>`natural_a5_share: 1.0` | `76b49e8` | 新增 `src/dsh_coderag/eval/attribute.py`：`collect_evidence`（只读地查文件系统 / `files`+`chunks_fts` / 一次 `probe_k=50` 广搜）+ 纯函数 `classify`（固定优先级 A4→A6→A7/A2→A5→A1→A3）+ `attribute_run` / `attribution_distribution` / `natural_a5_share` / `build_attribution_report`，**零新依赖**。⚠️ **R2 的两项字面条件都已满足**（`S@5=0.10<0.80`、natural 失败 100% 为 A5），但 §2.8 还要求「A1–A4/A6/A7 全部修完再考虑向量」，而 5 条 A1 恰是实现 bug；且当前只是 A 批 10 条。**T3-07 必须显式处理这个冲突，不能直接照字面判 R2**。全量 307 例通过，ruff / `mypy --strict src/` 干净 |
+| **T3-13** | 已完成 | `$ python -m pytest tests/test_cjk_recall.py -q`（forBSH 环境）<br>`......                                                                   [100%]`<br>（6 passed，退出码 0：2 字词可检索；精度模式 `用户令牌` 只命中 `token.py`、排除只含「用户」「令牌」的 `separate.py`；`令牌未定义词` 精度落空后由召回命中；`verify_token未定义词` 混合查询命中；两种模式都空仍是 `status: empty` + hint；标点路由不经过召回）<br>同一语料（`/tmp/dsh-coderag-t3-03-corpus`，查询侧改动**无需重建索引**）A 批前后对比：<br>`exact     S@5 0.250 [0.05,0.70] -> 1.000 [0.51,1.00]   MRR 0.250 -> 0.412`<br>`overall   S@5 0.100 [0.02,0.40] -> 0.400 [0.17,0.69]   MRR 0.100 -> 0.165`<br>`crossfile S@5 0.000 -> 0.000` ｜ `natural S@5 0.000 -> 0.000`<br>逐条：L-002 `empty → ready rank 5`、L-003 `empty → ready rank 5`、L-004 `empty → ready rank 4`；其余 6 条仍未命中<br>归因：`{"overall":{"A1":5,"A5":4}} → {"overall":{"A1":2,"A5":4}}`，`natural_a5_share` 仍为 `1.0` | `PENDING` | 新增 `_build_recall_match`（OR 构造）与 `_join_phrases`；`search()` 仅在**精度模式 0 条**时用召回模式重试一次，两者都 0 才 `empty`——即 §5.3.1 的流程 1→2→3。**未改精度模式语义**（重叠 bigram 使 AND 等价于精确子串，新文件有断言）。因行为变化同步更新 `tests/test_attribute.py` 里依赖旧行为的 3 个用例——改成直接喂**显式失败结果**只测 collector+classifier，判据未被放宽（T-08）。**exact 桶已回到 EVAL §2.7 的 0.90 阈值之上（1.000）**；crossfile/natural 仍不达标，A5 仍是 natural 失败的全部，故 R2 的字面条件依旧成立——**T3-07 仍须处理 R2 与 §2.8「A1 先修完」的冲突**。全量 314 例通过，ruff / `mypy --strict src/` 干净 |
 | … | | | | |
 
 ---
@@ -1388,7 +1391,7 @@ T4-10  ← T4-08
 | ADR-04 | T1-12 | 索引异步化，立刻返回 taskId |
 | ADR-05 | T2-14 | 检索结果按源码顺序输出 |
 | ADR-06 | T1-13 | 索引未就绪返回结构化状态；`RL-06` 是它的红线形式 |
-| ADR-07 | T1-06, T2-19 | 中文 bigram 预处理 + 精度/召回双模式 |
+| ADR-07 | T1-06, T2-19, T3-13 | 中文 bigram 预处理 + 精度/召回双模式 |
 | ADR-08 | T2-06 | 三层安全过滤（密钥黑名单 / 忽略规则 / 内容扫描） |
 | ADR-09 | T2-09 | 索引状态与忽略规则一并持久化 |
 | ADR-10 | T2-11 | 超过文件数上限显式失败并报实际数量 |

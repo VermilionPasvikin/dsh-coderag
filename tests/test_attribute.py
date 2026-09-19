@@ -14,6 +14,7 @@ import pytest
 
 from dsh_coderag.eval.attribute import (
     VECTOR_RELEVANT,
+    Attribution,
     AttributionCode,
     FailureEvidence,
     attribute_run,
@@ -24,7 +25,7 @@ from dsh_coderag.eval.attribute import (
     natural_a5_share,
     query_tokens,
 )
-from dsh_coderag.eval.runner import run_eval
+from dsh_coderag.eval.runner import EvalResult, run_eval
 from dsh_coderag.eval.tasks import EvalTask
 from dsh_coderag.indexer import index_sync
 
@@ -96,6 +97,37 @@ def evidence(**overrides: Any) -> FailureEvidence:
     }
     fields.update(overrides)
     return FailureEvidence(**fields)
+
+
+def make_result(rank: int | None, *, status: str = "ready") -> EvalResult:
+    """A minimal `EvalResult`; only rank/status matter for attribution."""
+    return EvalResult(
+        task_id="L-001",
+        task_class="exact",
+        query="q",
+        status=status,
+        hit=rank is not None,
+        matched_path=None,
+        rank=rank,
+        returned_paths=(),
+        must_not_hit=(),
+        symbol_hit=None,
+        token_estimate=0,
+        error=None,
+    )
+
+
+def describe(task: EvalTask, result: EvalResult, corpus: Path) -> Attribution:
+    """Run the collector + classifier for one explicit failing result."""
+    collected = collect_evidence(task, result, corpus, run_k=5)
+    code, reason = classify(collected)
+    return Attribution(
+        task_id=task.id,
+        task_class=task.task_class,
+        code=code,
+        reason=reason,
+        evidence=collected,
+    )
 
 
 # ── query tokenization ──────────────────────────────────────────────────
@@ -217,18 +249,25 @@ def test_collect_and_classify_a5_on_real_index(corpus: Path) -> None:
     assert attribution.code is AttributionCode.A5
 
 
-def test_collect_and_classify_a1_for_mixed_cjk_query(corpus: Path) -> None:
+def test_collect_and_classify_a1_for_a_mixed_cjk_query(corpus: Path) -> None:
+    """The tokenizer gap that recall fallback cannot rescue still reads as A1.
+
+    The retrieval itself now hits this query (see tests/test_cjk_recall.py), so
+    the failing result is supplied explicitly: this test pins the collector and
+    classifier, not the searcher.
+    """
     task = make_task("verify_token未知词汇", ("src/other.py",))
-    run = run_eval([task], corpus, k=5)
-    attribution = attribute_run(run, [task], corpus)[0]
+    failed = make_result(rank=None, status="empty")
+    attribution = describe(task, failed, corpus)
     assert attribution.code is AttributionCode.A1
     assert "未知" in attribution.reason
 
 
 def test_collect_and_classify_a3_when_terms_span_chunks(corpus: Path) -> None:
+    """Same explicit-failure shape: all tokens in the target, none in one chunk."""
     task = make_task("alpha_one beta_two", ("src/alpha.py",))
-    run = run_eval([task], corpus, k=5)
-    attribution = attribute_run(run, [task], corpus)[0]
+    failed = make_result(rank=None, status="empty")
+    attribution = describe(task, failed, corpus)
     assert attribution.code is AttributionCode.A3
     assert attribution.evidence.target_tokens_present == ("alpha_one", "beta_two")
 
@@ -309,24 +348,19 @@ def test_natural_a5_share_is_none_without_natural_failures(corpus: Path) -> None
     assert natural_a5_share(attribute_run(run, [task], corpus)) is None
 
 
-def test_natural_a5_share_computes_the_r2_ratio(corpus: Path) -> None:
-    tasks = [
-        make_task(
-            "zzz_semantic_concept",
-            ("src/other.py",),
-            task_id="L-001",
-            task_class="natural",
-        ),
-        make_task(
-            "verify_token未知词汇",
-            ("src/other.py",),
-            task_id="L-002",
-            task_class="natural",
-        ),
-    ]
-    run = run_eval(tasks, corpus, k=5)
-    share = natural_a5_share(attribute_run(run, tasks, corpus))
-    assert share == 0.5
+def test_natural_a5_share_computes_the_r2_ratio() -> None:
+    """The R2 ratio is a pure function of the codes, so build them directly."""
+    a5 = Attribution("L-001", "natural", AttributionCode.A5, "r", evidence())
+    a1 = Attribution("L-002", "natural", AttributionCode.A1, "r", evidence())
+    assert natural_a5_share([a5]) == 1.0
+    assert natural_a5_share([a5, a1]) == 0.5
+    assert natural_a5_share([a1, a1]) == 0.0
+
+
+def test_natural_a5_share_ignores_non_natural_classes() -> None:
+    exact_a5 = Attribution("L-001", "exact", AttributionCode.A5, "r", evidence())
+    natural_a1 = Attribution("L-002", "natural", AttributionCode.A1, "r", evidence())
+    assert natural_a5_share([exact_a5, natural_a1]) == 0.0
 
 
 def test_build_attribution_report_is_json_serializable(corpus: Path) -> None:

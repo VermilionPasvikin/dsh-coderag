@@ -2,8 +2,10 @@
 
 This module turns a query into a full-text match expression, ranks chunks
 with bm25 and reports a structured status so callers never have to infer
-"nothing is there" from an empty list (RL-06). It does not build the index
-and does not render model-visible text.
+"nothing is there" from an empty list (RL-06). A query is matched in
+precision mode first (every token) and only then in recall mode (any token),
+per PROJECT.md 5.3.1. It does not build the index and does not render
+model-visible text.
 """
 
 from __future__ import annotations
@@ -107,6 +109,10 @@ def search(
             if match is None
             else _search(connection, match, k, path_prefix)
         )
+        if not candidates and match is not None:
+            recall = _build_recall_match(query)
+            if recall is not None:
+                candidates = _search(connection, recall, k, path_prefix)
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
@@ -230,11 +236,29 @@ def _is_punctuation_only(query: str) -> bool:
 
 
 def _build_match(query: str) -> str | None:
-    """Turn a query into an FTS5 MATCH expression of quoted phrases."""
-    tokens = to_bigrams(query).split()
+    """Precision match: every token must be present (AND of quoted phrases).
+
+    For a CJK run the overlapping bigrams make this equivalent to an exact
+    substring match (PROJECT.md 5.3.1).
+    """
+    return _join_phrases(to_bigrams(query).split(), " ")
+
+
+def _build_recall_match(query: str) -> str | None:
+    """Recall fallback: any token may match (OR of quoted phrases).
+
+    Used only when the precision match found nothing, so a query carrying a
+    token the corpus lacks can still hit on the tokens it does share
+    (PROJECT.md 5.3.1, step 2).
+    """
+    return _join_phrases(to_bigrams(query).split(), " OR ")
+
+
+def _join_phrases(tokens: list[str], operator: str) -> str | None:
+    """Join quoted tokens with an FTS5 operator; None when there is no token."""
     if not tokens:
         return None
-    return " ".join(_quote(token) for token in tokens)
+    return operator.join(_quote(token) for token in tokens)
 
 
 def _quote(token: str) -> str:
