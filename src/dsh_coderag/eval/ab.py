@@ -21,6 +21,11 @@ Three deliberate properties:
 * Cases are **JSON**. `EVAL.md` 3.4 shows YAML, but this project declares no
   YAML dependency and the test environment has none; see the deviation note in
   `EVAL.md` 3.6.
+* Tool names are asserted **without** DSH's MCP namespace: a logged
+  `mcp__coderag__code_search` is matched by a case that says `code_search`. The
+  raw name stays in the trace and the reports; only assertion matching folds it.
+  Without this, every MCP-tool assertion silently fails no matter how well the
+  agent performed.
 
 The session log is a header line followed by event lines:
 `{version, id, ...}` then repeated `{type, seq, time, data}`.
@@ -44,6 +49,14 @@ SESSION_LOG_RE = re.compile(r"^session\.v(?P<version>\d+)\.jsonl$")
 
 COMPRESSED_SUFFIX = ".jsonl.zstd"
 """Suffix we refuse: the runner must not need a zstd decoder to read a trace."""
+
+MCP_TOOL_NAME_RE = re.compile(r"^mcp__.*?__")
+"""DSH namespaces MCP tools as `mcp__<serverName>__<toolName>`.
+
+Cases are authored against the tool's own name (`code_search`), so assertion
+matching strips this prefix. The pattern is non-greedy so a server name that
+itself contains `__` still leaves the whole tool name intact.
+"""
 
 DEFAULT_TIMEOUT_S = 900.0
 """Wall-clock cap for one headless attempt."""
@@ -440,20 +453,33 @@ def _log_parent(path: Path) -> str | None:
 
 
 # ── assertions ──────────────────────────────────────────────────────────
+def normalize_tool_name(name: str) -> str:
+    """Strip DSH's `mcp__<server>__` namespace from a logged tool name.
+
+    Cases name the tool itself (`code_search`); DSH records the namespaced form
+    (`mcp__coderag__code_search`). Non-MCP names are returned unchanged.
+    """
+    return MCP_TOOL_NAME_RE.sub("", name, count=1)
+
+
 def evaluate(case: Case, trace: Trace) -> list[str]:
     """Return every failed assertion as a human-readable string."""
     expect = case.expect
     failures: list[str] = []
     if expect.turn_end is not None and trace.turn_end != expect.turn_end:
         failures.append(f"turn_end 期望 {expect.turn_end!r}，实际 {trace.turn_end!r}")
-    called = [call.name for call in trace.tool_calls]
+    called = [normalize_tool_name(call.name) for call in trace.tool_calls]
     if expect.tools_called and not is_subsequence(tuple(called), expect.tools_called):
         failures.append(f"tools_called {list(expect.tools_called)} 不是 {called} 的保序子序列")
     forbidden = sorted(set(called) & set(expect.tools_not_called))
     if forbidden:
         failures.append(f"调用了禁止的工具 {forbidden}")
     for tool, needles in expect.tool_args_contains.items():
-        arguments = [call.arguments for call in trace.tool_calls if call.name == tool]
+        arguments = [
+            call.arguments
+            for call in trace.tool_calls
+            if normalize_tool_name(call.name) == tool
+        ]
         if not any(all(needle in raw for needle in needles) for raw in arguments):
             failures.append(f"{tool} 的参数未同时包含 {list(needles)}")
     if expect.tool_result_contains:

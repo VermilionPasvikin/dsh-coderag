@@ -29,6 +29,7 @@ from dsh_coderag.eval.ab import (
     gate,
     is_subsequence,
     load_cases,
+    normalize_tool_name,
     parse_session,
     pass_at_k,
     pass_caret_k,
@@ -311,6 +312,46 @@ def test_evaluate_detects_tool_errors() -> None:
     assert evaluate(case(Assertions(no_tool_errors=True)), trace)
 
 
+# ── MCP tool-name namespace (option b) ──────────────────────────────────
+def test_normalize_tool_name_strips_the_mcp_namespace() -> None:
+    assert normalize_tool_name("mcp__coderag__code_search") == "code_search"
+    assert normalize_tool_name("bash") == "bash"
+    assert normalize_tool_name("code_search") == "code_search"
+
+
+def test_normalize_tool_name_keeps_a_server_name_with_underscores() -> None:
+    assert normalize_tool_name("mcp__code_rag__code_outline") == "code_outline"
+
+
+def test_evaluate_matches_a_namespaced_mcp_tool_call() -> None:
+    trace = make_trace(tool_calls=(ToolCall(name="mcp__coderag__code_search", arguments="{}"),))
+    expect = Assertions(tools_called=("code_search",), tool_args_contains={"code_search": ["{"]})
+    assert evaluate(case(expect), trace) == []
+
+
+def test_evaluate_tools_not_called_sees_through_the_namespace() -> None:
+    trace = make_trace(tool_calls=(ToolCall(name="mcp__coderag__code_search", arguments="{}"),))
+    failures = evaluate(case(Assertions(tools_not_called=("code_search",))), trace)
+    assert any("禁止的工具" in item for item in failures)
+
+
+def test_evaluate_tool_args_contains_sees_through_the_namespace() -> None:
+    trace = make_trace(
+        tool_calls=(
+            ToolCall(name="mcp__coderag__code_search", arguments='{"query":"令牌"}'),
+        )
+    )
+    assert evaluate(case(Assertions(tool_args_contains={"code_search": ["令牌"]})), trace) == []
+    missing = evaluate(case(Assertions(tool_args_contains={"code_search": ["absent"]})), trace)
+    assert any("absent" in item for item in missing)
+
+
+def test_evaluate_still_reports_the_normalized_names_it_saw() -> None:
+    trace = make_trace(tool_calls=(ToolCall(name="mcp__coderag__code_search", arguments="{}"),))
+    failures = evaluate(case(Assertions(tools_called=("code_outline",))), trace)
+    assert any("code_search" in item and "mcp__" not in item for item in failures)
+
+
 # ── reliability statistics ──────────────────────────────────────────────
 def test_pass_at_k_matches_the_hypergeometric_definition() -> None:
     assert pass_at_k(successes=2, trials=3, k=1) == pytest.approx(2 / 3)
@@ -475,6 +516,26 @@ def test_run_group_end_to_end_passes(tmp_path: Path, fake_dsh: list[str]) -> Non
     assert case["attempts"][0]["tool_calls"] == ["code_search"]
     assert case["attempts"][0]["total_tokens"] == 10
     assert case["attempts"][0]["session_log"] is not None
+
+
+def test_run_group_end_to_end_matches_a_namespaced_mcp_tool(
+    tmp_path: Path, fake_dsh: list[str]
+) -> None:
+    """A real DSH logs `mcp__coderag__code_search`; a case says `code_search`."""
+    events = [
+        {"kind": "step/start", "turn": 1, "step": 0},
+        {"kind": "tool/call", "callId": "c1", "name": "mcp__coderag__code_search",
+         "arguments": '{"query":"令牌"}'},
+        {"kind": "assistant/message",
+         "message": {"content": [{"type": "text", "text": "见 token.py"}]}, "stream": []},
+        {"kind": "turn/end", "turn": 1, "reason": {"kind": "completed"}},
+    ]
+    expect = Assertions(turn_end="completed", tools_called=("code_search",),
+                        output_contains=("token.py",))
+    result = run_fake(tmp_path, fake_dsh, events, expect=expect)
+    assert result["successes"] == 1
+    # the trace and the report keep the raw logged name
+    assert result["cases"][0]["attempts"][0]["tool_calls"] == ["mcp__coderag__code_search"]
 
 
 def test_run_group_end_to_end_reports_failures(tmp_path: Path, fake_dsh: list[str]) -> None:
