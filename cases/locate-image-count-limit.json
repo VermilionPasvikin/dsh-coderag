@@ -18,13 +18,14 @@
   "answer_paths": [
     "packages/attachment/attachment-local/src/index.ts"
   ],
-  "notes": "出处：packages/attachment/attachment-local/src/index.ts:36 `export const DEFAULT_MAX_IMAGES_PER_MESSAGE = 20`。理由：先要找出常量名（中文问句里没有任何标识符），再定位文件；答案含具体数字，可机械断言。",
+  "notes": "出处：packages/attachment/attachment-local/src/index.ts:36 `export const DEFAULT_MAX_IMAGES_PER_MESSAGE = 20`。理由：先要找出常量名（中文问句里没有任何标识符），再定位文件；答案含具体数字，可机械断言。 同类审计：仓库另有 `DEFAULT_MAX_IMAGES_PER_REQUEST = 600`（llm-deepseek 的按请求上限），与本条的「每条消息」不是同一概念；断言只认 `DEFAULT_MAX_IMAGES_PER_MESSAGE` 与 attachment-local，并加了『每个模型请求最多 600 张』这条应拒绝样例把这个区别钉住。",
   "accept": [
     "上限是 20 张，定义在 packages/attachment/attachment-local/src/index.ts。",
     "常量是 DEFAULT_MAX_IMAGES_PER_MESSAGE，见 attachment-local/src/index.ts。"
   ],
   "reject": [
     "上限是 10，定义在 packages/attachment/attachment/src/index.ts。",
+    "每个模型请求最多 600 张。",
     "没有数量限制。"
   ]
 }

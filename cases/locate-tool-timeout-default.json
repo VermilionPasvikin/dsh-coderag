@@ -1,6 +1,6 @@
 {
   "name": "locate-tool-timeout-default",
-  "prompt": "工具调用默认多久算超时？这个默认值定义在哪个文件？",
+  "prompt": "MCP 工具调用的默认超时是多少？这个默认值定义在哪个文件？",
   "tags": [
     "locate"
   ],
@@ -18,13 +18,14 @@
   "answer_paths": [
     "packages/mcp/mcp-client/src/index.ts"
   ],
-  "notes": "出处：packages/mcp/mcp-client/src/index.ts:37 `const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000`。理由：刻意把 MCP 这个英文线索拿掉，只留中文『工具调用超时』，考验检索能否补上标识符缺口。",
+  "notes": "出处：packages/mcp/mcp-client/src/index.ts:37 `const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000`。理由：MCP 工具调用的默认超时，是 PROJECT.md 约束 E-01（MCP 工具调用 60 秒超时）的锚点常量，改动前必须定位。**更正记录（人工审核，2026-09-19）**：原问句是「工具调用默认多久算超时？」——DSH 里另有 `DEFAULT_WEB_TOOL_TIMEOUT_MS=30_000`、`DEFAULT_LSP_TOOL_TIMEOUT_MS=60_000`、bash/pwsh `timeoutMs=120_000`、persistent `timeoutMs=300_000` 共 6 处工具超时默认值，泛化的「工具」措辞**不唯一**；现明确限定为 MCP 工具调用。代价是问句里出现了英文 MCP（本可 grep），但唯一性优先于「纯中文」这一设计意图。",
   "accept": [
-    "默认 60 秒，定义在 packages/mcp/mcp-client/src/index.ts（DEFAULT_TOOL_CALL_TIMEOUT_MS）。",
-    "DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000，在 mcp-client/src/index.ts。"
+    "MCP 工具调用默认 60 秒超时，定义在 packages/mcp/mcp-client/src/index.ts 的 DEFAULT_TOOL_CALL_TIMEOUT_MS。",
+    "默认 60_000 ms（DEFAULT_TOOL_CALL_TIMEOUT_MS），见 mcp-client/src/index.ts:37。"
   ],
   "reject": [
-    "默认 30 秒，在 packages/web/tool-web/src/index.ts。",
-    "没有默认超时时间。"
+    "默认 30 秒，在 packages/web/tool-web/src/index.ts（DEFAULT_WEB_TOOL_TIMEOUT_MS）。",
+    "默认 120 秒，在 packages/shell/bash-local/src/index.ts。",
+    "没有默认超时。"
   ]
 }
