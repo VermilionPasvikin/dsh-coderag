@@ -1194,7 +1194,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | **T3-04d** | 实现 `golden_version` 校验：不匹配时**直接失败**，除非显式 `--rebaseline` | `src/dsh_coderag/eval/runner.py` | `python -m pytest tests/test_golden_version.py -q` | 版本不符时报错退出 | T3-03 | 1h |
 | **T3-02b** | 补足 **B 批 +20 条**（8 exact / 7 crossfile / 5 natural）。**A 批跑出第一组数字后再做，按结果决定重点补哪类** | `eval/tasks.jsonl` | 同 T3-02a 的校验命令 | 30 条全部通过校验 | T3-04c | 3h |
 | T3-05 | A 组基线：用 `dsh-eval-harness` 在 `eval-baseline` profile 上跑（`EVAL.md` §3.3） | `eval/runs/a-v1/` | `eval_run(cases_dir="cases", profile="eval-baseline", trials=3)` | 产出基线报告 | T3-00, T3-02a | 2h |
-| T3-06 | B 组：在 `eval-coderag` profile 上跑，产出对照报告 | `docs/eval-report-m3.md` | `eval_run(..., profile="eval-coderag", trials=3)` | 报告含**分层指标 + 归因分布 + 逐条 diff** | T3-04d, T3-05, T3-13 | 2h |
+| T3-06 | B 组：在 `eval-coderag` profile 上跑，产出对照报告 | `docs/eval-report-m3.md` | `eval_run(..., profile="eval-coderag", trials=3)` | 报告含**分层指标 + 归因分布 + 逐条 diff** | T3-04d, T3-05, T3-13, T3-14 | 2h |
 | **T3-07** | **决策门 M3-DECIDE**：按 `EVAL.md` §2.8 的**精确 R2 条件**裁决（见下） | `docs/adr/ADR-14-semantic-retrieval.md` | 文档含明确结论 + 支撑数据 + 归因分布 | 三条规则之一被明确命中 | T3-06 | 1h |
 | T3-08 | （条件）若 T3-07 判定需要：Ollama + `bge-m3`，实现 embedding 生成与缓存 | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 同一文本两次调用返回相同向量（缓存生效） | T3-07 = R2 | 3h |
 | T3-09 | （条件）实现向量存储与暴力余弦检索（numpy，≤10 万 chunk 不引入向量库） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "vector_search" -q` | top-k 与暴力计算一致 | T3-08 | 2h |
@@ -1202,6 +1202,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T3-11 | （条件）跑 C 组（混合），与 B 组对比 | `docs/eval-report-m3c.md` | `eval_run(..., profile="eval-coderag-vector")` | 报告含三组对照表 | T3-10 | 2h |
 | T3-12 | 回归门禁脚本：L1（pytest）+ L2（`eval_gate`）一键重跑 | `scripts/eval-gate.sh` | `bash scripts/eval-gate.sh` | 退出码 0/1；输出四项指标 + 回归条数 | T3-02b, T3-06 | 1h |
 | **T3-13** | **R3 的 A1 修复**：实现 §5.3.1 早已规定的**精度→召回降级**（精度模式 AND 落空时用 OR 重试一次） | `src/dsh_coderag/searcher.py`, `tests/test_cjk_recall.py` | `python -m pytest tests/test_cjk_recall.py -q` | M2 三条中文语义全绿；「标识符 + 中文」混合查询命中；两种模式都空时仍返回 `status: empty` | T3-04b | 1h |
+| **T3-14** | **R3 的 A4 修复**：落实 §3.3 第 3 步**结构化加分**——候选池放宽后按「测试路径降级 + `symbol_name` 完全匹配加权」重选 top-k（输出仍按源码顺序，ADR-05 不变） | `src/dsh_coderag/searcher.py`, `tests/test_ranking_signals.py` | `python -m pytest tests/test_ranking_signals.py -q` | 定义处不再被 `tests/`、`*.spec.*` 挤出 top-5；exact 桶 S@5 ≥ 0.90 | T3-04b | 2h |
 
 **T3-07 的三条判定规则（事先写下，避免事后找理由）**
 
@@ -1296,7 +1297,7 @@ T3-04b  ← T3-04
 T3-04c  ← T3-04
 T3-04d  ← T3-03
 T3-05  ← T3-00, T3-02a
-T3-06  ← T3-04d, T3-05, T3-13
+T3-06  ← T3-04d, T3-05, T3-13, T3-14
 T3-07  ← T3-06
 T3-08  ← T3-07
 T3-09  ← T3-08
@@ -1304,6 +1305,7 @@ T3-10  ← T3-09
 T3-11  ← T3-10
 T3-12  ← T3-02b, T3-06
 T3-13  ← T3-04b
+T3-14  ← T3-04b
 T4-01  ← T2-17
 T4-02  ← T4-01
 T4-03  ← T4-01
@@ -1370,6 +1372,7 @@ T4-10  ← T4-08
 | **T3-04b** | 已完成 | `$ python -m pytest tests/test_attribute.py -q`（forBSH 环境）<br>`..............................                                           [100%]`<br>（30 passed，退出码 0。`classify` 对 7 个码各有一条纯样例，A1/A3 的判据是**目标文件**而非全语料——全语料判据会误标 L-004）<br>A 批真实归因（`/tmp/dsh-coderag-t3-03-corpus`，9 条失败）：<br>`L-002 exact     A1  query 要求命中目标文件里不存在的词 ['定义','义在','在哪']；其中 ['义在','在哪'] 在整个索引中也不存在`<br>`L-003 exact     A1  同上`<br>`L-004 exact     A1  query 要求命中目标文件里不存在的词 ['的定','定义']`<br>`L-005 crossfile A1  目标文件缺少 18 个词，其中 10 个全索引皆无`<br>`L-006 crossfile A5  query 的任何一个词都不出现在目标文件的索引文本中`<br>`L-007 crossfile A5  同上`<br>`L-008 crossfile A1  目标文件缺少 16 个词，其中 11 个全索引皆无`<br>`L-009 natural   A5  同上`<br>`L-010 natural   A5  同上`<br>`distribution: {"overall": {"A1": 5, "A5": 4}, "exact": {"A1": 3}, "crossfile": {"A1": 2, "A5": 2}, "natural": {"A5": 2}}`<br>`natural_a5_share: 1.0` | `76b49e8` | 新增 `src/dsh_coderag/eval/attribute.py`：`collect_evidence`（只读地查文件系统 / `files`+`chunks_fts` / 一次 `probe_k=50` 广搜）+ 纯函数 `classify`（固定优先级 A4→A6→A7/A2→A5→A1→A3）+ `attribute_run` / `attribution_distribution` / `natural_a5_share` / `build_attribution_report`，**零新依赖**。⚠️ **R2 的两项字面条件都已满足**（`S@5=0.10<0.80`、natural 失败 100% 为 A5），但 §2.8 还要求「A1–A4/A6/A7 全部修完再考虑向量」，而 5 条 A1 恰是实现 bug；且当前只是 A 批 10 条。**T3-07 必须显式处理这个冲突，不能直接照字面判 R2**。全量 307 例通过，ruff / `mypy --strict src/` 干净。**后续修复 `bd9fd8d`**：A4 判据原先拿 probe 的**源码顺序位置**与 `run_k` 比较，几乎永不命中，30 条复测时把 2 条 A4 误判成 A3；改为「目标出现在 probe_k 候选集内即 A4」并补了回归用例 |
 | **T3-13** | 已完成 | `$ python -m pytest tests/test_cjk_recall.py -q`（forBSH 环境）<br>`......                                                                   [100%]`<br>（6 passed，退出码 0：2 字词可检索；精度模式 `用户令牌` 只命中 `token.py`、排除只含「用户」「令牌」的 `separate.py`；`令牌未定义词` 精度落空后由召回命中；`verify_token未定义词` 混合查询命中；两种模式都空仍是 `status: empty` + hint；标点路由不经过召回）<br>同一语料（`/tmp/dsh-coderag-t3-03-corpus`，查询侧改动**无需重建索引**）A 批前后对比：<br>`exact     S@5 0.250 [0.05,0.70] -> 1.000 [0.51,1.00]   MRR 0.250 -> 0.412`<br>`overall   S@5 0.100 [0.02,0.40] -> 0.400 [0.17,0.69]   MRR 0.100 -> 0.165`<br>`crossfile S@5 0.000 -> 0.000` ｜ `natural S@5 0.000 -> 0.000`<br>逐条：L-002 `empty → ready rank 5`、L-003 `empty → ready rank 5`、L-004 `empty → ready rank 4`；其余 6 条仍未命中<br>归因：`{"overall":{"A1":5,"A5":4}} → {"overall":{"A1":2,"A5":4}}`，`natural_a5_share` 仍为 `1.0` | `e7d7624` | 新增 `_build_recall_match`（OR 构造）与 `_join_phrases`；`search()` 仅在**精度模式 0 条**时用召回模式重试一次，两者都 0 才 `empty`——即 §5.3.1 的流程 1→2→3。**未改精度模式语义**（重叠 bigram 使 AND 等价于精确子串，新文件有断言）。因行为变化同步更新 `tests/test_attribute.py` 里依赖旧行为的 3 个用例——改成直接喂**显式失败结果**只测 collector+classifier，判据未被放宽（T-08）。**exact 桶已回到 EVAL §2.7 的 0.90 阈值之上（1.000）**；crossfile/natural 仍不达标，A5 仍是 natural 失败的全部，故 R2 的字面条件依旧成立——**T3-07 仍须处理 R2 与 §2.8「A1 先修完」的冲突**。全量 314 例通过，ruff / `mypy --strict src/` 干净 |
 | **T3-02b** | 已完成 | `$ python3 scripts/verify-tasks.py eval/tasks.jsonl /Users/vermi/projects/dsh`<br>`解析到 30 条任务（exact 12 / crossfile 11 / natural 7）`<br>`[V1 ] 读取与解析            PASS  30 条有效任务`<br>`[V2 ] schema           PASS  30/30 条通过 schema.json`<br>`[V3 ] 唯一 ID            PASS  30 个唯一 ID / 30 条`<br>`[V4 ] 路径格式             PASS  46 条路径`<br>`[V5 ] 路径存在             PASS  46/46 条路径存在`<br>`[V6 ] 无答案泄漏            PASS  30 条 query`<br>`[V7 ] exact 标识符存在      PASS  12 条 exact`<br>`[V8 ] natural 无标识符     PASS  7 条 natural`<br>`[V9 ] class 配比         PASS  exact/crossfile/natural = 12/11/7，目标比例 12:11:7（±1）`<br>`[V10] 任务数下限            PASS  30 ≥ 10`<br>`PASS: 30 条任务全部通过 10 项检查`<br>（退出码 0，被评测仓库 `/Users/vermi/projects/dsh`） | `43a2b65` | 新增 **L-011..L-030**（8 exact / 7 crossfile / 5 natural），凑齐 12/11/7。**每行的 `notes` 都写了出处（`file:line` + 原文片段）与选取理由**；crossfile 全部改成「定义处 → 使用/写入处 → 复用/封锁处」的三文件链路。**按用户指示提前执行**：任务表原依赖 `T3-04c`（尚未完成），此处按 A 批已暴露的 crossfile/natural 缺口定重点，未使用 `T3-04c` 的 diff。**未跑 L1 评测**——用户要先人工排查 query 是否泄漏答案，在其复核前不对评测集调参（EVAL §2.9 陷阱 3/14）。⚠️ `eval/tasks.meta.json` 尚未创建（属 T3-04d），**T3-04d 必须把初始 `golden_version` 定为本次 B 批后的状态**，否则踩 EVAL §2.9 陷阱 15。golden 集改动已按 EVAL §2.7 单独成一个提交（`43a2b65`） |
+| **T3-14** | 已完成 | `$ python -m pytest tests/test_ranking_signals.py -q`（forBSH 环境）<br>`.................                                                        [100%]`<br>（17 passed，退出码 0：非测试路径恒在测试路径之前；`tests/`、`__tests__/`、`*.spec.*`、`*.test.*` 的识别 + 4 个相似路径反例（`tests_helper.py`/`latest.py`/`contest.py`/`spec.py` 不算测试）；`symbol_name` 完全匹配才加权、部分匹配不加权；端到端先断言**原始 bm25 冠军确实是 spec**，再断言结果选的是 impl；输出仍按源码顺序；两次检索结果一致）<br>30 条 golden 集复测（同一语料，查询侧改动**无需重建索引**）：<br>`exact     S@5 0.833 [0.55,0.95] -> 1.000 [0.76,1.00]   MRR 0.582 -> 0.693`<br>`overall   S@5 0.333 [0.19,0.51] -> 0.400 [0.25,0.58]   MRR 0.233 -> 0.277`<br>`crossfile S@5 0.000 -> 0.000` ｜ `natural S@5 0.000 -> 0.000`<br>逐条：L-013 `未命中 -> rank 1`、L-018 `未命中 -> rank 3`；L-003 名次 5→4，L-002/L-004 保持 5<br>归因：`{"A4":2,"A1":2,"A5":16} -> {"A4":1,"A1":1,"A5":16}`，**exact 失败清零** | `1559cf3` | 新增 `selection_key` / `query_symbols` / `_is_test_path` 与 `CANDIDATE_POOL_FACTOR=4`、`CANDIDATE_POOL_MIN=20`、`SYMBOL_MATCH_BOOST=2.0`；`_search` 先取 `max(4k, 20)` 候选，**稳定排序**重选 top-k，截断后仍按 `(path, start_line)` 输出（ADR-05 不变）。测试路径用**层级降级**而不是加权——bm25 的尺度依赖语料，硬编码惩罚就是魔数；层级降级无参数且可直接断言。唯一权重 `SYMBOL_MATCH_BOOST` 只在 `symbol_name` 完全相等时生效。**未实现** §3.3 的「同文件局部性加权」与「声明定义处加权」——实测两条失败靠测试路径降级即可修复，未引入数据不支持的新权重（记入 `docs/backlog.md`）。全量 333 例通过，ruff / `mypy --strict src/` 干净 |
 | … | | | | |
 
 ---
@@ -1390,7 +1393,7 @@ T4-10  ← T4-08
 | ADR-02 | T3-07 | 第一版只做 BM25；由决策门强制，`RL-10` 是它的红线形式 |
 | ADR-03 | T1-11 | 工具集固定为 4 个；`RL-05` 是它的红线形式 |
 | ADR-04 | T1-12 | 索引异步化，立刻返回 taskId |
-| ADR-05 | T2-14 | 检索结果按源码顺序输出 |
+| ADR-05 | T2-14, T3-14 | 检索结果按源码顺序输出 |
 | ADR-06 | T1-13 | 索引未就绪返回结构化状态；`RL-06` 是它的红线形式 |
 | ADR-07 | T1-06, T2-19, T3-13 | 中文 bigram 预处理 + 精度/召回双模式 |
 | ADR-08 | T2-06 | 三层安全过滤（密钥黑名单 / 忽略规则 / 内容扫描） |
