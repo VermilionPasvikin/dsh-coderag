@@ -3,9 +3,9 @@
 This module turns a query into a full-text match expression, ranks chunks
 with bm25 and reports a structured status so callers never have to infer
 "nothing is there" from an empty list (RL-06). A query is matched in
-precision mode first (every token) and only then in recall mode (any token),
-per PROJECT.md 5.3.1. It does not build the index and does not render
-model-visible text.
+precision mode first (every token), then by an identifier-only OR, and only
+then by a full OR that includes CJK bigrams, per PROJECT.md 5.3.1. It does not
+build the index and does not render model-visible text.
 """
 
 from __future__ import annotations
@@ -36,14 +36,6 @@ _CJK = re.compile(r"[\u4e00-\u9fff]")
 
 # ── 结构化加分（PROJECT.md §3.3 第 3 步）─────────────────────────────────
 # Selection is by score, output stays in source order (ADR-05).
-CANDIDATE_POOL_FACTOR = 4
-"""Fetch k * this many candidates before re-ranking, so a demoted result can
-still be promoted into the top k. Must not be smaller than the longest
-demotion chain we expect to undo."""
-
-CANDIDATE_POOL_MIN = 20
-"""Absolute floor for the candidate pool, so a small k still sees the field."""
-
 SYMBOL_MATCH_BOOST = 2.0
 """bm25 delta subtracted when a chunk's symbol_name matches a query identifier.
 
@@ -51,33 +43,25 @@ Exact symbol equality is a strong, cheap signal (PROJECT.md §3.3). The value
 is deliberately small: it should break near-ties, not override a much better
 lexical match."""
 
-_TEST_PATH = re.compile(r"(^|/)(tests?|__tests__)/|\.(spec|test)\.[^/]*$")
-"""Paths whose matches are demoted: a test asserts on a symbol, it rarely
-defines it. A magnitude-free demotion (see selection_key) is used instead of a
-tuned penalty, because bm25's scale is corpus-dependent."""
+TEST_PATH_TIER_SQL = (
+    "(f.path LIKE 'tests/%' OR f.path LIKE '%/tests/%'"
+    " OR f.path LIKE '__tests__/%' OR f.path LIKE '%/__tests__/%'"
+    " OR f.path LIKE '%.spec.%' OR f.path LIKE '%.test.%')"
+)
+"""SQL predicate selecting test paths, used as the first ORDER BY tier.
 
-
-def _is_test_path(path: str) -> bool:
-    """Whether a workspace-relative path lives in a test tree or test file."""
-    return _TEST_PATH.search(path) is not None
+A test asserts on a symbol, it rarely defines it, so every non-test chunk is
+ranked before every test chunk. Doing this in SQL (rather than over a widened
+Python candidate pool) keeps the demotion exact: no pool size has to be large
+enough to see past a run of test chunks. The LIKE patterns mirror the previous
+Python regex; `tests_helper.py`, `latest.py`, `contest.py` and `spec.py` are
+deliberately not matches.
+"""
 
 
 def query_symbols(query: str) -> frozenset[str]:
     """ASCII identifiers in a query, used for exact `symbol_name` matching."""
     return frozenset(_IDENTIFIER.findall(query))
-
-
-def selection_key(hit: Hit, symbols: frozenset[str]) -> tuple[bool, float]:
-    """Sort key used to pick the top k candidates before source ordering.
-
-    Non-test chunks always precede test chunks (``False`` < ``True``); within a
-    tier the bm25 score decides, with an exact `symbol_name` match subtracting
-    ``SYMBOL_MATCH_BOOST``. Lower is better, matching SQLite's bm25.
-    """
-    score = hit.score
-    if hit.symbol_name is not None and hit.symbol_name in symbols:
-        score -= SYMBOL_MATCH_BOOST
-    return (_is_test_path(hit.path), score)
 
 _TYPE_KINDS = frozenset({"class", "struct", "union", "interface"})
 _NAME_NODE_TYPES = frozenset(
@@ -112,12 +96,13 @@ def search(
 ) -> SearchResult:
     """Search the index under root and always return a structured status.
 
-    Candidates are ranked by bm25, then re-ranked by `selection_key` (test
-    paths demoted, exact `symbol_name` matches boosted, PROJECT.md 3.3) before
-    the best k are chosen; the survivors are re-sorted into source order and
-    trimmed to max_tokens, with the number dropped reported as omitted.
-    path restricts the search to a workspace-relative subdirectory (or file);
-    None searches the whole workspace.
+    The query is matched in three rungs until one returns candidates: precision
+    (all tokens), identifier-only OR, then the full OR including CJK bigrams.
+    Candidates are ordered in SQL by a test-path tier and an exact
+    `symbol_name` boost (PROJECT.md 3.3); the best k are then re-sorted into
+    source order and trimmed to max_tokens, with the number dropped reported
+    as omitted. path restricts the search to a workspace-relative
+    subdirectory (or file); None searches the whole workspace.
     """
     if not sqlite_caps.fts5_available():
         return SearchResult(
@@ -150,17 +135,24 @@ def search(
     try:
         files, chunks = _index_counts(connection)
         punctuation_only = _is_punctuation_only(query)
-        match = None if punctuation_only else _build_match(query)
         symbols = query_symbols(query)
-        candidates = (
+        # Three rungs, first non-empty wins (PROJECT.md 5.3.1): precision AND,
+        # then an identifier-only OR, then the full OR including CJK bigrams.
+        matches = (
             []
-            if match is None
-            else _search(connection, match, k, path_prefix, symbols)
+            if punctuation_only
+            else [_build_match(query), _build_identifier_recall_match(query),
+                  _build_recall_match(query)]
         )
-        if not candidates and match is not None:
-            recall = _build_recall_match(query)
-            if recall is not None:
-                candidates = _search(connection, recall, k, path_prefix, symbols)
+        candidates: list[Hit] = []
+        seen: set[str] = set()
+        for match in matches:
+            if match is None or match in seen:
+                continue
+            seen.add(match)
+            candidates = _search(connection, match, k, path_prefix, symbols)
+            if candidates:
+                break
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
@@ -212,13 +204,14 @@ def _search(
     k: int,
     path_prefix: str | None = None,
     symbols: frozenset[str] = frozenset(),
+    symbol_boost: float = SYMBOL_MATCH_BOOST,
 ) -> list[Hit]:
     """Select the k best chunks, then return them in source order (ADR-05).
 
-    A wider candidate pool than k is fetched first so structural demotion or
-    an exact symbol match can promote a chunk that bm25 alone would drop.
+    Ordering is expressed in SQL so the `LIMIT` sees the final ranking:
+    non-test chunks first, then the bm25 score adjusted by an exact
+    `symbol_name` match, then `c.id` as the deterministic tiebreak.
     """
-    pool = max(k * CANDIDATE_POOL_FACTOR, CANDIDATE_POOL_MIN)
     sql = """
         SELECT f.path, c.seq, c.start_line, c.end_line, c.symbol_kind,
                c.symbol_name, c.text, bm25(chunks_fts)
@@ -232,8 +225,20 @@ def _search(
         escaped = _escape_like(path_prefix)
         sql += " AND (f.path = ? OR f.path LIKE ? ESCAPE '\\')"
         params.extend([escaped, f"{escaped}/%"])
-    sql += " ORDER BY bm25(chunks_fts), c.id LIMIT ?"
-    params.append(pool)
+    order = [f"CASE WHEN {TEST_PATH_TIER_SQL} THEN 1 ELSE 0 END"]
+    if symbols:
+        placeholders = ", ".join("?" for _ in symbols)
+        order.append(
+            "bm25(chunks_fts) - (CASE WHEN c.symbol_name IN "
+            f"({placeholders}) THEN ? ELSE 0 END)"
+        )
+        params.extend(sorted(symbols))
+        params.append(symbol_boost)
+    else:
+        order.append("bm25(chunks_fts)")
+    order.append("c.id")
+    sql += f" ORDER BY {', '.join(order)} LIMIT ?"
+    params.append(k)
     rows = connection.execute(sql, params).fetchall()
     hits = [
         Hit(
@@ -248,10 +253,6 @@ def _search(
         )
         for path, seq, start_line, end_line, symbol_kind, symbol_name, text, score in rows
     ]
-    # Stable sort: ties keep the SQL order (bm25, then c.id), so selection stays
-    # deterministic (TESTING.md 3.4).
-    hits.sort(key=lambda hit: selection_key(hit, symbols))
-    del hits[k:]
     # ADR-05: selection is by score, but output follows source order.
     hits.sort(key=lambda hit: (hit.path, hit.start_line))
     return hits
@@ -303,11 +304,23 @@ def _build_match(query: str) -> str | None:
     return _join_phrases(to_bigrams(query).split(), " ")
 
 
-def _build_recall_match(query: str) -> str | None:
-    """Recall fallback: any token may match (OR of quoted phrases).
+def _build_identifier_recall_match(query: str) -> str | None:
+    """Middle rung: OR over the query's ASCII identifiers only.
 
-    Used only when the precision match found nothing, so a query carrying a
-    token the corpus lacks can still hit on the tokens it does share
+    CJK bigrams are high-recall but very low precision — in a repository with
+    localization catalogs they match translation strings that outrank the real
+    code, so they are held back for the last rung. Identifiers carry the
+    discriminative intent, so they are tried first (PROJECT.md 5.3.1).
+    """
+    identifiers = list(dict.fromkeys(_IDENTIFIER.findall(query)))
+    return _join_phrases(identifiers, " OR ")
+
+
+def _build_recall_match(query: str) -> str | None:
+    """Last rung: OR over every token, including CJK bigrams.
+
+    Used only when both the precision match and the identifier-only recall
+    found nothing, so a query whose only content is CJK can still hit
     (PROJECT.md 5.3.1, step 2).
     """
     return _join_phrases(to_bigrams(query).split(), " OR ")

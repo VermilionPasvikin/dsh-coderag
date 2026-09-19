@@ -1,8 +1,9 @@
 """Structured re-ranking signals (T3-14, PROJECT.md 3.3 step 3).
 
-Selection happens over a widened candidate pool: test paths are demoted and an
-exact `symbol_name` match is boosted, before the best k are chosen. Output order
-is still source order (ADR-05), so these tests separate selection from ordering.
+Selection ordering lives in SQL so `LIMIT k` sees the final ranking: non-test
+paths first, then bm25 adjusted by an exact `symbol_name` match, then the chunk
+id. Output order is still source order (ADR-05), so selection is asserted on the
+*set* of returned paths rather than their order.
 """
 
 from __future__ import annotations
@@ -12,81 +13,42 @@ from pathlib import Path
 
 import pytest
 
-from dsh_coderag.indexer import index_sync
-from dsh_coderag.searcher import query_symbols, search, selection_key
-from dsh_coderag.types import Hit
+from dsh_coderag.indexer import connect, index_sync
+from dsh_coderag.searcher import SYMBOL_MATCH_BOOST, _search, query_symbols, search
+
+TIER_FILES = {
+    "src/plain.py": "# tierneedle\n",
+    "src/tests_helper.py": "# tierneedle\n",  # lookalike, must not be demoted
+    "src/tests/spec.py": "# tierneedle\n",
+    "src/__tests__/spec2.py": "# tierneedle\n",
+    "src/x.spec.py": "# tierneedle\n",
+    "src/y.test.py": "# tierneedle\n",
+}
+SYMBOL_FILES = {
+    "src/defs.py": "def target_symbol():\n    return 1\n",
+    "src/uses.py": "# target_symbol\n" * 50,
+}
 
 
-def make_hit(
-    path: str, *, score: float = 0.0, symbol_name: str | None = None
-) -> Hit:
-    return Hit(
-        path=path,
-        seq=0,
-        start_line=1,
-        end_line=1,
-        text="x",
-        score=score,
-        symbol_name=symbol_name,
-    )
+def make_corpus(root: Path, files: dict[str, str]) -> Path:
+    for relative, text in files.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    return root
 
 
 @pytest.fixture
 def ranking_corpus(tmp_path: Path) -> Path:
     """One implementation file and one test file that repeats the token 30x."""
-    root = tmp_path / "ranking"
-    (root / "src" / "tests").mkdir(parents=True)
-    (root / "src" / "impl.py").write_text("# needle\n", encoding="utf-8")
-    (root / "src" / "tests" / "impl_spec.py").write_text(
-        "# needle\n" * 30, encoding="utf-8"
+    root = make_corpus(
+        tmp_path / "ranking",
+        {"src/impl.py": "# needle\n", "src/tests/impl_spec.py": "# needle\n" * 30},
     )
     index_sync(root)
     return root
 
 
-# ── selection_key (pure) ────────────────────────────────────────────────
-def test_non_test_paths_are_never_demoted_below_test_paths() -> None:
-    test = make_hit("src/tests/x.py", score=-100.0)
-    impl = make_hit("src/x.py", score=-1.0)
-    assert selection_key(impl, frozenset()) < selection_key(test, frozenset())
-
-
-@pytest.mark.parametrize(
-    "path",
-    ["src/tests/x.py", "tests/x.py", "src/__tests__/x.py", "src/x.spec.ts", "a.test.py"],
-)
-def test_test_paths_are_recognised(path: str) -> None:
-    assert selection_key(make_hit(path), frozenset())[0] is True
-
-
-@pytest.mark.parametrize(
-    "path",
-    ["src/tests_helper.py", "src/latest.py", "src/contest.py", "src/spec.py"],
-)
-def test_lookalike_paths_are_not_treated_as_tests(path: str) -> None:
-    assert selection_key(make_hit(path), frozenset())[0] is False
-
-
-def test_exact_symbol_match_lowers_the_score() -> None:
-    matched = make_hit("src/a.py", score=-5.0, symbol_name="retry_call")
-    unmatched = make_hit("src/b.py", score=-5.0, symbol_name="other")
-    key = selection_key(matched, frozenset({"retry_call"}))
-    assert key < selection_key(unmatched, frozenset({"retry_call"}))
-    assert key[1] < -5.0
-
-
-def test_symbol_boost_does_not_apply_to_a_partial_match() -> None:
-    partial = make_hit("src/a.py", score=-5.0, symbol_name="retry_call_extra")
-    assert selection_key(partial, frozenset({"retry_call"}))[1] == -5.0
-
-
-def test_query_symbols_extracts_ascii_identifiers() -> None:
-    symbols = query_symbols("CONTEXT_WINDOW_EXCEEDED_CODE定义在哪？")
-    assert "CONTEXT_WINDOW_EXCEEDED_CODE" in symbols
-    assert query_symbols("中文查询") == frozenset()
-
-
-# ── end-to-end selection ────────────────────────────────────────────────
 def test_test_file_does_not_crowd_out_the_implementation(ranking_corpus: Path) -> None:
     """The spec has 30 occurrences and impl has 1: bm25 alone picks the spec."""
     connection = sqlite3.connect(ranking_corpus / ".coderag" / "index.sqlite3")
@@ -105,6 +67,25 @@ def test_test_file_does_not_crowd_out_the_implementation(ranking_corpus: Path) -
     assert [hit.path for hit in result.hits] == ["src/impl.py"]
 
 
+@pytest.mark.parametrize("k", [1, 2])
+def test_only_non_test_paths_are_selected_first(tmp_path: Path, k: int) -> None:
+    root = make_corpus(tmp_path / "tiers", TIER_FILES)
+    index_sync(root)
+    selected = {hit.path for hit in search(root, "tierneedle", k=k).hits}
+    assert selected <= {"src/plain.py", "src/tests_helper.py"}
+    if k == 2:
+        assert selected == {"src/plain.py", "src/tests_helper.py"}
+
+
+def test_every_test_path_shape_is_demoted(tmp_path: Path) -> None:
+    root = make_corpus(tmp_path / "all-tiers", TIER_FILES)
+    index_sync(root)
+    selected = {hit.path for hit in search(root, "tierneedle", k=6).hits}
+    assert selected == set(TIER_FILES)  # all present at k=6 ...
+    first_two = {hit.path for hit in search(root, "tierneedle", k=2).hits}
+    assert first_two == {"src/plain.py", "src/tests_helper.py"}  # ... tests last
+
+
 def test_result_order_is_still_source_order(ranking_corpus: Path) -> None:
     result = search(ranking_corpus, "needle", k=5)
     positions = [(hit.path, hit.start_line) for hit in result.hits]
@@ -117,8 +98,38 @@ def test_selection_is_deterministic(ranking_corpus: Path) -> None:
     assert first == second
 
 
-def test_demotion_can_promote_a_candidate_from_beyond_k(ranking_corpus: Path) -> None:
-    """With k=1 the demoted test would leave room only via the wider pool."""
-    result = search(ranking_corpus, "needle", k=1)
-    assert result.hits[0].path == "src/impl.py"
-    assert len(result.hits) == 1
+def test_exact_symbol_match_can_be_promoted(tmp_path: Path) -> None:
+    """With a decisive boost, the declaring chunk outranks a heavier mention."""
+    root = make_corpus(tmp_path / "symbols", SYMBOL_FILES)
+    index_sync(root)
+    connection = connect(root / ".coderag" / "index.sqlite3")
+    try:
+        plain = _search(connection, '"target_symbol"', 2, None, frozenset(), 0.0)
+        boosted = _search(
+            connection, '"target_symbol"', 2, None, frozenset({"target_symbol"}), 100.0
+        )
+    finally:
+        connection.close()
+    assert plain[0].path == "src/uses.py"  # bm25 favours the heavier mention
+    assert boosted[0].path == "src/defs.py"  # the symbol match is boosted in SQL
+
+
+def test_partial_symbol_names_are_not_boosted(tmp_path: Path) -> None:
+    root = make_corpus(tmp_path / "partial", SYMBOL_FILES)
+    index_sync(root)
+    connection = connect(root / ".coderag" / "index.sqlite3")
+    try:
+        hits = _search(connection, '"target_symbol"', 2, None, frozenset({"target"}), 100.0)
+    finally:
+        connection.close()
+    assert hits[0].path == "src/uses.py"
+
+
+def test_query_symbols_extracts_ascii_identifiers() -> None:
+    symbols = query_symbols("CONTEXT_WINDOW_EXCEEDED_CODE定义在哪？")
+    assert "CONTEXT_WINDOW_EXCEEDED_CODE" in symbols
+    assert query_symbols("中文查询") == frozenset()
+
+
+def test_symbol_boost_default_is_positive() -> None:
+    assert SYMBOL_MATCH_BOOST > 0
