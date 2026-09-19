@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsh-coderag.local/eval/schema.json",
+  "title": "dsh-coderag retrieval eval task",
+  "description": "One JSON object per line in eval/tasks.jsonl. See eval/README.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "class",
+    "query",
+    "expect_paths",
+    "added"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^L-[0-9]{3}$",
+      "description": "Stable task id; unique within the golden set."
+    },
+    "class": {
+      "enum": [
+        "exact",
+        "crossfile",
+        "natural"
+      ],
+      "description": "Diagnostic bucket; see EVAL.md 2.3."
+    },
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The user query. Must not leak expected paths or symbols."
+    },
+    "expect_paths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relativePath"
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "At least one of these workspace-relative paths must be hit."
+    },
+    "expect_symbols": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Optional symbols that must be hit."
+    },
+    "must_not_paths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relativePath"
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Optional precision guard; hitting any of these fails the task."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional rationale for why this task is designed this way."
+    },
+    "added": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "Date this task entered the golden set (YYYY-MM-DD)."
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Workspace-relative path using forward slashes."
+    }
+  }
+}
