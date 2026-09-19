@@ -14,7 +14,7 @@
       "agent-loop"
     ],
     "no_tool_errors": true,
-    "max_steps": 12
+    "max_steps": 16
   },
   "answer_paths": [
     "packages/core/tools/src/index.ts",

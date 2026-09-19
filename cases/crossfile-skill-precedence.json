@@ -14,7 +14,7 @@
       "BUNDLED_SKILL_RANK|skill/skill/src/index"
     ],
     "no_tool_errors": true,
-    "max_steps": 12
+    "max_steps": 16
   },
   "answer_paths": [
     "packages/skill/skill-filesystem/src/index.ts",
