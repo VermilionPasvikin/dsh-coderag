@@ -22,6 +22,7 @@ from dsh_coderag.eval.ab import (
     ToolCall,
     ToolResult,
     Trace,
+    _resolve_dsh,
     build_command,
     compression_overlay,
     evaluate,
@@ -380,6 +381,65 @@ def test_build_command_orders_profile_patches_prompt(tmp_path: Path) -> None:
 
 def test_build_command_omits_an_empty_profile(tmp_path: Path) -> None:
     assert build_command(["./scripts/dsh"], "", [], "p") == ["./scripts/dsh", "p"]
+
+
+def test_resolve_dsh_resolves_a_path_but_leaves_a_bare_command() -> None:
+    assert _resolve_dsh(["dsh"]) == ["dsh"]
+    assert _resolve_dsh(["npx", "@deepseek-ai/dsh"]) == ["npx", "@deepseek-ai/dsh"]
+    resolved = _resolve_dsh(["./scripts/dsh", "--profile"])
+    assert os.path.isabs(resolved[0])
+    assert resolved[1:] == ["--profile"]
+    assert _resolve_dsh([]) == []
+
+
+def test_run_group_resolves_relative_paths_against_the_invocation_directory(
+    tmp_path: Path, fake_dsh: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a child runs with `cwd=workspace`, so relative paths break.
+
+    The fake dsh opens the `--patch` it is given relative to its own cwd, so a
+    relative overlay/patch makes the attempt fail to produce a session log.
+    """
+    (tmp_path / "ws").mkdir()
+    (tmp_path / "extra.yml").write_text("# extra overlay\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    events = [
+        {"kind": "assistant/message",
+         "message": {"content": [{"type": "text", "text": "答"}]}, "stream": []},
+    ]
+    result = run_group(
+        [Case(name="only", prompt="问题", tags=(), expect=Assertions())],
+        group="fake",
+        out_dir=Path("out"),
+        dsh=fake_dsh,
+        profile="headless",
+        workspace=Path("ws"),
+        patches=[Path("extra.yml")],
+        env=dict(os.environ, FAKE_EVENTS=json.dumps(events)),
+    )
+    attempt = result["cases"][0]["attempts"][0]
+    assert attempt["error"] is None
+    assert attempt["session_log"] is not None
+    assert Path(attempt["session_log"]).is_absolute()
+    assert result["workspace"] == str((tmp_path / "ws").resolve())
+
+
+def test_run_group_rejects_a_missing_relative_launcher(tmp_path: Path) -> None:
+    with pytest.raises(AbError, match="找不到 dsh 启动器"):
+        run_group([], group="fake", out_dir=tmp_path / "out", dsh=["./missing-dsh"],
+                  profile="headless", workspace=tmp_path)
+
+
+def test_run_group_rejects_a_missing_patch(tmp_path: Path) -> None:
+    with pytest.raises(AbError, match="找不到 patch 文件"):
+        run_group([], group="fake", out_dir=tmp_path / "out", dsh=["dsh"],
+                  profile="headless", workspace=tmp_path, patches=[tmp_path / "nope.yml"])
+
+
+def test_run_group_rejects_a_missing_workspace(tmp_path: Path) -> None:
+    with pytest.raises(AbError, match="workspace"):
+        run_group([], group="fake", out_dir=tmp_path / "out", dsh=["dsh"],
+                  profile="headless", workspace=tmp_path / "nope")
 
 
 def test_compression_overlay_points_at_the_root_and_disables_compression(tmp_path: Path) -> None:

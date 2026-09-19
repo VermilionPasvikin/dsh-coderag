@@ -11,7 +11,7 @@ It never calls a model itself — the model runs inside DSH — and it contains 
 L1 logic (that lives in `tasks` / `runner` / `metrics`). It does not author
 cases.
 
-Three deliberate properties:
+Five deliberate properties:
 
 * The runner makes DSH write **uncompressed** session logs by overriding the
   `session-persistence-jsonl` row (`compression: none`, `root` pointed at the
@@ -26,6 +26,9 @@ Three deliberate properties:
   raw name stays in the trace and the reports; only assertion matching folds it.
   Without this, every MCP-tool assertion silently fails no matter how well the
   agent performed.
+* Every path is resolved against the **invocation directory** up front, because
+  each child runs with `cwd=workspace`; a relative `--dsh` / `--patch` / `--out`
+  would otherwise be re-based onto the workspace and silently fail.
 
 The session log is a header line followed by event lines:
 `{version, id, ...}` then repeated `{type, seq, time, data}`.
@@ -560,6 +563,18 @@ def build_command(
     return command
 
 
+def _resolve_dsh(dsh: Sequence[str]) -> list[str]:
+    """Resolve a path-like dsh launcher and leave a bare command for PATH lookup.
+
+    `dsh` is invoked with `cwd=workspace`, so a launcher that is relative to the
+    invocation directory must be made absolute here. A bare command (`dsh`,
+    `npx`) must stay untouched so the OS still resolves it through `PATH`.
+    """
+    if dsh and (os.sep in dsh[0] or dsh[0].startswith(".")):
+        return [str(Path(dsh[0]).resolve()), *dsh[1:]]
+    return list(dsh)
+
+
 def run_group(
     cases: Sequence[Case],
     *,
@@ -578,9 +593,30 @@ def run_group(
 
     Each attempt gets its own directory: its overlay points the session log
     there, so discovery never has to disambiguate two runs.
+
+    Every path is resolved against the invocation directory **before** any
+    child starts, because `_run_attempt` runs DSH with `cwd=workspace`: a
+    relative `--dsh` / `--patch` / `--out` would otherwise be re-based onto the
+    workspace and silently fail to spawn or to find the session log.
     """
     if trials < 1:
         raise AbError(f"trials 必须 ≥ 1，实际 {trials}")
+    out_dir = out_dir.resolve()
+    workspace = workspace.resolve()
+    dsh = _resolve_dsh(dsh)
+    patches = [patch.resolve() for patch in patches]
+    if dsh_home is not None:
+        dsh_home = dsh_home.resolve()
+    if not workspace.is_dir():
+        raise AbError(f"workspace 不存在或不是目录：{workspace}")
+    if dsh and os.sep in dsh[0] and not Path(dsh[0]).is_file():
+        raise AbError(
+            f"找不到 dsh 启动器 {dsh[0]!r}：相对路径按调用目录解析，"
+            "请用绝对路径或 PATH 上的命令"
+        )
+    for patch in patches:
+        if not patch.is_file():
+            raise AbError(f"找不到 patch 文件：{patch}")
     out_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
     for index, case in enumerate(cases):
