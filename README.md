@@ -1,82 +1,253 @@
 # dsh-coderag
 
-> **安全声明（请先读）**：安装本插件等于授予它与本机账号**同等的机器权限**。
-> DSH 的三档文件权限（read-only / workspace-write / danger-full-access）**不约束插件**（E-04）。
-> 请只在你信任的仓库与本机上安装和运行。
+> ## ⚠️ 安全声明（请先读）
+>
+> **安装本插件等于授予它与本机账号同等的机器权限。**
+> DSH 的三档文件权限（`read-only` / `workspace-write` / `danger-full-access`）**不约束插件**
+> （依据：DSH `tool-cordis` README 与 `agent-scope-contexts` 笔记，见 `AGENTS.md` E-04）。
+> **请只在你信任的仓库与本机上安装和运行。** 本项目默认**不联网**、**不采集遥测**。
 
-dsh-coderag 是一个以 MCP 服务形态提供的**代码库检索引擎**：让 DeepSeek Harness（DSH）的
-Agent 能按语义与结构找到代码，而不是靠猜关键词反复 grep。
+dsh-coderag 是一个以 **MCP 服务器**形态提供的代码库检索引擎：让 DeepSeek Harness（DSH）的 Agent
+能按语义与结构找到代码，而不是靠猜关键词反复 grep。它只做检索，不改你的代码。
+
+**当前版本 `0.1.0`，尚未发布到 PyPI / npm；安装方式见下文「安装（当前方式）」。**
+
+---
 
 ## 当前状态
 
-- **M1 已完成**：DSH → MCP → Python → SQLite → 返回结果 的闭环已跑通，并有实测证据
-  （`docs/m1-findings.md`、`PROJECT.md` §6.6）。
-- **M2 / M3 / M4 尚未开始**：tree-sitter 分块、安全过滤、增量索引、评测、打包均未落地。
-- **尚无 S1–S4 评测数字**：实测数据将在 M3 产出后补入（T4-05）。本文件只描述当前状态。
+| 里程碑 | 状态 |
+|---|---|
+| **M1** 走通闭环 | ✅ 已完成（DSH → MCP → Python → SQLite → 结果） |
+| **M2** 检索质量 | ✅ 已完成（tree-sitter 声明感知分块、三层安全过滤、增量索引、任务取消、顺序保持） |
+| **M3** 评测与决策 | 🟡 **大部分完成**：L1/L2 评测已跑，决策门 `T3-07` 已裁定。**未完成**：逐 query diff（`T3-04c`）、`golden_version` 校验（`T3-04d`）、向量检索（`T3-08`–`T3-11`）、一键门禁脚本（`T3-12`） |
+| **M4** 打包分发 | ❌ 未开始：无 npm bundle（`package.json`）、无 `scripts/install.sh`、无 `CHANGELOG.md` |
+
+**评测结论**：端到端**有用**（S3 成立，+25.6pp），但**检索本身还没达标**（S1/S2 未达标）——
+详见下文「实测评测数据」。这不是一个"检索很准"的项目，而是一个"接进去能提升任务成功率、
+且对自己的短板有量化"的项目。
 
 ## 它是怎么工作的
 
 - 引擎是 Python 包 `dsh_coderag`，以 **MCP stdio 服务器**运行。
 - DSH 通过内置包 `@deepseek-ai/dsh-mcp-client` 在本机**拉起一个子进程**
-  （`python -m dsh_coderag.server`），两者用 stdin/stdout 上的 JSON-RPC 通信，**不经过网络、不监听端口**。
-- 索引存放在 `<工作区>/.coderag/index.sqlite3`（SQLite FTS5 + CJK bigram），**不写到工作区之外**。
-- 仓库根的 `cordis.patch.yml` 同时是本地开发 overlay 与分发 bundle patch。
+  （`python -m dsh_coderag.server`），两者用 stdin/stdout 上的 JSON-RPC 通信，
+  **不经过网络、不监听端口**。
+- 索引存放在 `<工作区>/.coderag/index.sqlite3`（SQLite **FTS5** + 中文 bigram），
+  **不写到工作区之外**（`AGENTS.md` S-03/S-04）。
+- 分块用 **tree-sitter** 按函数/类/接口等声明边界切分；检索用 **BM25**，
+  选按分数、**排按源码顺序**（ADR-05）。
+- 仓库根的 `cordis.patch.yml` 同时充当本地开发 overlay 与将来的分发 bundle patch。
 
-## 快速开始
+## 安装（当前方式）
 
-前置：Python 3.10–3.12；DSH；一个装有依赖的 conda 环境（下文示例名 `forBSH`）。
+> **注意**：`package.json` bundle 尚未创建（M4 未开始），所以**还不能**用
+> `dsh plugin add dsh-coderag` 一条命令安装。当前可靠的方式是「克隆 + `pip install` + `--patch`」。
+> 下面每一条都在本机实测过（见文末「安装验证」）。
 
-    conda activate forBSH
-    pip install -e .
-    dsh-coderag index /path/to/repo
-    dsh-coderag search "你想找的行为或标识符" --root /path/to/repo
+**前置**：Python **3.10–3.12**（`requires-python = ">=3.10,<3.13"`）、
+[DSH](https://www.npmjs.com/package/@deepseek-ai/dsh)、Git。
 
-把它挂到 DSH 上（本地开发方式）：
+```sh
+# 1. 克隆（cordis.patch.yml 在仓库里，必须克隆）
+git clone https://github.com/VermilionPasvikin/dsh-coderag.git
+cd dsh-coderag
 
-    ./scripts/dsh web --patch ./cordis.patch.yml
+# 2. 装 Python 包（用你自己环境里的解释器；conda 或 venv 都行）
+python -m pip install .          # 开发者用 pip install -e ".[dev]"
 
-`dsh plugin add` 的一键安装属 M4，尚未提供。
+# 3. 验证引擎可用（这一步不涉及 DSH）
+dsh-coderag --version            # 期望输出：dsh-coderag 0.1.0
+dsh-coderag index /path/to/repo  # 期望：indexed N files, M chunks into .../.coderag/index.sqlite3
+dsh-coderag search "用户令牌在哪里校验" --root /path/to/repo
+
+# 4. 告诉 DSH 用哪个解释器（重要：patch 里的默认值是作者机器的路径）
+export CODERAG_PYTHON="$(command -v python)"
+
+# 5. 把插件挂进 DSH
+./scripts/dsh web --patch ./cordis.patch.yml
+```
+
+> **顺序有讲究**：`--profile` / `--patch` 是**启动器**选项，必须写在 Web 应用自己的选项
+> （`--port` / `--no-open` / `--host`）**之前**。写成
+> `./scripts/dsh web --port 3099 --patch ./cordis.patch.yml` 会被应用解析器拒绝，报
+> `error: unknown option '--patch'`。正确的写法是
+> `./scripts/dsh --profile web --patch ./cordis.patch.yml --port 3099`（实测）。
+
+第 5 步之后，DSH 会话里就会出现 `mcp__coderag__code_search` 等 4 个工具。
+**`dsh` 不一定在 PATH 上**，所以本仓库统一用 `./scripts/dsh`（见 `PROJECT.md` §4.3.1 / `AGENTS.md` E-07）；
+若你已有全局 `dsh`，它等价于直接敲 `dsh`。
+
+> **`CODERAG_PYTHON` 不设会怎样**：patch 的内置默认值是
+> `/opt/anaconda3/envs/forBSH/bin/python`——那是**作者本机**的路径，在你的机器上多半不存在，
+> MCP 子进程会启动失败。所以第 4 步不是可选项。
+
+### 安装验证
+
+本机实测（macOS，Python 3.10.21，DSH 0.1.5-rc.1），**在一个全新的 venv 与新的 DSH 实例上**：
+
+1. **干净环境 `pip install .` 成功**（依赖全部从 PyPI 解析：`mcp` / `tree-sitter` /
+   `tree-sitter-language-pack` / `pathspec`），无 install script 参与。
+2. `dsh-coderag --version` → `dsh-coderag 0.1.0`；
+   对一个 2 chunk 的小仓库 `index` → `indexed 1 files, 2 chunks`，
+   `search "verify_token"` → `token.py:1-3`。
+3. **MCP 握手**（用的就是 patch 里的那条命令，解释器设为该 venv）：
+   `serverInfo {'name': 'coderag', 'version': '0.1.0'}`、
+   `tools ['code_search', 'code_outline', 'code_index', 'index_status']`、
+   `code_search` 返回结构化结果且 `isError: False`。
+4. **新 DSH Web 实例**（`:3099`）用 `./scripts/dsh --profile web --patch ./cordis.patch.yml --port 3099`
+   启动成功，UI 正常返回（HTTP 200 + `__DSH_BOOT__`）。
+5. **端到端功能**：让一个 headless DSH 进程带着同一份 patch 与 `CODERAG_PYTHON` 提问，
+   其会话日志显示 `mcp__coderag__code_search` 被调用 5 次、`code_outline` / `index_status` 各 1 次，
+   检索返回 `status: ready` / `scanned: 3967 files / 63046 chunks`，并给出了正确答案。
 
 ## 配置
 
-stdio 子进程的环境会被清洗（匹配 `*KEY*` / `*PASSWORD*` / `*SECRET*` / `*TOKEN*` 的变量与所有
-`DSH_*` 变量都会被删除），所以配置必须写进 `cordis.patch.yml` 的 `config.env`：
+stdio 子进程的环境会被清洗（匹配 `*KEY*` / `*PASSWORD*` / `*SECRET*` / `*TOKEN*` 的环境变量
+与**所有** `DSH_*` 变量都会被删除），所以需要传给 Python 进程的配置要么通过 `cordis.patch.yml`
+的 `config.env`，要么在**启动 dsh 的那个 shell** 里 export（后者对 `CODERAG_PYTHON` 有效，
+因为它在 DSH 进程内求值）。
 
 | 变量 | 作用 | 默认 |
 |---|---|---|
-| `CODERAG_PYTHON` | 运行服务器的解释器路径 | 本机 `forBSH` 路径 |
+| `CODERAG_PYTHON` | 运行 MCP 服务器的解释器路径 | 作者机器上的 `forBSH` 路径（**请覆盖**） |
 | `CODERAG_ROOT` | 要索引的工作区根 | DSH 进程的工作目录 |
-| `CODERAG_MAX_FILES` | 文件数上限（已解析，尚未生效） | 20000 |
-| `CODERAG_MAX_TOKENS` | 单次检索的 token 预算（已解析，尚未生效） | 4000 |
-
-激活目标环境后可用 `which python` 查解释器路径。
+| `CODERAG_MAX_FILES` | 文件数上限，**超限显式失败**并报实际数量（不静默截断） | `20000` |
+| `CODERAG_MAX_TOKENS` | 单次检索返回的 token 预算 | `4000` |
+| `CODERAG_MAX_FILE_BYTES` | 单文件大小上限，超过则跳过并计入 `skipped.too_large` | `1048576`（1 MiB） |
+| `CODERAG_BATCH_SIZE` | 索引写库批大小（不设则自适应推导） | 自适应（1–512） |
+| `CODERAG_MAX_WORKERS` | 索引并发度（不设则按 CPU/内存推导） | 自适应（上限 8） |
 
 ## 工具（固定 4 个，不动态增删）
 
-| 工具 | 作用 |
-|---|---|
-| `code_search` | 按自然语言或标识符检索代码，返回文件路径与行号 |
-| `code_index` | 建立 / 刷新索引，立刻返回 taskId，后台执行 |
-| `index_status` | 查询任务或工作区索引状态 |
-| `code_outline` | 返回单个文件的符号大纲（**尚未实现**，返回结构化“暂不支持”） |
+DSH 侧看到的工具名前缀为 `mcp__coderag__`，例如 `mcp__coderag__code_search`。
 
-模型侧看到的工具名形如 `mcp__coderag__code_search`。
+| 工具 | 参数 | 作用 |
+|---|---|---|
+| `code_search` | `query`（必填）、`path`、`limit`（默认 5，上限 50）、`max_tokens`（默认 4000） | 按自然语言或标识符检索，返回**文件路径 + 行号 + 符号名**；索引未就绪时返回结构化 `status` 而**不是空列表** |
+| `code_outline` | `path`（必填）、`max_depth`（默认 2） | 返回单个文件的符号大纲（类/函数/方法）与行号 |
+| `code_index` | `path`、`force` | 建立/刷新索引，**立刻返回 taskId**，后台执行 |
+| `index_status` | `task_id`（可省） | 查询索引任务或当前工作区索引状态；含 `skipped` 计数与原因分类 |
+
+`code_search` 的返回形如：
+
+```jsonc
+status: ready
+query: "..."
+scanned: 3967 files / 63046 chunks
+hits: 10 (sorted by source order)
+skipped: 3 (secret_file: 3)
+```
+
+## CLI
+
+```sh
+dsh-coderag index [路径]                 # 建/刷新索引（默认当前目录）
+dsh-coderag search "查询" [--root 路径] [--limit N]
+dsh-coderag --version
+```
+
+## 实测评测数据
+
+**一次性说明**：两套评测都跑在 **DSH 仓库的一份副本**上（遵守 `AGENTS.md` RL-01/S-03，
+用 rsync 复制而非原地索引）：**3967 个文件 / 63046 个 chunk**，全量索引**约 4.0 秒**（本机）。
+
+### 成功标准（`PROJECT.md` §1.4）
+
+| # | 标准 | 阈值 | 实测 | 达标 |
+|---|---|---|---|---|
+| **S1** | 检索本身有效：`Success@5` | ≥ 0.80 | **0.433**（30 条，95% CI `[0.274, 0.608]`） | ❌ |
+| **S2** | 排序质量：`MRR` | ≥ 0.60 | **0.313** | ❌ |
+| **S3** | 端到端有提升（有检索 vs 无检索） | ≥ +10pp | **+25.6pp**（0.308 → 0.564） | ✅ |
+| **S4** | 成本：单次返回 token 中位数 | ≤ 4000 | **2492** | ✅ |
+
+### L1 检索质量（30 条 golden 集，k=5）
+
+| 桶 | n | Success@1 | Success@3 | Success@5 | MRR | token 中位数 |
+|---|---:|---:|---:|---:|---:|---:|
+| **overall** | 30 | 0.267 | 0.367 | **0.433** | **0.313** | 2492 |
+| exact（裸标识符） | 12 | 0.583 | 0.833 | **1.000** | 0.700 | 1318 |
+| crossfile（跨文件） | 11 | 0.091 | 0.091 | **0.091** | 0.091 | 3083 |
+| natural（纯中文自然语言） | 7 | 0.000 | 0.000 | **0.000** | 0.000 | 3354 |
+
+失败归因（`EVAL.md` §2.8 的 A1–A7）：`overall {"A5": 16, "A1": 1}`；
+**`natural` 桶 7 条失败全部是 `A5`（零词法重叠）**，占 100%。
+
+**读法**：`exact`（已知标识符）已经很好（S@5 = 1.000）；**纯中文自然语言是短板**
+（S@5 = 0.000，因为查询词与代码文本没有共同词元，BM25 无从下手）。
+
+### L2 端到端 A/B（13 条用例 × 3 trials）
+
+| 组 | 检索工具 | taskSuccess |
+|---|---|---:|
+| A · 基线 | 无（只有 bash/grep/read） | 12/39 = **0.308** |
+| B · 词法 | `code_search` / `code_outline` | 22/39 = **0.564** |
+
+`pass@3`（至少 1 次通过）4/13 → 10/13；门禁 **0 回归 / 6 条改善**，**S3 成立**。
+完整分层、逐条 diff 与失败归因见 **[`docs/eval-report-m3.md`](docs/eval-report-m3.md)**。
+
+> **注意**：B 组 17 条失败 attempt 中 **16 条是模型没有调用 `code_search`**（工具可用但没被采纳），
+> 只有 1 条是工具报错，**没有一条是"检索返回了错误文件"**。也就是说这个 +25.6pp 主要来自
+> "工具被用上的用例变多"，而不是"排序变准"——排序质量看上面的 L1。
 
 ## 已知限制
 
-- **模型是否使用检索并不稳定**：已知确切标识符时它仍可能先 grep（R5，见 `docs/m1-findings.md`）。
-- `code_search` 的 `path` 与 `max_tokens` 参数**尚未生效**。
-- 检索按 bm25 相关度排序，**尚未**做到 ADR-05 的源码顺序保持（T2-14）。
-- 中文查询目前只有精度模式；整句自然语言可能返回 `empty`，召回降级与标点路由尚未实现（T2-19）。
-- M1 没有 tree-sitter 分块、gitignore / 密钥过滤、增量索引与任务取消；这些属 M2。
+- **S1 / S2 未达标**：`Success@5 = 0.433`（阈值 0.80）、`MRR = 0.313`（阈值 0.60）。
+- **纯中文自然语言检索基本不可用**：`natural` 桶 `Success@5 = 0.000`，失败 100% 归因 `A5`
+  （查询与代码零词法重叠）。`ADR-14` 已据此裁定"引入向量检索"（R2 命中），
+  但 **`T3-08`–`T3-11` 尚未实现**——目前**没有任何向量/embedding 依赖**。
+- **工具采纳不稳定（R5）**：模型即使有这个工具，也可能先用 `grep`；这是 L2 的主要瓶颈。
+- **工作区里若有与标准库同名的模块，MCP 服务器会起不来**（实测）：DSH 以工作区为 cwd
+  启动 `python -m dsh_coderag.server`，而 `python -m` 会把 cwd 放到 `sys.path` 最前。
+  工作区根目录存在 `token.py` 时实测直接
+  `ImportError: cannot import name 'EXACT_TOKEN_TYPES' from 'token'`；`types.py`、`parser.py`、
+  `config.py`、`logging.py` 等同理。**Python 项目受影响概率不低**，修复见 `docs/backlog.md`。
+- **gap chunk 没有行数上限**：`export const X = {...}` 这类不被识别为声明的区域会合成一个
+  大块，DSH 语料上实测最大 **3080 行**（`docs/backlog.md`）。
+- **TS 的 `type` 别名与 `const`/箭头函数未纳入声明**：在 DSH 语料上 **69.6% 的 chunk 是 gap**
+  （`docs/backlog.md`）。
+- **每次检索会为填 `skipped` 重新遍历仓库**（约 180 ms），尚未随索引持久化。
+- **单字中文查询**未实现 `§5.3.1` 规定的 `LIKE + low_confidence` 退化路径。
+- **固定 4 个工具**，不动态增删（`AGENTS.md` RL-05）。
+- **尚未打包**：无 PyPI、无 npm、无 `scripts/install.sh`、无 `CHANGELOG.md`；
+  安装必须走上面的"克隆 + `pip install` + `--patch`"。
+- 未做 Windows 实测；开发与评测均在 macOS 上完成。
+
+## 安全与隐私
+
+- **三层过滤**（`AGENTS.md` §4.1，按顺序、缺一不可）：
+  ① 内置密钥黑名单（`.env*`、`*.pem`、`*.key`、`id_rsa*`、`.npmrc`、`.ssh/`、`.aws/` …）；
+  ② 项目的 `.gitignore` → `.coderagignore`（用 `pathspec`，不自造 gitignore 语义）；
+  ③ **内容级正则**（私钥头、`AKIA…`、`sk-…`、`ghp_…`、`xox…`）——命中的 chunk **不入库**，
+  且**只记路径与模式名，绝不记录匹配到的内容**。
+- **过滤结果对模型可见**：`code_search` / `index_status` 会报告 `skipped: {count, reasons}`，
+  避免模型把"被过滤"误读成"不存在"从而编造。
+- **不联网、不采集遥测、不外发任何数据**（`AGENTS.md` S-01/S-02）。
+- **索引只写在工作区内**：`<工作区>/.coderag/index.sqlite3`，且被本仓库的 `.gitignore` 排除。
+
+## 开发
+
+```sh
+python -m pip install -e ".[dev]"
+python -m pytest                    # 全量（离线，不需要 API key）
+python -m ruff check src tests
+python -m mypy --strict src/
+```
+
+L2 A/B 评测（**需要模型 API key**）见 `EVAL.md` §3.6 与 `docs/eval-report-m3.md`。
 
 ## 文档
 
-- `PROJECT.md`：项目概况、架构、实现方案、任务表与进度。
-- `AGENTS.md`：强制性约束（红线、DSH 环境坑、安全、提交规范）。
-- `TESTING.md` / `EVAL.md`：测试方案与评测方案。
-- `cordis.patch.yml`：DSH 接入配置。
+| 文件 | 内容 |
+|---|---|
+| `PROJECT.md` | 项目概况、架构、ADR、任务表与进度 |
+| `AGENTS.md` | 强制性约束：红线、DSH 环境坑、安全、提交规范 |
+| `EVAL.md` / `TESTING.md` | 评测方案 / 测试方案 |
+| `docs/eval-report-m3.md` | M3 的 L1/L2 评测报告（分层 + 逐条 + 归因） |
+| `docs/adr/ADR-14-semantic-retrieval.md` | 决策门 `T3-07` 的裁决与证据 |
+| `docs/backlog.md` | 已知但未修的缺陷 |
+| `cordis.patch.yml` | DSH 接入配置 |
 
 ## 许可
 
-MIT，见 `LICENSE`。
+MIT，见 [`LICENSE`](LICENSE)。
