@@ -1,21 +1,62 @@
-"""Serialize an eval run into the per-query JSON report (EVAL.md 2.7 / 2.14).
+"""Serialize an eval run, and diff two runs query by query (EVAL.md 2.7).
 
-`build_report` turns an `EvalRun` into a plain JSON-serializable dict that
-lists every task's outcome plus raw hit/miss counts per class. It computes no
-Success@k, MRR or confidence interval — those metrics are T3-04 — and no
-before/after diff, which is T3-04c.
+`build_report` turns an `EvalRun` into a plain JSON-serializable dict that lists
+every task's outcome plus raw hit/miss counts per class.
+
+`diff_runs` compares two such reports **per query** and counts regressions;
+`gate_diff` turns that count into a pass/fail verdict, optionally waiving
+individual queries; `render_diff_markdown` renders both for a human.
+
+EVAL.md 2.7 requires the gate to look at the regression count rather than the
+mean alone, because a change can lift the average while quietly breaking
+individual queries.
+
+What this module does not do: it computes no Success@k / MRR / confidence
+interval (that is `metrics`), no failure attribution (that is `attribute`), and
+no `golden_version` check (that is `runner`, T3-04d).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from dsh_coderag.eval.runner import EvalResult, EvalRun
-from dsh_coderag.eval.tasks import TASK_CLASSES
+from dsh_coderag.eval.tasks import TASK_CLASSES, EvalError
 
 REPORT_SCHEMA = "dsh-coderag/eval-run/v1"
+DIFF_SCHEMA = "dsh-coderag/eval-diff/v1"
+
+CHANGE_REGRESSION = "regression"
+CHANGE_IMPROVEMENT = "improvement"
+CHANGE_RANK_IMPROVED = "rank_improved"
+CHANGE_RANK_REGRESSED = "rank_regressed"
+CHANGE_UNCHANGED = "unchanged"
+
+CHANGE_KINDS = (
+    CHANGE_REGRESSION,
+    CHANGE_IMPROVEMENT,
+    CHANGE_RANK_IMPROVED,
+    CHANGE_RANK_REGRESSED,
+    CHANGE_UNCHANGED,
+)
+
+MAX_REGRESSIONS_DEFAULT = 0
+"""Unwaived regressions tolerated by default.
+
+EVAL.md 2.7 quotes the industry starting point "two regressions fail the gate",
+then states this project must be **stricter** because 10-30 queries make a
+single flip worth 3.3-10 points. The L2 gate in `ab` already fails on any
+regression, so this module tolerates none by default; pass a larger
+`max_regressions` to adopt the looser rule explicitly.
+"""
+
+
+class ReportDiffError(EvalError):
+    """A report is not a valid run report, or two reports cannot be compared."""
 
 
 def build_report(run: EvalRun, *, tasks_file: str | None = None) -> dict[str, Any]:
@@ -50,6 +91,295 @@ def write_report(report: dict[str, Any], path: Path) -> None:
     )
 
 
+@dataclass(frozen=True)
+class QueryDiff:
+    """One query's outcome before and after, with its derived change kind."""
+
+    task_id: str
+    task_class: str
+    query: str
+    baseline_hit: bool
+    current_hit: bool
+    baseline_rank: int | None
+    current_rank: int | None
+    baseline_matched_path: str | None
+    current_matched_path: str | None
+
+    @property
+    def change(self) -> str:
+        """Classify the change between the two outcomes.
+
+        A hit that becomes a miss is the only thing called a regression; a
+        worse rank among hits is a separate, weaker signal.
+        """
+        if self.baseline_hit and not self.current_hit:
+            return CHANGE_REGRESSION
+        if self.current_hit and not self.baseline_hit:
+            return CHANGE_IMPROVEMENT
+        if self.baseline_hit and self.current_hit:
+            if self.baseline_rank is None or self.current_rank is None:
+                return CHANGE_UNCHANGED
+            if self.current_rank < self.baseline_rank:
+                return CHANGE_RANK_IMPROVED
+            if self.current_rank > self.baseline_rank:
+                return CHANGE_RANK_REGRESSED
+        return CHANGE_UNCHANGED
+
+    def to_json(self) -> dict[str, Any]:
+        """Return the JSON-serializable form recorded in the diff report."""
+        return {
+            "id": self.task_id,
+            "class": self.task_class,
+            "query": self.query,
+            "baseline_hit": self.baseline_hit,
+            "current_hit": self.current_hit,
+            "baseline_rank": self.baseline_rank,
+            "current_rank": self.current_rank,
+            "baseline_matched_path": self.baseline_matched_path,
+            "current_matched_path": self.current_matched_path,
+            "change": self.change,
+        }
+
+
+def diff_runs(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, Any]:
+    """Compare two run reports query by query and count regressions.
+
+    Only queries present on **both** sides are compared; those present on one
+    side alone are listed separately and never counted as a regression, because
+    there is nothing to compare them against. Rates are computed over the
+    compared set only, so a query that only exists on one side cannot move them.
+
+    Raises:
+        ReportDiffError: If either report is not a run report, or the two use
+            different `k` (ranks from different cut-offs are not comparable).
+    """
+    baseline_results = _run_results(baseline, "baseline")
+    current_results = _run_results(current, "current")
+    baseline_k = baseline.get("k")
+    current_k = current.get("k")
+    if baseline_k != current_k:
+        raise ReportDiffError(
+            f"k 不一致（baseline={baseline_k!r}, current={current_k!r}）：排名不可比"
+        )
+    current_by_id = {str(entry["id"]): entry for entry in current_results}
+    baseline_by_id = {str(entry["id"]): entry for entry in baseline_results}
+
+    pairs: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    diffs: list[QueryDiff] = []
+    for entry in baseline_results:
+        other = current_by_id.get(str(entry["id"]))
+        if other is None:
+            continue
+        pairs.append((entry, other))
+        diffs.append(_query_diff(entry, other))
+
+    per_query = [diff.to_json() for diff in diffs]
+    change_counts = {kind: sum(1 for diff in diffs if diff.change == kind) for kind in CHANGE_KINDS}
+    return {
+        "schema": DIFF_SCHEMA,
+        "k": baseline_k,
+        "compared": len(diffs),
+        "change_counts": change_counts,
+        "regression_count": change_counts[CHANGE_REGRESSION],
+        "improvement_count": change_counts[CHANGE_IMPROVEMENT],
+        "only_in_baseline": sorted(set(baseline_by_id) - set(current_by_id)),
+        "only_in_current": sorted(set(current_by_id) - set(baseline_by_id)),
+        "rates": _rates(pairs),
+        "per_query": per_query,
+    }
+
+
+def gate_diff(
+    diff: Mapping[str, Any],
+    *,
+    waivers: Sequence[str] = (),
+    max_regressions: int = MAX_REGRESSIONS_DEFAULT,
+) -> dict[str, Any]:
+    """Turn a query diff into a verdict keyed on the regression count.
+
+    `waivers` lists task ids whose regression a human has explicitly accepted
+    and explained (EVAL.md 2.7 allows that escape hatch). Waived regressions are
+    still reported; they just do not fail the gate. A waiver that matches no
+    actual regression is surfaced as `unused_waivers` rather than silently
+    ignored.
+
+    Raises:
+        ReportDiffError: If `max_regressions` is negative or the diff is not a
+            diff report.
+    """
+    if max_regressions < 0:
+        raise ReportDiffError(f"max_regressions 必须 ≥ 0，实际 {max_regressions}")
+    per_query = diff.get("per_query")
+    if diff.get("schema") != DIFF_SCHEMA or not isinstance(per_query, list):
+        raise ReportDiffError(f"不是一份 diff 报告：schema={diff.get('schema')!r}")
+    regressed = [
+        str(entry["id"])
+        for entry in per_query
+        if isinstance(entry, Mapping) and entry.get("change") == CHANGE_REGRESSION
+    ]
+    waiver_set = set(waivers)
+    waived = [task_id for task_id in regressed if task_id in waiver_set]
+    active = [task_id for task_id in regressed if task_id not in waiver_set]
+    return {
+        "schema": DIFF_SCHEMA,
+        "regression_count": len(regressed),
+        "waived_regressions": waived,
+        "active_regressions": active,
+        "unused_waivers": sorted(waiver_set - set(regressed)),
+        "max_regressions": max_regressions,
+        "passed": len(active) <= max_regressions,
+    }
+
+
+def render_diff_markdown(diff: Mapping[str, Any], verdict: Mapping[str, Any]) -> str:
+    """Render a query diff and its gate verdict as Markdown."""
+    rates = diff.get("rates")
+    rates = rates if isinstance(rates, Mapping) else {}
+    counts = diff.get("change_counts")
+    counts = counts if isinstance(counts, Mapping) else {}
+    lines = [
+        "# L1 逐 query diff",
+        "",
+        f"- 对比条数：{diff.get('compared')}（k={diff.get('k')}）",
+        f"- 命中率：{_rate(rates.get('baseline_hit_rate'))} → "
+        f"{_rate(rates.get('current_hit_rate'))}（{_pp(rates.get('delta'))}）",
+        f"- 回归：{diff.get('regression_count')} ｜ 改善：{diff.get('improvement_count')} ｜ "
+        f"名次变好：{counts.get(CHANGE_RANK_IMPROVED)} ｜ "
+        f"名次变差：{counts.get(CHANGE_RANK_REGRESSED)}",
+        f"- 门禁：{'PASS' if verdict.get('passed') else 'FAIL'}"
+        f"（未豁免回归 {len(verdict.get('active_regressions', []))} 条，"
+        f"容忍 {verdict.get('max_regressions')}）",
+    ]
+    if diff.get("only_in_baseline") or diff.get("only_in_current"):
+        lines.append(
+            f"- 仅单侧存在：baseline {diff.get('only_in_baseline')} ｜ "
+            f"current {diff.get('only_in_current')}"
+        )
+    regressions = [
+        entry for entry in diff.get("per_query", []) if entry["change"] == CHANGE_REGRESSION
+    ]
+    if regressions:
+        lines += ["", "## 回归（命中 → 未命中）", ""]
+        lines += [_describe(entry) for entry in regressions]
+    improvements = [
+        entry for entry in diff.get("per_query", []) if entry["change"] == CHANGE_IMPROVEMENT
+    ]
+    if improvements:
+        lines += ["", "## 改善（未命中 → 命中）", ""]
+        lines += [_describe(entry) for entry in improvements]
+    if verdict.get("waived_regressions"):
+        lines += ["", "## 已豁免的回归（需人工说明）", ""]
+        lines += [f"- {task_id}" for task_id in verdict["waived_regressions"]]
+    if verdict.get("unused_waivers"):
+        lines += ["", f"- ⚠️ 未匹配到任何回归的 waiver：{verdict['unused_waivers']}"]
+    lines += [
+        "",
+        "## 逐条对比",
+        "",
+        "| query | 类 | baseline | current | 变化 |",
+        "|---|---|---|---|---|",
+    ]
+    for entry in diff.get("per_query", []):
+        lines.append(
+            f"| {entry['id']} | {entry['class']} | {_side(entry, 'baseline')} "
+            f"| {_side(entry, 'current')} | {entry['change']} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _side(entry: Mapping[str, Any], prefix: str) -> str:
+    if not entry.get(f"{prefix}_hit"):
+        return "miss"
+    rank = entry.get(f"{prefix}_rank")
+    path = entry.get(f"{prefix}_matched_path")
+    return f"hit #{rank} ({path})"
+
+
+def _describe(entry: Mapping[str, Any]) -> str:
+    return (
+        f"- **{entry['id']}**（{entry['class']}）："
+        f"{_side(entry, 'baseline')} → {_side(entry, 'current')} ｜ {entry['query']}"
+    )
+
+
+def _rates(pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any]]]) -> dict[str, Any]:
+    """Hit rates over the compared pairs, overall and per class."""
+    baseline_entries = [before for before, _ in pairs]
+    current_entries = [after for _, after in pairs]
+    baseline_rate = _hit_rate(baseline_entries)
+    current_rate = _hit_rate(current_entries)
+    class_rates: dict[str, dict[str, Any]] = {}
+    for task_class in TASK_CLASSES:
+        class_pairs = [
+            (before, after)
+            for before, after in pairs
+            if before.get("class") == task_class
+        ]
+        class_rates[task_class] = {
+            "n": len(class_pairs),
+            "baseline_hit_rate": _hit_rate([before for before, _ in class_pairs]),
+            "current_hit_rate": _hit_rate([after for _, after in class_pairs]),
+        }
+    return {
+        "n": len(pairs),
+        "baseline_hit_rate": baseline_rate,
+        "current_hit_rate": current_rate,
+        "delta": (
+            current_rate - baseline_rate
+            if baseline_rate is not None and current_rate is not None
+            else None
+        ),
+        "by_class": class_rates,
+    }
+
+
+def _hit_rate(entries: Sequence[Mapping[str, Any]]) -> float | None:
+    if not entries:
+        return None
+    return sum(1 for entry in entries if entry.get("hit") is True) / len(entries)
+
+
+def _run_results(report: Mapping[str, Any], label: str) -> list[Mapping[str, Any]]:
+    if report.get("schema") != REPORT_SCHEMA:
+        raise ReportDiffError(
+            f"{label}: schema 期望 {REPORT_SCHEMA!r}，实际 {report.get('schema')!r}"
+        )
+    results = report.get("results")
+    if not isinstance(results, list):
+        raise ReportDiffError(f"{label}: 缺少 results 列表")
+    checked: list[Mapping[str, Any]] = []
+    for entry in results:
+        if not isinstance(entry, Mapping) or not isinstance(entry.get("id"), str):
+            raise ReportDiffError(f"{label}: results 含非法条目 {entry!r}")
+        checked.append(entry)
+    return checked
+
+
+def _query_diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> QueryDiff:
+    return QueryDiff(
+        task_id=str(baseline["id"]),
+        task_class=str(baseline.get("class", "")),
+        query=str(baseline.get("query", "")),
+        baseline_hit=baseline.get("hit") is True,
+        current_hit=current.get("hit") is True,
+        baseline_rank=_rank(baseline.get("rank")),
+        current_rank=_rank(current.get("rank")),
+        baseline_matched_path=_optional_str(baseline.get("matched_path")),
+        current_matched_path=_optional_str(current.get("matched_path")),
+    )
+
+
+def _rank(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _optional_str(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
 def _result_to_json(result: EvalResult) -> dict[str, Any]:
     return {
         "id": result.task_id,
@@ -65,3 +395,11 @@ def _result_to_json(result: EvalResult) -> dict[str, Any]:
         "token_estimate": result.token_estimate,
         "error": result.error,
     }
+
+
+def _rate(value: Any) -> str:
+    return "n/a" if not isinstance(value, (int, float)) else f"{float(value):.3f}"
+
+
+def _pp(value: Any) -> str:
+    return "n/a" if not isinstance(value, (int, float)) else f"{float(value) * 100:+.1f}pp"
