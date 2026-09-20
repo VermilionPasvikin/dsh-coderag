@@ -83,7 +83,7 @@ Done in 1.7s using pnpm v12.4.2
 ./scripts/dsh --profile coderag-dev --dump-config
 ```
 
-实际输出：先 `# == @deepseek-ai/dsh-base`（约 120 条内置行），随后本插件自成一层。关键段：
+实际输出：先 `# == @deepseek-ai/dsh-base`（84 条内置条目，占 332 行），随后本插件自成一层（第 333 行起）。关键段：
 
 ```yaml
 # == dsh-coderag
@@ -100,7 +100,7 @@ Done in 1.7s using pnpm v12.4.2
       CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
 ```
 
-退出码 `0`，stderr 无输出（没有 patch 应用警告）。
+退出码 `0`；分开采集后 stdout `10843` 字节、**stderr `0` 字节**（没有 patch 应用警告）。层标签 `# == dsh-coderag` 在第 333 行，`- id: mcp-coderag` 在第 334 行。
 
 **期望结果的逐项对应**：
 
