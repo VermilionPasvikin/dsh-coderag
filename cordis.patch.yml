@@ -9,6 +9,14 @@
 # engine indexes defaults to the process working directory and is overridable
 # with CODERAG_ROOT; both are set through config.env because stdio child
 # environments are scrubbed (E-02).
+#
+# `args` uses `-c`, not `-m`. The child runs with cwd set to the workspace being
+# indexed, and `python -m` imports `runpy` before any of our code runs, so a
+# workspace file shadowing a module runpy needs (e.g. `types.py`) aborts the
+# server during interpreter startup, before it can defend itself. `-c` skips
+# runpy, and `dsh_coderag/__init__.py` drops the working directory from
+# `sys.path` before its first shadowable import. Keep this string in sync with
+# `LAUNCHER_PROGRAM` in tests/test_cwd_shadowing.py, which asserts the two match.
 
 - insert:
     - id: mcp-coderag
@@ -17,6 +25,6 @@
         serverName: coderag
         transport: stdio
         command: !!js process.env.CODERAG_PYTHON ?? '/opt/anaconda3/envs/forBSH/bin/python'
-        args: ['-m', 'dsh_coderag.server']
+        args: ['-c', 'import dsh_coderag.server as s; s.run()']
         env:
           CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()

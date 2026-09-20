@@ -31,8 +31,8 @@ dsh-coderag 是一个以 **MCP 服务器**形态提供的代码库检索引擎�
 
 - 引擎是 Python 包 `dsh_coderag`，以 **MCP stdio 服务器**运行。
 - DSH 通过内置包 `@deepseek-ai/dsh-mcp-client` 在本机**拉起一个子进程**
-  （`python -m dsh_coderag.server`），两者用 stdin/stdout 上的 JSON-RPC 通信，
-  **不经过网络、不监听端口**。
+  （`dsh_coderag.server` 的 stdio 入口，见 `cordis.patch.yml`），
+  两者用 stdin/stdout 上的 JSON-RPC 通信，**不经过网络、不监听端口**。
 - 索引存放在 `<工作区>/.coderag/index.sqlite3`（SQLite **FTS5** + 中文 bigram），
   **不写到工作区之外**（`AGENTS.md` S-03/S-04）。
 - 分块用 **tree-sitter** 按函数/类/接口等声明边界切分；检索用 **BM25**，
@@ -197,11 +197,16 @@ dsh-coderag --version
   （查询与代码零词法重叠）。`ADR-14` 已据此裁定"引入向量检索"（R2 命中），
   但 **`T3-08`–`T3-11` 尚未实现**——目前**没有任何向量/embedding 依赖**。
 - **工具采纳不稳定（R5）**：模型即使有这个工具，也可能先用 `grep`；这是 L2 的主要瓶颈。
-- **工作区里若有与标准库同名的模块，MCP 服务器会起不来**（实测）：DSH 以工作区为 cwd
-  启动 `python -m dsh_coderag.server`，而 `python -m` 会把 cwd 放到 `sys.path` 最前。
-  工作区根目录存在 `token.py` 时实测直接
-  `ImportError: cannot import name 'EXACT_TOKEN_TYPES' from 'token'`；`types.py`、`parser.py`、
-  `config.py`、`logging.py` 等同理。**Python 项目受影响概率不低**，修复见 `docs/backlog.md`。
+- **工作区里与标准库同名的模块：已处理，保留一个残余边界**。DSH 以工作区为 cwd 启动引擎，
+  而 `python -m` / `-c` 会把 cwd 放到 `sys.path` 最前，工作区根目录的 `token.py`、`types.py`、
+  `logging.py` 等会遮蔽标准库，导致 MCP 服务器起不来。现在由两层防护解决：
+  `cordis.patch.yml` 改用 **`-c`** 启动（绕开 `runpy`），
+  `dsh_coderag/__init__.py` 在**任何可被遮蔽的导入之前**把 cwd 从 `sys.path` 移除。
+  实测在同时含 `token.py` / `types.py` / `parser.py` / `logging.py` / `config.py` 的工作区里，
+  DSH 会话中的 `code_search` 正常返回 `status: ready`。
+  **残余边界**：手工执行 `python -m dsh_coderag.server`（不经 `-c`）且工作区含 `types.py`
+  这类 **`runpy` 自身依赖**的同名文件时，解释器启动阶段仍会失败——这发生在我们的代码运行之前，
+  无法从包内修复；请使用 `cordis.patch.yml` 的启动方式。
 - **gap chunk 没有行数上限**：`export const X = {...}` 这类不被识别为声明的区域会合成一个
   大块，DSH 语料上实测最大 **3080 行**（`docs/backlog.md`）。
 - **TS 的 `type` 别名与 `const`/箭头函数未纳入声明**：在 DSH 语料上 **69.6% 的 chunk 是 gap**

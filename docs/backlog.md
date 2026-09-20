@@ -88,7 +88,7 @@
 - 结论：**不做排序硬凑**；保留为真实的语义检索失败样本。
 
 
-## MCP 服务器会被工作区里与标准库同名的模块打断（发现于 README 安装验证）
+## ✅ 已解决：MCP 服务器会被工作区里与标准库同名的模块打断（发现于 README 安装验证）
 
 - 现象：在**工作区根目录含 `token.py`** 的仓库里，`python -m dsh_coderag.server` 直接
   `ImportError: cannot import name 'EXACT_TOKEN_TYPES' from 'token'
@@ -107,5 +107,24 @@
      但需注意 `-m` 下导入已经发生，真正可靠的拦截点在 `__main__` 入口。
   3. 补一条回归测试：在 `tmp_path` 放一个 `token.py`，断言 `python -m dsh_coderag.server`
      仍能完成 MCP 握手。
+- **已解决（commit 见本节末）**：采纳了两层防护，并修正了上面"建议 1"的方向——
+  用 `runpy.run_module` 的 `-c` 一行**并不解决问题**，因为 `-c` 里 `import runpy` 时
+  `runpy` 仍会走 `types`（`runpy → importlib.util → contextlib → functools →
+  from types import GenericAlias`），工作区的 `types.py` 一样能打断它。真正的解法是
+  **让 `-c` 只导入我们自己的包**，把 `sys.path` 清理放进包内、且在第一个可被遮蔽的导入之前：
+  1. `cordis.patch.yml` 的 `args` 改为 `['-c', 'import dsh_coderag.server as s; s.run()']`
+     ——`-c` 本身不导入 `runpy`，因此解释器启动阶段不会被工作区文件打断。
+  2. `dsh_coderag/__init__.py` 在**任何子模块导入之前**删除 `sys.path` 里的 `''` / `.` / cwd
+     （引擎只把用户文件当文本读，从不 import 它们，所以移除是安全的）。
+  3. `tests/test_cwd_shadowing.py` 三条回归：patch 里的启动串与测试常量一致、
+     `-c "import dsh_coderag"` 在工作区含 `token.py`/`types.py`/`parser.py`/`logging.py`/
+     `config.py` 时仍成功、以及用**与 patch 完全相同的 argv** 完成一次 MCP 握手。
+- **实测验证**：在同时含上述 5 个同名文件的工作区里，DSH 会话中
+  `code_search` 调用 5 次、返回 `status: ready` / `scanned: 6 files / 7 chunks` /
+  `auth.py:1-3`，**无任何 ImportError**。
+- **残余边界（无法从包内修复）**：手工执行 `python -m dsh_coderag.server`（不经 `-c`）
+  且工作区含 `types.py` 这类 **`runpy` 自身依赖**的文件时，失败发生在解释器启动阶段、
+  早于我们的代码；另外 `sitecustomize.py` 之类由 `site` 在启动时导入的文件同样无法拦截。
+  请使用 `cordis.patch.yml` 的启动方式。
 - 关联：属 `T1-14`（patch 启动方式）/ `T4-02`（可分发的 bundle patch）范围；
-  在发布给社区前应优先修掉，因为它会让"装了但用不了"出现在相当一部分 Python 仓库上。
+  已在发布前修掉。
