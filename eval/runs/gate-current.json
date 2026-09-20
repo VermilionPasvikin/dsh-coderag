@@ -1,10 +1,10 @@
 {
   "schema": "dsh-coderag/ab-gate/v1",
-  "baseline_group": "eval-coderag",
+  "baseline_group": "eval-baseline",
   "current_group": "eval-coderag",
-  "baseline_task_success_rate": 0.5641025641025641,
+  "baseline_task_success_rate": 0.3076923076923077,
   "current_task_success_rate": 0.8974358974358975,
-  "delta_pp": 33.333333333333336,
+  "delta_pp": 58.97435897435898,
   "only_in_baseline": [],
   "only_in_current": [],
   "regressions": [],
@@ -16,22 +16,27 @@
     },
     {
       "case": "crossfile-skill-precedence",
-      "baseline_rate": 0.6666666666666666,
+      "baseline_rate": 0.0,
       "current_rate": 1.0
     },
     {
       "case": "crossfile-subprocess-env-scrub",
-      "baseline_rate": 0.3333333333333333,
+      "baseline_rate": 0.0,
       "current_rate": 1.0
     },
     {
+      "case": "crossfile-todo-snapshot",
+      "baseline_rate": 0.0,
+      "current_rate": 0.6666666666666666
+    },
+    {
       "case": "crossfile-tool-cancel-code",
-      "baseline_rate": 0.3333333333333333,
+      "baseline_rate": 0.0,
       "current_rate": 1.0
     },
     {
       "case": "locate-image-count-limit",
-      "baseline_rate": 0.6666666666666666,
+      "baseline_rate": 0.0,
       "current_rate": 1.0
     },
     {
@@ -46,7 +51,7 @@
     },
     {
       "case": "locate-tool-timeout-default",
-      "baseline_rate": 0.6666666666666666,
+      "baseline_rate": 0.0,
       "current_rate": 1.0
     }
   ],
@@ -59,33 +64,33 @@
     },
     {
       "case": "crossfile-skill-precedence",
-      "baseline_rate": 0.6666666666666666,
+      "baseline_rate": 0.0,
       "current_rate": 1.0,
-      "delta": 0.33333333333333337
+      "delta": 1.0
     },
     {
       "case": "crossfile-subprocess-env-scrub",
-      "baseline_rate": 0.3333333333333333,
+      "baseline_rate": 0.0,
       "current_rate": 1.0,
-      "delta": 0.6666666666666667
+      "delta": 1.0
     },
     {
       "case": "crossfile-todo-snapshot",
-      "baseline_rate": 0.6666666666666666,
+      "baseline_rate": 0.0,
       "current_rate": 0.6666666666666666,
-      "delta": 0.0
+      "delta": 0.6666666666666666
     },
     {
       "case": "crossfile-tool-cancel-code",
-      "baseline_rate": 0.3333333333333333,
+      "baseline_rate": 0.0,
       "current_rate": 1.0,
-      "delta": 0.6666666666666667
+      "delta": 1.0
     },
     {
       "case": "locate-image-count-limit",
-      "baseline_rate": 0.6666666666666666,
+      "baseline_rate": 0.0,
       "current_rate": 1.0,
-      "delta": 0.33333333333333337
+      "delta": 1.0
     },
     {
       "case": "locate-repeat-tool-reminder",
@@ -101,9 +106,9 @@
     },
     {
       "case": "locate-tool-timeout-default",
-      "baseline_rate": 0.6666666666666666,
+      "baseline_rate": 0.0,
       "current_rate": 1.0,
-      "delta": 0.33333333333333337
+      "delta": 1.0
     },
     {
       "case": "negative-elasticsearch",

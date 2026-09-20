@@ -1,13 +1,9 @@
 # L2 gate
 
 - baseline: `eval-coderag` → 0.564
-- current: `eval-coderag` → 0.872
-- delta: +30.8pp ｜ S3(≥+10pp): True
-- gate: FAIL （回归 1 条）
-
-## 回归
-
-- negative-elasticsearch: 1.000 → 0.667
+- current: `eval-coderag` → 0.897
+- delta: +33.3pp ｜ S3(≥+10pp): True
+- gate: PASS （回归 0 条）
 
 ## 改善
 

@@ -25,8 +25,10 @@ L1_CURRENT="${CODERAG_L1_CURRENT:-eval/runs/l1-current.json}"
 L1_GATE="${CODERAG_L1_GATE_OUT:-eval/runs/l1-gate.json}"
 L1_MD="${CODERAG_L1_MARKDOWN:-eval/runs/l1-gate.md}"
 L2_BASELINE="${CODERAG_L2_BASELINE:-eval/runs/a-v1/report.json}"
-L2_CURRENT="${CODERAG_L2_CURRENT:-eval/runs/b-v1/report.json}"
-L2_GATE="${CODERAG_L2_GATE_OUT:-eval/runs/gate-v1.json}"
+# 当前 B 组：每次改实现/工具文本后产生新的 run，把它设成"当前"，基线保持 A 组。
+# 历史对照（a-v1 → b-v1，T3-06）保留在 eval/runs/gate-v1.*。
+L2_CURRENT="${CODERAG_L2_CURRENT:-eval/runs/b-r5/report.json}"
+L2_GATE="${CODERAG_L2_GATE_OUT:-eval/runs/gate-current.json}"
 
 status=0
 

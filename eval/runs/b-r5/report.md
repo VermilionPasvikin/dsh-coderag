@@ -2,7 +2,7 @@
 
 - profile: `headless` ｜ trials: 3
 - workspace: `/private/tmp/dsh-coderag-t3-03-corpus`
-- taskSuccess: 0.872 (34/39)
+- taskSuccess: 0.897 (35/39)
 
 | case | successes | rate | steps | tokens | turn_end |
 |---|---:|---:|---:|---:|---|
@@ -15,7 +15,7 @@
 | locate-repeat-tool-reminder | 2/3 | 0.667 | 3.0 | 47332.3 | completed |
 | locate-spill-notice | 2/3 | 0.667 | 6.0 | 178680.3 | completed |
 | locate-tool-timeout-default | 3/3 | 1.000 | 3.3 | 57510.3 | completed |
-| negative-elasticsearch | 2/3 | 0.667 | 2.7 | 44954.0 | completed |
+| negative-elasticsearch | 3/3 | 1.000 | 2.7 | 44954.0 | completed |
 | negative-kafka | 3/3 | 1.000 | 3.3 | 50723.0 | completed |
 | regression-context-window-code | 3/3 | 1.000 | 2.7 | 38779.3 | completed |
 | regression-prune-marker | 3/3 | 1.000 | 2.3 | 32511.0 | completed |
@@ -26,4 +26,3 @@
 - **crossfile-todo-snapshot**: 步数 20 超过 max_steps=16; 有工具返回错误：['call_01_QldkKY4Ti8vmbVgE3pO27411']
 - **locate-repeat-tool-reminder**: tools_called ['code_search'] 不是 ['bash', 'grep'] 的保序子序列
 - **locate-spill-notice**: tools_called ['code_search'] 不是 ['bash', 'grep', 'bash', 'grep', 'read', 'read', 'read', 'read', 'grep', 'grep', 'grep', 'read', 'grep', 'read'] 的保序子序列
-- **negative-elasticsearch**: 最终回答不匹配正则 '(?i)((没有|不存在|未找到|找不到|未包含)[^。\\n]{0,15}elasticsearch)|(no\\s+elasticsearch)|(not\\s+(found|present|used|exist))'
