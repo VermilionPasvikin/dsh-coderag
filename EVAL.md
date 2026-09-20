@@ -316,7 +316,7 @@ Carterette (2012) 证明：**12 个系统做 66 次配对检验时，"至少出�
 |---|---|
 | **主聚合口径** | **宏平均（macro-average）**，即"每条 query 等权"。用于 CI 门禁。**不用流量加权**——本地工具没有流量概念 |
 | **二值化** | 本项目是**天然二值**（路径命中/未命中），不存在分级阈值问题。**这也是选 `Success@k` 而非 nDCG 的一个实际好处** |
-| **`golden_version` 字段** | `eval/tasks.jsonl` 与 `eval/tasks.next.jsonl` 各带一个版本号 |
+| **`golden_version` 字段** | 版本号描述**整份文件**，因此放在同目录的 `eval/tasks.meta.json`（`{"golden_version": "..."}`），**不进每一行**——30 次重复只会制造漂移风险。当前值由 `T3-04d` 冻结（`m3-b1`），运行/门禁读取方式见 `EVAL.md` §3.6 |
 | **版本不匹配时** | **直接失败**，除非显式指定 `--rebaseline` 并**由人确认**。原文：*"Always fail on `golden_version` mismatch unless the job is explicitly a 'rebaseline' workflow"* |
 | **改动 golden 集必须单独成一次提交** | 否则"改了题"和"改了实现"混在一个 diff 里，**你无法判断分数变化来自哪一边**——这是"静默的方法论破坏" |
 
@@ -468,6 +468,10 @@ dsh plugin --profile eval-coderag   add .        # 加上我们的 bundle
 3. **`no_tool_errors: true` 拦住"假通过"**。README 自己举了例子：工具报错但 Agent 兜底答对，不加这条就会误判为通过。
 
 ### 3.5 判分与门禁
+
+> ⚠️ **下面代码块里的 `eval_run` / `eval_gate` 是 `dsh-eval-harness` 的 API。** `T3-00` 已实测该插件
+> 与本机 DSH 的会话日志格式不兼容，实际使用的是**自建 runner**：`scripts/ab_eval.py run|gate`
+> （见 §3.6）。此处的调用示例**仅为记录原始方案**，不要照着执行。
 
 ```sh
 # B 组跑一次，产出报告

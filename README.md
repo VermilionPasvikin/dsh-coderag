@@ -41,8 +41,10 @@ dsh-coderag 是一个以 **MCP 服务器**形态提供的代码库检索引擎�
 
 ## 安装（当前方式）
 
-> **注意**：`package.json` bundle 尚未创建（M4 未开始），所以**还不能**用
-> `dsh plugin add dsh-coderag` 一条命令安装。当前可靠的方式是「克隆 + `pip install` + `--patch`」。
+> **注意**：bundle 清单（`package.json`，`T4-01`）**已就绪**——`dsh.bundle.patch` 指向
+> `./cordis.patch.yml`，`files` 只放行该文件，且**不含任何 JS 入口**。但**"一条命令安装"尚未验证**
+> （本地 `dsh plugin add .` 属 `T4-02`，干净 profile 的端到端验证属 `T4-08`），也**尚未发布到
+> PyPI / npm**。因此当前可靠的方式仍是「克隆 + `pip install` + `--patch`」。
 > 下面每一条都在本机实测过（见文末「安装验证」）。
 
 **前置**：Python **3.10–3.12**（`requires-python = ">=3.10,<3.13"`）、
