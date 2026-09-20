@@ -1,0 +1,14 @@
+{
+  "name": "dsh-coderag",
+  "version": "0.1.0",
+  "description": "Codebase retrieval engine for DeepSeek Harness, exposed over MCP",
+  "license": "MIT",
+  "files": [
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
