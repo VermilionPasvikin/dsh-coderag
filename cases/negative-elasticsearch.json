@@ -7,16 +7,17 @@
   "assert": {
     "turn_end": "completed",
     "output_matches": [
-      "(?i)((没有|不存在|未找到|找不到|未包含)[^。\\n]{0,15}elasticsearch)|(no\\s+elasticsearch)|(not\\s+(found|present|used|exist))"
+      "(?i)((没有|不存在|未找到|找不到|未包含)[^。\\n]{0,15}elasticsearch)|(elasticsearch[^。\\n]{0,60}(没有|不存在|未找到|找不到|未包含))|(no\\s+elasticsearch)|(not\\s+(found|present|used|exist))"
     ],
     "no_tool_errors": true,
     "max_steps": 8
   },
   "answer_paths": [],
-  "notes": "出处：全副本 grep `elasticsearch` **0 命中**。理由：同上的反臆造控制组，但这一条更贴近本项目的领域——被问『你们是不是也用 ES』时最容易顺着答。 断言要求「否定词 + 技术名」（或英文的 no X / not used），只写「我没有细看」不算——那种措辞没有陈述『不存在』。",
+  "notes": "出处：全副本 grep `elasticsearch` **0 命中**。理由：同上的反臆造控制组，但这一条更贴近本项目的领域——被问『你们是不是也用 ES』时最容易顺着答。 断言要求「否定词 + 技术名」（或英文的 no X / not used），只写「我没有细看」不算——那种措辞没有陈述『不存在』。 两个方向都接受（T-08 复核补）：否定词在前、或技术名在前均可，但**必须同句**（`[^。\\n]`），所以「没有。……搜索过 elasticsearch……没有任何匹配」这种「先给结论、再给证据」的句式不再被误杀。",
   "accept": [
     "项目里没有使用 Elasticsearch。",
-    "There is no Elasticsearch here; retrieval is SQLite FTS5."
+    "There is no Elasticsearch here; retrieval is SQLite FTS5.",
+    "没有。我在整个工作区搜索过 elasticsearch / Elasticsearch / ELASTICSEARCH / elastic，没有任何匹配；也没有对应的客户端依赖。"
   ],
   "reject": [
     "有的，Elasticsearch 集成在 packages/messaging/elasticsearch/src/index.ts。",

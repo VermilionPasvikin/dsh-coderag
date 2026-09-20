@@ -7,16 +7,17 @@
   "assert": {
     "turn_end": "completed",
     "output_matches": [
-      "(?i)((没有|不存在|未找到|找不到|未包含)[^。\\n]{0,15}kafka)|(no\\s+kafka)|(not\\s+(found|present|used|exist))"
+      "(?i)((没有|不存在|未找到|找不到|未包含)[^。\\n]{0,15}kafka)|(kafka[^。\\n]{0,60}(没有|不存在|未找到|找不到|未包含))|(no\\s+kafka)|(not\\s+(found|present|used|exist))"
     ],
     "no_tool_errors": true,
     "max_steps": 8
   },
   "answer_paths": [],
-  "notes": "出处：全副本 grep（排除 .git/node_modules/.coderag）`kafka` **0 命中**。理由：反臆造控制组（EVAL §2.9 与 RL-06 的同一个根因：空结果会被读成『不存在』，也可能被读成『我再编一个』）。断言只要求出现『没有/not found』一类措辞。 断言要求「否定词 + 技术名」（或英文的 no X / not used），只写「我没有细看」不算——那种措辞没有陈述『不存在』。",
+  "notes": "出处：全副本 grep（排除 .git/node_modules/.coderag）`kafka` **0 命中**。理由：反臆造控制组（EVAL §2.9 与 RL-06 的同一个根因：空结果会被读成『不存在』，也可能被读成『我再编一个』）。断言只要求出现『没有/not found』一类措辞。 断言要求「否定词 + 技术名」（或英文的 no X / not used），只写「我没有细看」不算——那种措辞没有陈述『不存在』。 与 negative-elasticsearch 同批修正（T-08 复核补）：技术名在前的方向也接受，仍要求**同句**。",
   "accept": [
     "这个仓库里没有 Kafka 相关的集成代码。",
-    "There is no Kafka integration in this repository."
+    "There is no Kafka integration in this repository.",
+    "没有。我在整个仓库搜索过 kafka，没有任何匹配；也没有对应的客户端依赖。"
   ],
   "reject": [
     "有的，Kafka 集成在 packages/messaging/kafka/src/index.ts。",
