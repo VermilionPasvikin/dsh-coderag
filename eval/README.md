@@ -13,7 +13,7 @@
 | `eval/schema.json` | 单条评测任务的 JSON Schema（Draft 2020-12） |
 | `eval/tasks.jsonl` | 冻结的 golden 评测集；每行一个 JSON 对象，由 T3-02a 创建 |
 | `eval/tasks.next.jsonl` | 调参期间发现、但本轮不允许修改 golden 集时的新 case 暂存区（EVAL.md §2.9 陷阱 3） |
-| `eval/tasks.meta.json` | 文件级元数据（含 `golden_version`）；由 `T3-04d` 落地版本校验时创建 |
+| `eval/tasks.meta.json` | 文件级元数据（含 `golden_version`）；初始版本 `m3-b1` = 30 条 B 批冻结状态 |
 
 ## `tasks.jsonl` 的每行字段
 
@@ -38,8 +38,10 @@ JSONL 示例：
 ```
 
 **不要**把 `golden_version` 塞进每一行。它描述整份文件，重复 30 次只会制造漂移风险；
-按 `EVAL.md` §2.7，`T3-04d` 将把它放在 `eval/tasks.meta.json` 中，并在版本不匹配时直接失败，
-除非显式 `--rebaseline`。
+按 `EVAL.md` §2.7，它放在 `eval/tasks.meta.json` 里。`python -m dsh_coderag.eval run` 会读取它：
+当 `--expect-golden-version` 与文件中的版本不一致时，**在跑任何查询之前**就以退出码 2 失败，
+除非显式传 `--rebaseline`（人工确认，从不自动推断）。改了 golden 集就必须同步升版本号，
+否则分数变化无法归因（`EVAL.md` §2.9 陷阱 15）。
 
 ## 配比
 
