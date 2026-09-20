@@ -2,9 +2,12 @@
 
 This package loads the golden task set, runs each query through the production
 searcher and writes a per-query JSON report. It never participates in the
-production retrieval path and never calls a model. Future pieces live in
-their own modules: metrics (T3-04), attribution (T3-04b), diff (T3-04c) and
-golden_version checks (T3-04d).
+production retrieval path and never calls a model.
+
+Sibling modules extend it rather than being re-exported here: `metrics`
+(Success@k, MRR, Wilson intervals, T3-04), `attribute` (A1-A7 failure
+attribution, T3-04b) and `report`'s per-query diff plus its regression gate
+(T3-04c). The `golden_version` check is still outstanding (T3-04d).
 """
 
 from __future__ import annotations
