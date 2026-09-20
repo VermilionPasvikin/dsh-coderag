@@ -87,3 +87,25 @@
   **判别性**（低文档频率）的词"。需要按 token 统计文档频率，属独立改动。
 - 结论：**不做排序硬凑**；保留为真实的语义检索失败样本。
 
+
+## MCP 服务器会被工作区里与标准库同名的模块打断（发现于 README 安装验证）
+
+- 现象：在**工作区根目录含 `token.py`** 的仓库里，`python -m dsh_coderag.server` 直接
+  `ImportError: cannot import name 'EXACT_TOKEN_TYPES' from 'token'
+  (/path/to/workspace/token.py)`，MCP 服务器根本起不来。
+- 根因：DSH 以**工作区为 cwd** 启动 MCP 子进程（`cordis.patch.yml` 的
+  `CODERAG_ROOT: process.cwd()` 正依赖这一点），而 `python -m` 会把 cwd（`''`）放到
+  `sys.path` 最前，于是工作区里的 `token.py` 覆盖了标准库 `token`。`types.py`、
+  `parser.py`、`config.py`、`logging.py` 等同理——**对 Python 项目命中率不低**。
+- 影响面：只在被索引工作区的**根目录**有同名文件时触发；DSH 自己的 TS 语料不会触发，
+  所以 M2/M3 的全部实测都没暴露它。
+- 建议动作（按优先级）：
+  1. `cordis.patch.yml` 的 `args` 改为不把 cwd 放进 `sys.path` 的启动方式，例如
+     `['-c', 'import runpy,sys; sys.path.pop(0); runpy.run_module("dsh_coderag.server", run_name="__main__")']`；
+     或 Python ≥3.11 时用 `-P`（本项目支持 3.10，故不能只靠 `-P`）。
+  2. 在 `dsh_coderag/server.py` 顶部做 `sys.path` 防御（删除 `''`/cwd 项后再导入其余模块），
+     但需注意 `-m` 下导入已经发生，真正可靠的拦截点在 `__main__` 入口。
+  3. 补一条回归测试：在 `tmp_path` 放一个 `token.py`，断言 `python -m dsh_coderag.server`
+     仍能完成 MCP 握手。
+- 关联：属 `T1-14`（patch 启动方式）/ `T4-02`（可分发的 bundle patch）范围；
+  在发布给社区前应优先修掉，因为它会让"装了但用不了"出现在相当一部分 Python 仓库上。
