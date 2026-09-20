@@ -1,0 +1,125 @@
+{
+  "schema": "dsh-coderag/ab-gate/v1",
+  "baseline_group": "eval-baseline",
+  "current_group": "eval-coderag",
+  "baseline_task_success_rate": 0.3076923076923077,
+  "current_task_success_rate": 0.7692307692307693,
+  "delta_pp": 46.15384615384615,
+  "only_in_baseline": [],
+  "only_in_current": [],
+  "regressions": [],
+  "improvements": [
+    {
+      "case": "crossfile-skill-precedence",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0
+    },
+    {
+      "case": "crossfile-subprocess-env-scrub",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0
+    },
+    {
+      "case": "crossfile-todo-snapshot",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0
+    },
+    {
+      "case": "locate-image-count-limit",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0
+    },
+    {
+      "case": "locate-spill-notice",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0
+    },
+    {
+      "case": "locate-tool-timeout-default",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0
+    }
+  ],
+  "per_case": [
+    {
+      "case": "crossfile-goal-round-limit",
+      "baseline_rate": 0.0,
+      "current_rate": 0.0,
+      "delta": 0.0
+    },
+    {
+      "case": "crossfile-skill-precedence",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0,
+      "delta": 1.0
+    },
+    {
+      "case": "crossfile-subprocess-env-scrub",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0,
+      "delta": 1.0
+    },
+    {
+      "case": "crossfile-todo-snapshot",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0,
+      "delta": 1.0
+    },
+    {
+      "case": "crossfile-tool-cancel-code",
+      "baseline_rate": 0.0,
+      "current_rate": 0.0,
+      "delta": 0.0
+    },
+    {
+      "case": "locate-image-count-limit",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0,
+      "delta": 1.0
+    },
+    {
+      "case": "locate-repeat-tool-reminder",
+      "baseline_rate": 0.0,
+      "current_rate": 0.0,
+      "delta": 0.0
+    },
+    {
+      "case": "locate-spill-notice",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0,
+      "delta": 1.0
+    },
+    {
+      "case": "locate-tool-timeout-default",
+      "baseline_rate": 0.0,
+      "current_rate": 1.0,
+      "delta": 1.0
+    },
+    {
+      "case": "negative-elasticsearch",
+      "baseline_rate": 1.0,
+      "current_rate": 1.0,
+      "delta": 0.0
+    },
+    {
+      "case": "negative-kafka",
+      "baseline_rate": 1.0,
+      "current_rate": 1.0,
+      "delta": 0.0
+    },
+    {
+      "case": "regression-context-window-code",
+      "baseline_rate": 1.0,
+      "current_rate": 1.0,
+      "delta": 0.0
+    },
+    {
+      "case": "regression-prune-marker",
+      "baseline_rate": 1.0,
+      "current_rate": 1.0,
+      "delta": 0.0
+    }
+  ],
+  "s3_met": true,
+  "passed": true
+}

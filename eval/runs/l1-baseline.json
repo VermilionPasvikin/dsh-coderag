@@ -1,0 +1,614 @@
+{
+  "schema": "dsh-coderag/eval-run/v1",
+  "k": 5,
+  "corpus_root": "/tmp/dsh-coderag-t3-03-corpus",
+  "tasks_file": "eval/tasks.jsonl",
+  "golden_version": "m3-b1",
+  "task_count": 30,
+  "hit_count": 13,
+  "class_counts": {
+    "exact": {
+      "total": 12,
+      "hit": 12
+    },
+    "crossfile": {
+      "total": 11,
+      "hit": 1
+    },
+    "natural": {
+      "total": 7,
+      "hit": 0
+    }
+  },
+  "results": [
+    {
+      "id": "L-001",
+      "class": "exact",
+      "query": "DEFAULT_TOOL_CALL_TIMEOUT_MS",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/mcp/mcp-client/src/index.ts",
+      "rank": 1,
+      "returned_paths": [
+        "packages/mcp/mcp-client/src/index.ts",
+        "packages/mcp/mcp-client/src/index.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 864,
+      "error": null
+    },
+    {
+      "id": "L-002",
+      "class": "exact",
+      "query": "CONTEXT_WINDOW_EXCEEDED_CODE定义在哪？",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/llm/llm/src/error.ts",
+      "rank": 5,
+      "returned_paths": [
+        "packages/compaction/compaction-basic/src/index.ts",
+        "packages/llm/llm-deepseek/src/protocols/chat-completions/adapter.ts",
+        "packages/llm/llm-deepseek/src/protocols/chat-completions/adapter.ts",
+        "packages/llm/llm-pi-ai/src/stream.ts",
+        "packages/llm/llm/src/error.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 1603,
+      "error": null
+    },
+    {
+      "id": "L-003",
+      "class": "exact",
+      "query": "delegationDepthOf定义在哪？",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/subagent/subagent/src/depth.ts",
+      "rank": 3,
+      "returned_paths": [
+        "packages/subagent/subagent/src/child-agent.ts",
+        "packages/subagent/subagent/src/child-agent.ts",
+        "packages/subagent/subagent/src/depth.ts",
+        "packages/subagent/subagent/src/index.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 1405,
+      "error": null
+    },
+    {
+      "id": "L-004",
+      "class": "exact",
+      "query": "SANDBOX_MODES的定义",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/sandbox/sandbox-policy/src/session-mode.ts",
+      "rank": 5,
+      "returned_paths": [
+        "packages/sandbox/sandbox-policy/src/index.ts",
+        "packages/sandbox/sandbox-policy/src/invariant.ts",
+        "packages/sandbox/sandbox-policy/src/invariant.ts",
+        "packages/sandbox/sandbox-policy/src/invariant.ts",
+        "packages/sandbox/sandbox-policy/src/session-mode.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 1200,
+      "error": null
+    },
+    {
+      "id": "L-005",
+      "class": "crossfile",
+      "query": "MCP 工具调用的超时时间在哪里配置、又在哪里真正生效？",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/mcp/mcp-client/src/index.ts",
+      "rank": 1,
+      "returned_paths": [
+        "packages/mcp/mcp-client/src/index.ts",
+        "packages/mcp/mcp-client/src/tools.ts",
+        "packages/mcp/mcp-client/src/tools.ts",
+        "packages/mcp/mcp-client/src/tools.ts",
+        "packages/mcp/mcp-resources/src/index.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 207,
+      "error": null
+    },
+    {
+      "id": "L-006",
+      "class": "crossfile",
+      "query": "会话级沙箱模式覆盖如何持久化并在重启后恢复？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-agent-preset/src/client/locales.ts",
+        "packages/client/ui-commands/src/client/locales.ts",
+        "packages/client/ui-sidebar-browser/src/client/locales.ts",
+        "scripts/persistence-catalog-text.ts",
+        "website/docs.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3613,
+      "error": null
+    },
+    {
+      "id": "L-007",
+      "class": "crossfile",
+      "query": "子代理的递归深度限制如何跨重启保留下来",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "apps/desktop/src/locale.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-subagent/src/client/locales.ts",
+        "packages/client/ui-subagent/src/client/locales.ts",
+        "packages/client/ui-workspace/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2541,
+      "error": null
+    },
+    {
+      "id": "L-008",
+      "class": "crossfile",
+      "query": "stdio 子进程会继承哪些环境变量，哪些会被过滤掉？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/lsp/lsp-stdio/src/index.ts",
+        "packages/lsp/lsp-stdio/src/translate.ts",
+        "packages/subprocess/subprocess-local/src/runner-launch.ts",
+        "packages/subprocess/subprocess-local/src/spawn.ts",
+        "packages/subprocess/win32-process/src/control-stdio.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 1091,
+      "error": null
+    },
+    {
+      "id": "L-009",
+      "class": "natural",
+      "query": "模型请求失败以后默认会重试哪些错误？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-settings-models/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/extensions/ui-cordis/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3354,
+      "error": null
+    },
+    {
+      "id": "L-010",
+      "class": "natural",
+      "query": "上下文窗口超限以后，系统会先裁剪还是先摘要？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-settings-models/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3389,
+      "error": null
+    },
+    {
+      "id": "L-011",
+      "class": "exact",
+      "query": "SQLITE_FTS5_OUTER_PREDICATE_LIMIT",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/session-query/session-query-sqlite/src/query.ts",
+      "rank": 1,
+      "returned_paths": [
+        "packages/session-query/session-query-sqlite/src/query.ts",
+        "packages/session-query/session-query-sqlite/src/query.ts",
+        "packages/session-query/session-query-sqlite/tests/query.spec.ts",
+        "packages/session-query/session-query-sqlite/tests/query.spec.ts",
+        "packages/session-query/session-query-sqlite/tests/query.spec.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 926,
+      "error": null
+    },
+    {
+      "id": "L-012",
+      "class": "exact",
+      "query": "MESSAGE_PROJECTION_EVENT_TYPES",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/core/session/src/known-event-types.ts",
+      "rank": 1,
+      "returned_paths": [
+        "packages/core/session/src/known-event-types.ts",
+        "packages/core/session/src/surface.ts",
+        "packages/core/session/src/surface.ts",
+        "packages/core/session/tests/gen-persistence-catalog.spec.ts",
+        "scripts/gen-persistence-catalog.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 1804,
+      "error": null
+    },
+    {
+      "id": "L-013",
+      "class": "exact",
+      "query": "ANONYMOUS_USER_ID_FILE_NAME",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/identity/anonymous-user-id/src/index.ts",
+      "rank": 1,
+      "returned_paths": [
+        "packages/identity/anonymous-user-id/src/index.ts",
+        "packages/identity/anonymous-user-id/src/index.ts",
+        "packages/identity/anonymous-user-id/tests/anonymous-user-id.spec.ts",
+        "packages/identity/anonymous-user-id/tests/anonymous-user-id.spec.ts",
+        "packages/identity/anonymous-user-id/tests/anonymous-user-id.spec.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 1231,
+      "error": null
+    },
+    {
+      "id": "L-014",
+      "class": "exact",
+      "query": "REQUEST_IMAGE_TRANSFORM_VERSION",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/attachment/attachment-local/src/request-image.ts",
+      "rank": 1,
+      "returned_paths": [
+        "packages/attachment/attachment-local/src/request-image.ts",
+        "packages/attachment/attachment-local/src/request-image.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 483,
+      "error": null
+    },
+    {
+      "id": "L-015",
+      "class": "exact",
+      "query": "SSH_MAX_PROCESS_HANDLES",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/ssh/ssh/src/protocol.ts",
+      "rank": 3,
+      "returned_paths": [
+        "packages/ssh/ssh/src/helper.ts",
+        "packages/ssh/ssh/src/helper.ts",
+        "packages/ssh/ssh/src/protocol.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3875,
+      "error": null
+    },
+    {
+      "id": "L-016",
+      "class": "exact",
+      "query": "PRUNE_MARKER",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/compaction/compaction-tool-result-pruner/src/config.ts",
+      "rank": 1,
+      "returned_paths": [
+        "packages/compaction/compaction-tool-result-pruner/src/config.ts",
+        "packages/compaction/compaction-tool-result-pruner/src/config.ts",
+        "packages/compaction/compaction-tool-result-pruner/src/index.ts",
+        "packages/compaction/compaction-tool-result-pruner/src/index.ts",
+        "packages/compaction/compaction-tool-result-pruner/tests/tool-result-pruner.spec.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2876,
+      "error": null
+    },
+    {
+      "id": "L-017",
+      "class": "exact",
+      "query": "DEFAULT_STDERR_SUMMARY_MAX_CHARS",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/hooks/hook-protocol/src/events.ts",
+      "rank": 1,
+      "returned_paths": [
+        "packages/hooks/hook-protocol/src/events.ts",
+        "packages/hooks/hook-protocol/src/events.ts",
+        "packages/hooks/hook-protocol/src/index.ts",
+        "packages/hooks/hooks-claude-code/src/index.ts",
+        "packages/hooks/hooks-codex/src/index.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 879,
+      "error": null
+    },
+    {
+      "id": "L-018",
+      "class": "exact",
+      "query": "DEFAULT_FILE_SEARCH_EXCLUDED_DIRECTORIES",
+      "status": "ready",
+      "hit": true,
+      "matched_path": "packages/context/file-reference-local/src/search.ts",
+      "rank": 3,
+      "returned_paths": [
+        "packages/context/file-reference-local/src/index.ts",
+        "packages/context/file-reference-local/src/index.ts",
+        "packages/context/file-reference-local/src/search.ts",
+        "packages/context/file-reference-local/tests/search.spec.ts",
+        "packages/context/file-reference-local/tests/search.spec.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2194,
+      "error": null
+    },
+    {
+      "id": "L-019",
+      "class": "crossfile",
+      "query": "技能是怎么被发现的，同名冲突时又按什么规则决定谁生效？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-input-trigger/src/client/locales.ts",
+        "packages/client/ui-model-selection/src/client/locales.ts",
+        "packages/client/ui-plugin-manager/src/client/locales.ts",
+        "scripts/persistence-release-facts.ts",
+        "website/docs.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2443,
+      "error": null
+    },
+    {
+      "id": "L-020",
+      "class": "crossfile",
+      "query": "工具输出被溢出保存以后追加的那段提示文本，是谁生成的、在哪里被拼上去、客户端又怎么认出来？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3211,
+      "error": null
+    },
+    {
+      "id": "L-021",
+      "class": "crossfile",
+      "query": "目标创建时没指定轮次上限的话默认是多少，这个上限存在哪里，又在哪触发封锁？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-agent-preset/src/client/locales.ts",
+        "packages/client/ui-goal/src/client/locales.ts",
+        "packages/client/ui-settings-models/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-sidebar-documentpreview/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3189,
+      "error": null
+    },
+    {
+      "id": "L-022",
+      "class": "crossfile",
+      "query": "工具还没真正执行就被取消时用的那个错误码在哪定义、在循环的哪一处被写进结果、又被哪个检查点策略复用？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-agent-preset/src/client/locales.ts",
+        "packages/client/ui-plugin-manager/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts",
+        "packages/experimental/client-ui-agent-team/src/client/locales.ts",
+        "packages/extensions/ui-cordis/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3899,
+      "error": null
+    },
+    {
+      "id": "L-023",
+      "class": "crossfile",
+      "query": "一个设置项从被声明到真正写进配置文件，中间经过哪几层？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-agent-preset/src/client/locales.ts",
+        "packages/client/ui-settings-general/src/client/locales.ts",
+        "packages/client/ui-settings-models/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-sidebar-files/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3370,
+      "error": null
+    },
+    {
+      "id": "L-024",
+      "class": "crossfile",
+      "query": "整份待办清单是怎么被保存成一条记录的，检索时又是怎么把它转成可搜索文本的？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/locale/src/locales/zh.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-subagent/src/client/locales.ts",
+        "packages/client/ui-workspace/src/client/locales.ts",
+        "website/.vitepress/config.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 1987,
+      "error": null
+    },
+    {
+      "id": "L-025",
+      "class": "crossfile",
+      "query": "读取文件超过大小上限时用的错误码在哪定义、又在哪里被抛出？",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-conversation/src/client/locales.ts",
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-sidebar-documentpreview/src/client/locales.ts",
+        "packages/client/ui-sidebar-documentpreview/src/client/office/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3083,
+      "error": null
+    },
+    {
+      "id": "L-026",
+      "class": "natural",
+      "query": "助手连续好几次用完全一样的参数调用同一个工具时，系统会怎么处理",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-permission-presets/src/client/locales.ts",
+        "packages/client/ui-permission-presets/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3388,
+      "error": null
+    },
+    {
+      "id": "L-027",
+      "class": "natural",
+      "query": "助手在没有读过某个文件的情况下直接修改它，会被允许吗",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-plugin-manager/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/extensions/ui-cordis/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3283,
+      "error": null
+    },
+    {
+      "id": "L-028",
+      "class": "natural",
+      "query": "助手在每一步开始之前是怎么知道当前时间的",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/locale/src/locales/zh.ts",
+        "packages/client/ui-conversation/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3382,
+      "error": null
+    },
+    {
+      "id": "L-029",
+      "class": "natural",
+      "query": "抓取网页时遇到跳转到另一个站点会怎么处理",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-agent-preset/src/client/locales.ts",
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-conversation/src/client/locales.ts",
+        "packages/client/ui-sidebar-browser/src/client/locales.ts",
+        "packages/experimental/client-ui-agent-team/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3071,
+      "error": null
+    },
+    {
+      "id": "L-030",
+      "class": "natural",
+      "query": "用户能把整段对话记录导出吗，导出的是什么文件",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-commands/src/client/locales.ts",
+        "packages/client/ui-conversation/src/client/locales.ts",
+        "packages/client/ui-subagent/src/client/locales.ts",
+        "packages/client/ui-workspace/src/client/locales.ts",
+        "packages/session-query/session-log-export/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2034,
+      "error": null
+    }
+  ]
+}

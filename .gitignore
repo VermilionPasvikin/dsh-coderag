@@ -12,12 +12,17 @@
 # 不忽略的后果：索引库（含代码全文副本）会被提交进 git
 .coderag/
 
-# ── 1b. L2 评测运行产物【项目特有，必须忽略】────────────────
-# eval/runs/ 每次运行都会写入逐 attempt 的 report.json 与原始
-# session.v3.jsonl（单条日志数百 KB；13 条 × trials 3 即数十 MB）。
-# 结论与数据存进 docs/eval-report-m3.md，原始产物不入库。
-# 见 EVAL.md §3.6（runner 用法）与 PROJECT.md §6.6（T3-05/T3-06）。
-eval/runs/
+# ── 1b. 评测运行产物【项目特有】────────────────────────────
+# 入库：冻结的基线报告与对照结果——CI 的 L1/L2 门禁要拿它们做逐条对比。
+#   eval/runs/l1-baseline.json、eval/runs/{a-v1,b-v1}/、eval/runs/gate-v1.*
+# 不入库：
+#   ① 原始会话日志（session.v3.jsonl 单条数百 KB；13 条 × trials 3 实测 23 MB）
+#   ② 每次重跑都会变的派生输出（l1-current / l1-gate），否则每次门禁都产生 diff
+# 见 EVAL.md §3.6（runner 用法）、PROJECT.md §6.6（T3-05/T3-06/T3-12）。
+eval/runs/**/.sessions/
+eval/runs/l1-current.json
+eval/runs/l1-gate.json
+eval/runs/l1-gate.md
 
 # ── 2. Python ───────────────────────────────────────────────
 __pycache__/

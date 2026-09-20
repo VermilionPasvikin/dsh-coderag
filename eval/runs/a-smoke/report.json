@@ -1,0 +1,554 @@
+{
+  "schema": "dsh-coderag/ab-run/v1",
+  "group": "eval-baseline",
+  "profile": "headless",
+  "trials": 1,
+  "workspace": "/private/tmp/dsh-coderag-t3-03-corpus",
+  "dsh": [
+    "/Users/vermi/个人项目/python/dsh-coderag/scripts/dsh"
+  ],
+  "cases": [
+    {
+      "name": "crossfile-goal-round-limit",
+      "tags": [
+        "crossfile"
+      ],
+      "prompt": "目标模式里轮次上限的默认值是多少？它存在哪、又在哪儿触发封锁？列文件。",
+      "answer_paths": [
+        "packages/goal/goal/src/index.ts",
+        "packages/goal/goal/src/fold.ts",
+        "packages/goal/goal-round-driver/src/index.ts"
+      ],
+      "notes": "出处：goal/goal/src/index.ts:244 `defaultMaxGoalRounds: z.number().default(256)` ＋ fold.ts:112（随状态持久化）＋ goal-round-driver/src/index.ts:166（触发封锁）。理由：默认值 → 持久化 → 封锁三处，且要求报出具体数字 256，答案可机械判定。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'glob', 'grep', 'grep', 'read', 'read', 'read', 'grep', 'grep', 'read', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 16.973,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/000-crossfile-goal-round-limit/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-db695595-5923-49c0-bfe8-45fec1a0a172/session.v3.jsonl",
+          "steps": 6,
+          "total_tokens": 140621,
+          "tool_calls": [
+            "bash",
+            "glob",
+            "grep",
+            "grep",
+            "read",
+            "read",
+            "read",
+            "grep",
+            "grep",
+            "read",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "## 结论\n\n**轮次上限（round cap）默认 256。**\n\n`goal` 模式里有两个不同的“轮次”数字，容易混：上限 256 是硬性 auto-continuation 预算；另有一个默认 3 的“模型自报 blocked 阈值”。分别说明。\n\n---\n\n### 1. 轮次上限默认值 = 256\n\n配置字段 `defaultMaxGoalRounds`，zod 默认值 256：\n\n- `packages/goal/goal/src/index.ts:244` — `defaultMaxGoalRounds: z.number().default(256)`\n- `packages/goal/goal/src/index.ts:253` — 落盘前再次兜底 `?? 256`\n- `packages/goal/goal/src/index.ts:215-219` — `resolveCreateGoal` 在 create 请求未带 `maxGoalRounds` 时套用该默认值\n- `packages/goal/goal/README.md:46` — 文档表格：`defaultMaxGoalRounds` | `256`\n\n即 CLI/服务端未在 cordis.yml 覆盖时，新建 goal 的 `maxGoalRounds` 就是 256。\n\n### 2. 它存在哪\n\n- **默认值存在部署配置**：`GoalService` 的 `Config.defaultMaxGoalRounds`（`packages/goal/goal/src/index.ts:174,180,244`）。可用配置文件覆盖（测试 fixture 用 11：`packages/goal/goal/tests/fixtures/domain/goal.patch.yml:11`）。\n- **每个 goal 的实际上限存在 goal 快照里**：`GoalSnapshot.maxGoalRounds`（`packages/goal/goal/src/types.ts:68`），随 goal change 事件持久化进 session log，由 `packages/goal/goal/src/fold.ts` 折叠/校验（`:102-113, :187-188, :327`）。\n- **投影 schema 也带它**：`packages/goal/goal/src/index.ts:74`，并在 `:98-99` 校验 `roundsStarted` 不得超过该上限。\n\n### 3. 在哪儿触发封锁\n\n**主路径：goal-round-driver** —— 自动续行前检查预算，耗尽即调用 `ctx.goals.block`：\n\n- `packages/goal/goal-round-driver/src/index.ts:166-171` — `if (goal.roundsStarted >= goal.maxGoalRounds)` → `ctx.goals.block(..., { code: 'round-limit', message: ... })`\n\n**其他相关 enforcement 点：**\n\n- `packages/goal/goal/src/index.ts:409-424` — `GoalService.block()` 真正写入 `phase: 'blocked'` 并 disarm（受保护动词，`round-limit` 由驱动器传入）。\n- `packages/goal/goal/src/index.ts:375-380` — `resume` 在预算耗尽时抛 `GOAL_INVALID_TRANSITION`（拒绝重新武装，而非直接封锁）。\n- `packages/goal/goal/src/index.ts:98-100` — 投影校验拒绝 `roundsStarted > maxGoalRounds`。\n\n### 4. 另一个“轮次”阈值：模型自报 blocked 默认 3\n\n若你问的“触发封锁”指模型主动 `update_goal action=blocked`，那是另一处、另一个默认值：\n\n- `packages/goal/tool-goal/src/index.ts:32` — `blockedAfterConsecutiveRounds: z.number().step(1).min(1).default(3)`\n- `packages/goal/tool-goal/src/index.ts:306-310` — 自主 goal round 中 `roundsStarted < blockedAfterConsecutiveRounds` 时机械拒绝 `blocked`\n- 提示词插值：`packages/goal/tool-goal/src/index.ts:111-130, 191`\n\n### 文件清单\n\n| 文件 | 作用 |\n|---|---|\n| `packages/goal/goal/src/index.ts` | `defaultMaxGoalRounds` 默认 256、create 解析、`block()`、`resume` 预算检查、投影校验 |\n| `packages/goal/goal/src/types.ts` | `GoalSnapshot.maxGoalRounds`、`GoalBlockReason`、phase 类型 |\n| `packages/goal/goal/src/fold.ts` | 持久 goal change 折叠与上限校验 |\n| `packages/goal/goal/src/domain.ts` | goal 域辅助 |\n| `packages/goal/goal-round-driver/src/index.ts` | 预算耗尽触发 `block`（`round-limit`） |\n| `packages/goal/goal-round-driver/src/prompt.ts` | 注出 `Round: n/maxGoalRounds` |\n| `packages/goal/tool-goal/src/index.ts` | `blockedAfterConsecutiveRounds` 默认 3 及 enforcement |\n| `packages/goal/goal/README.md` / `packages/goal/goal-round-driver/README.md` / `packages/goal/tool-goal/README.md` | 契约文档 |\n\n如果你实际问的是“模型连续多少轮后才能自报 blocked”，答案是 **3**；如果你问的是“自动续行的总轮次上限”，答案是 **256**。",
+          "stderr_tail": "or `GOAL_ROUND_LIMIT`? Let me check the code.\n3. Also the projection schema rejects roundsStarted > maxGoalRounds (line 98).\n\nAlso there's a separate blocking threshold `blockedAfterConsecutiveRounds` default 3, in tool-goal. The question \"又在哪儿触发封锁\" might refer to this—but \"轮次上限\" specifically. I'll present both clearly, since both are \"round\" numbers and both can cause blocking: maxGoalRounds=256 is the round cap; blockedAfterConsecutiveRounds=3 is the model self-report threshold. Actually the phrase \"轮次上限\" (round cap/upper limit) = maxGoalRounds. But \"触发封锁\" (trigger blockage) - maxGoalRounds triggers blocking in the driver. I'll be explicit and distinguish.\n\nLet me read the resume block and the block method for accuracy.\ndsh: reasoning:\nNow I have all the info. Let me compose the answer in Chinese, listing files.\n\nKey facts:\n- 默认轮次上限 = 256. Configured by `GoalService.Config.defaultMaxGoalRounds` (zod default 256), materialized in `resolveCreateGoal` when create request omits `maxGoalRounds`.\n- Stored: in the goal snapshot as `maxGoalRounds`, durable in session log via goal change events (folded). `GoalSnapshot` in `goal/src/types.ts`. Default lives in config `goal/src/index.ts`.\n- Where blocking triggered:\n  - `goal-round-driver/src/index.ts` lines 164–171: when active+armed and `roundsStarted >= maxGoalRounds`, calls `ctx.goals.block(..., {code:'round-limit'})`.\n  - `goal/src/index.ts` lines 375-380: `resume` throws `GOAL_INVALID_TRANSITION` when exhausted (refuses to rearm, doesn't block).\n  - Projection schema line 98 rejects roundsStarted > cap.\n  - Goal service `block()` method line 409.\n- Separate threshold: `blockedAfterConsecutiveRounds` default 3 in `tool-goal/src/index.ts` (config, line 32), enforced at line 306-310 for model-reported `blocked`.\n\nLet me give file list with line numbers.\n\nI should mention the distinction: the \"round cap\" default is 256; the model self-report blocking threshold default is 3. Both are \"rounds\" but different.\n\nLet me format.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "crossfile-skill-precedence",
+      "tags": [
+        "crossfile"
+      ],
+      "prompt": "项目自带的技能是怎么被发现的？如果两个技能重名，谁生效？请把相关的文件都列出来。",
+      "answer_paths": [
+        "packages/skill/skill-filesystem/src/index.ts",
+        "packages/skill/skill/src/index.ts"
+      ],
+      "notes": "出处：skill-filesystem/src/index.ts:723 `discoverRoot`（发现）＋ skill/src/index.ts:28 `BUNDLED_SKILL_RANK`、:78 `readonly rank`（同层同名按 rank 决胜）。理由：『发现』与『谁生效』分属两个包，单文件检索答不全；两个正则分别对应两处证据。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'glob', 'bash', 'read', 'read', 'bash', 'grep', 'bash', 'read', 'bash', 'bash', 'read', 'read', 'bash', 'read', 'bash'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 47.001,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/001-crossfile-skill-precedence/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-1f9a9f34-d4b4-42e5-87dd-2b8de09394fc/session.v3.jsonl",
+          "steps": 10,
+          "total_tokens": 401802,
+          "tool_calls": [
+            "bash",
+            "glob",
+            "bash",
+            "read",
+            "read",
+            "bash",
+            "grep",
+            "bash",
+            "read",
+            "bash",
+            "bash",
+            "read",
+            "read",
+            "bash",
+            "read",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "## 结论速览\n\n- **发现入口是 `ctx.skills` 这个分层注册表**：它把各 provider 的目录合并，重名时按规则选出唯一“获胜者”。本地技能由 `dsh-skill-filesystem` 从固定的一批根目录扫描；打包技能由 `dsh-skill-badge` / `dsh-skill-office` 这类 provider 直接贡献。\n- **重名分两级判定**：跨“层”时**离调用 agent 最近的那一层直接获胜**（不看 rank）；同一层内才按 **rank 升序 → provider 注册顺序 → 同一 provider 内的枚举顺序**，先到先得，落败者只打一条 warning。\n\n---\n\n## 一、发现机制\n\n### 1) 注册表合并（Service Definition）\n\n`packages/skill/skill/src/index.ts` 里的 `SkillRegistry` 是唯一的注册中心：\n\n- 用 `ScopedLayers<SkillLayer>` 做 **host 全局层 + 每个 scope（agent preset）一层**（`packages/core/scope`）。\n- `registerProvider()` 把 provider 注册进**调用 context 所属的层**：主机组合里的行进全局层，preset 里挂载的进该 preset 层。\n- `list()` / `snapshot()` / `get()` 读取时把全局层与当前 scope 链合并，输出按名字排序的赢家。\n\n### 2) 本地根目录扫描（Service Provider）\n\n`packages/skill/skill-filesystem/src/index.ts` 的 `FileSystemSkillProvider.roots()`（第 245–265 行）按固定顺序收集根：\n\n| rank | source | 根目录 |\n|---|---|---|\n| 100 | `project-dsh` | `<projectRoot>/.dsh/skills` |\n| 200 | `project-agents` | `<projectRoot>/.agents/skills` |\n| 250 | `runtime` | `ctx.skills.register()` 注入的运行时技能 |\n| 300 | `custom` | `Config.customSkillDirs` |\n| 400 | `user-dsh` | `<dshHome>/skills`（跳过 `.system`） |\n| 500 | `user-agents` | `<agentsHome>/skills` |\n| 600 | `bundled` | `Config.bundledSkillDir`，默认 `$DSH_BUNDLED_SKILL_DIR` |\n\n- `projectRoot` = 最近的含 `.git` 祖先；找不到就用 `cwd`（`findProjectRoot()`，第 945–955 行）。\n- 每个根**只扫一层**：`<name>/SKILL.md` 目录包，或 `<name>.md` 平铺文件（第 723–751 行）；解析 YAML frontmatter，要求 `name`（kebab-case）与 `description`，可选 `whenToUse`、`metadata`、`disable-model-invocation`、`user-invocable`（第 797–840、1000–1037 行）。\n- 有 `ctx.fs` 时通过文件系统服务读取/探 `.git`，否则退回 Node I/O。\n- Chokidar 监听根目录变化并触发 `skills/change` 失效；`write`/`edit` 工具的目标命中时同步失效。\n\n### 3) 打包技能（Bundled providers）\n\n- `packages/skill/skill-badge/src/index.ts`：注册 `dsh-badge`，`source: 'bundled'`，`rank: BUNDLED_SKILL_RANK (600)`。\n- `packages/skill/skill-office/src/index.ts`：注册 `office-docx/office-pptx/office-xlsx`，同样 rank 600。\n- 这两者由组合决定是否启用（badge 默认关闭，需显式 opt-in）。\n\n### 4) 消费者（catalog 与工具）\n\n`packages/skill/tool-skill/src/index.ts` 把胜出的摘要渲染成模型可见的 `<available_skills>` 目录，并注册 `skill({name})` 加载工具；`packages/api/session-controller/src/skill-catalog.ts` 给浏览器侧 `ctx.remote.skills` 用。\n\n### 5) 本仓库的实际情形\n\n当前工作区**没有 `.git`**，所以 `cwd` 即 `projectRoot`；存在 `.agents/skills`（12 个技能），因此它们走 **`project-agents` rank 200** 被发现。`.claude/skills` 是指向 `../.agents/skills` 的符号链接。其中 `dsh-translate-docs/SKILL.md` 带 `disable-model-invocation: true`，所以会被发现但**不进模型目录**，这解释了目录里 12 个而会话技能清单只有 11 个。\n\n---\n\n## 二、两个技能重名，谁生效\n\n代码在 `packages/skill/skill/src/index.ts`：\n\n1. **跨层：最近层直接赢**。`collectFresh()`（551–565 行）按 `[global, ...scope 链]` 顺序覆盖合并；`collectLayer()` 对每层已排好序的候选做 `seen` 去重，后面的层覆盖前面的。也就是说 preset 层里的技能会**无视 rank** 压过全局层的同名技能。\n2. **同层内：按 rank 排序，先到先得**。`compareIndexedCandidates()`（807–811 行）比较 `rank` → `providerOrder`（provider 注册先后）→ `localOrder`（provider 返回顺序）；`collectLayer()`（567–582 行）保留第一个，落败者打日志：`skill \"...\" from <source> ignored because a higher-priority skill already exists`。\n   - 因此根目录优先级：`project-dsh(100)` > `project-agents(200)` > `runtime(250)` > `custom(300)` > `user-dsh(400)` > `user-agents(500)` > `bundled(600)`。\n   - 注意 `source` 只是提示给模型的元数据，**优先级完全由 `rank` 决定**（源码第 39 行注释）。\n3. **运行时技能同层重名：先注册者赢**。`register()`（439–460 行）遇到已存在名字只警告并返回空 disposer，不会移除赢家。\n4. **同层 provider 重名：直接抛错**（`SkillLayer` 构造，334–337 行）；provider 名 `runtime` 被保留（406–408 行）。\n5. 若同名、同 rank、同一 provider，则按该 provider `list()` 返回顺序（`localOrder`）决定。\n\n（另外 `collect()` 有 cwd/scope 链/revision 维度的缓存；不完整观测不缓存，见 519–549 行。）\n\n---\n\n## 三、相关文件清单\n\n### 核心实现\n- `packages/skill/skill/src/index.ts` — 注册表、分层、rank 合并、重名判定\n- `packages/skill/skill-filesystem/src/index.ts` — 本地根目录发现、rank、frontmatter、监听\n- `packages/skill/skill-badge/src/index.ts` — 打包 `dsh-badge` provider\n- `packages/skill/skill-office/src/index.ts` — 打包 Office provider\n- `packages/skill/tool-skill/src/index.ts` — 会话目录 + `skill` 工具\n- `packages/api/session-controller/src/skill-catalog.ts` — 浏览器会话目录\n- `packages/util/home-paths/*` — `resolveDshHome` / `$DSH_HOME` 解析\n\n### 组合 / 配置（谁注册哪些 provider）\n- `packages/bundle/base/cordis.patch.yml`（约 280–291 行：`skill`、`skill-filesystem`、`skill-badge`、`tool-skill`）\n- `packages/bundle/web-app/cordis.patch.yml`（313–434 行：host plane 禁用本地发现，preset 拥有本地 discovery）\n- `packages/preset/agent-presets/presets/standard/agent.cordis.yml`（77–88 行）\n- `packages/preset/agent-presets/presets/ptc/agent.cordis.yml`\n- `packages/preset/agent-presets/presets/cordis/agent.cordis.yml`\n- 示例：`snapshots/session/office-skills/cordis.yml`、`snapshots/session/office-skills-no-renderer/cordis.yml` 等\n\n### 实际“项目自带”的技能\n- `.agents/skills/*/SKILL.md`（12 个：`dsh-archive-agent-notes`、`dsh-ci-test-reliability`、`dsh-code-review`、`dsh-doc`、`dsh-find-simplifications`、`dsh-merging-stacked-prs`、`dsh-pre-push-checks`、`dsh-prose-standard`、`dsh-speed-up-perf`、`dsh-translate-docs`、`dsh-trim-cot-leakage`、`record-browser-gif`）\n- `.claude/skills` → `../.agents/skills`（符号链接）\n\n### 文档\n- `docs/subsystems/skills.md`（及中文 `docs/subsystems/skills.zh.md`）— 最权威的本地发现优先级表\n- `packages/skill/README.md`、`packages/skill/skill/README.md`、`packages/skill/skill-filesystem/README.md`、`packages/skill/skill-badge/README.md`、`packages/skill/skill-office/README.md`、`packages/skill/tool-skill/README.md`\n- `docs/config-catalog.md`、`docs/tool-catalog.md`（生成表）\n\n### 测试\n- `packages/skill/skill/tests/skill.spec.ts` — 层/rank/重名/缓存\n- `packages/skill/skill-filesystem/tests/skill-filesystem.spec.ts` 与 `.../skill-filesystem-watcher.spec.ts` — 根优先级与监听\n- `packages/skill/tool-skill/tests/tool-skill.spec.ts`\n- `packages/skill/skill-badge/tests/skill-badge.spec.ts`、`packages/skill/skill-office/tests/skill-office.spec.ts`\n\n### 历史决策（archived，仅供背景）\n- `.agents/notes/archived/architecture/2026-08-09-layered-skill-registry.md`\n- `.agents/notes/archived/feature/2026-07-05-skill-system.md`\n- `.agents/notes/archived/feature/2026-08-06-bundled-dsh-badge-skill.md`\n- `.agents/notes/archived/feature/2026-09-15-bundled-office-skills.md`\n- `.agents/notes/implemented/feature/2026-07-28-skill-invocation-policy.md`",
+          "stderr_tail": "ystem doc. Enough.\n\nLet me present concisely but with the required detail and file list. Use markdown links with relative paths? Since this is a chat answer, I can use plain paths in backticks, maybe markdown links. I'll use relative paths as code. The instruction about citing URLs applies to web content; here local files, I'll just use paths.\n\nI'll answer in Chinese.\n\nLet me structure:\n\n1. 结论速览 (discovery path)\n2. 发现机制 (registry + filesystem provider roots + ranks + bundled providers + consumer)\n3. 重名判定 (two-level)\n4. 本仓库的具体情况 (why the session catalog has 12/11 skills, dsh-translate-docs)\n5. 相关文件清单 (grouped)\n\nBe accurate about numbers: project-agents rank 200 and runtime 250. The doc table listed 100..600 without runtime; runtime is 250 from source (RUNTIME_RANK). I'll note it.\n\nAlso mention that `source` is metadata not precedence; precedence is `rank` within layer.\n\nAlso mention warning log: \"skill X from <source> ignored because a higher-priority skill already exists\".\n\nAlso note that ranks only decide duplicates within one layer; across layers nearest scope wins outright (so a preset-layer skill shadows a global-layer skill even if global rank is lower).\n\nI should double check: is rank only within one layer? Yes: collectLayer sorts each layer's candidates by rank first, then cross-layer merge overwrites by layer order. So yes.\n\nLet me also mention provider registration order tiebreak: lower providerOrder (earlier registration) wins; localOrder (order within provider's list) wins within same provider/rank.\n\nNow write final answer. I'll keep it thorough but not overly long. The user asked to list all relevant files, so I'll include a good list.\n\nLet me also mention the files under packages/preset/agent-presets presets. Let me verify ptc and cordis also have skill rows — grep found all three. Good.\n\nAlso apps/cli fixtures and profiles. I'll mention apps/cli/tests/fixtures/dsh-badge/*.cordis.yml as examples, maybe not necessary. Keep relevant.\n\nI'll produce final.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "crossfile-subprocess-env-scrub",
+      "tags": [
+        "crossfile",
+        "semantic-gap"
+      ],
+      "prompt": "启动子进程时，父进程的环境变量哪些会被过滤掉？这套规则写在哪个文件？",
+      "answer_paths": [
+        "packages/subprocess/subprocess/src/index.ts"
+      ],
+      "notes": "出处：packages/subprocess/subprocess/src/index.ts `scrubbedParentEnv` 与 `SENSITIVE_ENV_PATTERN`。理由：L1 的 L-008 已证明这是典型的『中文意图 vs 英文代码』零词法重叠案例（环境变量/过滤 ↔ env/scrub）。作为 L2 里的语义缺口探针：若 A/B 都失败，说明词法检索在这类问题上确实无能为力（对应 ADR-14 的 R2）。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'read', 'grep', 'bash'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 8.835,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/002-crossfile-subprocess-env-scrub/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-740d2bbb-4ac0-4404-8a54-1457c8f41aae/session.v3.jsonl",
+          "steps": 4,
+          "total_tokens": 77873,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "read",
+            "grep",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "## 结论\n\n规则写在 **`packages/subprocess/subprocess/src/index.ts`** 的 `scrubbedParentEnv()` 函数里（第 66–80 行），敏感名模式常量 `SENSITIVE_ENV_PATTERN` 在同一文件第 47 行，前缀常量 `DSH_ENV_PREFIX` 定义在 **`packages/subprocess/subprocess/src/types.ts`** 第 13 行。\n\n被过滤掉的父进程环境变量有两大类：\n\n1. **凭据形状的名字**：匹配正则 `/KEY|PASSWORD|SECRET|TOKEN/i` 的键，全部丢弃。目的是防止 harness 自己的 `DEEPSEEK_API_KEY` 等秘密隐式泄漏给子进程。\n2. **`DSH_*` 命名空间**：键名（先 `toUpperCase()`）以 `DSH_` 开头的全部丢弃，避免 harness 身份隐式泄漏。之所以大小写不敏感，是因为 Windows 环境变量名不区分大小写，父进程里的 `dsh_*` 否则会以 `$env:DSH_*` 存活到子进程。\n3. 值为 `undefined` 的条目也不写入。\n\n```ts\n// packages/subprocess/subprocess/src/index.ts:66\nexport function scrubbedParentEnv(): Record<string, string> {\n  const env: Record<string, string> = {}\n  for (const [key, value] of Object.entries(process.env)) {\n    if (value !== undefined && !SENSITIVE_ENV_PATTERN.test(key) && !key.toUpperCase().startsWith(DSH_ENV_PREFIX)) env[key] = value\n  }\n  ...\n}\n```\n\n## 几点补充\n\n- **保留项**：`PATH`、`HOME`、locale、代理变量等正常保留，保证子 CLI 能跑。\n- **代理叠加**：当父进程启用代理时，函数末尾会用 `proxyEnvironmentForChild()` 覆盖（第 75–78 行），把解析后的代理名和子 Node 需要的标志加回去，并删除用户从未设置的名字。\n- **显式覆盖优先**：这是“规范基座”，调用方传入的 `spec.env` 在 scrub **之后**合并（例如 `packages/subprocess/subprocess-local/src/spawn.ts:45`），所以刻意转发的凭据或 `DSH_*` 事实仍能生效。\n- **统一实现**：该函数被导出为纯函数，供无法走 `ctx.subprocess` 服务的 spawner 共用——如 node-pty、MCP stdio、SDK 管理的传输、subagent CLI 等（见 `packages/mcp/mcp-client/src/transport.ts`、`packages/subagent/subagent-dsh-sdk/src/run.ts` 等），保证全仓库只有一份 scrub 定义。\n\n一句话：**过滤 `KEY|PASSWORD|SECRET|TOKEN`（不分大小写）和 `DSH_*` 前缀，规则在 `packages/subprocess/subprocess/src/index.ts`。**",
+          "stderr_tail": "dsh: reasoning:\nThe user is asking about a codebase question: When spawning a child process, which environment variables of the parent are filtered out? Which file contains this rule?\n\nThis is a code-RAG task. Let me search the repository. The workspace is /private/tmp/dsh-coderag-t3-03-corpus. Let me explore.\n\nLet me start with searching for environment variable filtering in subprocess package.\ndsh: reasoning:\nThe key file is packages/subprocess/subprocess/src/index.ts, which has scrubbedParentEnv and SENSITIVE_ENV_PATTERN and DSH_ENV_PREFIX. Let me read it.\ndsh: reasoning:\nThe key file is packages/subprocess/subprocess/src/index.ts. The rule: scrubbedParentEnv filters out env vars matching /KEY|PASSWORD|SECRET|TOKEN/i and those whose name starts with DSH_ENV_PREFIX (DSH_) case-insensitively. Let me confirm DSH_ENV_PREFIX value in types.ts. Also proxy overlay re-adds some. Let me check types.ts.\ndsh: reasoning:\nI have the answer. Let me also note the proxy overlay behavior (proxyEnvironmentForChild). The question asks \"启动子进程时，父进程的环境变量哪些会被过滤掉？这套规则写在哪个文件？\"\n\nAnswer: In packages/subprocess/subprocess/src/index.ts, `scrubbedParentEnv()`:\n1. Names matching /KEY|PASSWORD|SECRET|TOKEN/i (case-insensitive) — credential-shaped.\n2. Names starting with `DSH_` (case-insensitive, since it uses toUpperCase) — DSH_ENV_PREFIX defined in src/types.ts.\nAlso `undefined` values dropped. Then proxy overlay re-adds resolved proxy names + NODE_OPTIONS flag (proxyEnvironmentForChild), removing names user never set.\n\nThis is the canonical base used by all in-repo spawners. Explicit env merges after scrub so deliberately supplied secrets survive.\n\nLet me answer in Chinese, concise, cite file paths and line numbers.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "crossfile-todo-snapshot",
+      "tags": [
+        "crossfile"
+      ],
+      "prompt": "整份待办清单是怎么被存进会话里的？以后检索会话时它又是怎么变成可搜索文本的？列文件。",
+      "answer_paths": [
+        "packages/todo/tool-todo/src/types.ts",
+        "packages/todo/tool-todo/src/index.ts",
+        "packages/session-query/session-query/src/extraction.ts"
+      ],
+      "notes": "出处：tool-todo/src/types.ts:31 `'todo/write'`（事件载荷）＋ tool-todo/src/index.ts:210 `session.append('todo/write', ...)`（写入）＋ session-query/src/extraction.ts:29 `case 'todo/write':`（检索提取）。理由：跨『写会话』与『被检索』两侧，且两个包名都要说出来。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'bash', 'read', 'read', 'read', 'read', 'read', 'read', 'read', 'read', 'read', 'bash', 'read', 'read', 'read', 'bash', 'bash', 'read', 'bash', 'bash', 'bash', 'read', 'read', 'bash', 'bash', 'bash'] 的保序子序列",
+            "步数 17 超过 max_steps=16"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 37.257,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/003-crossfile-todo-snapshot/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-c131f63f-352e-4da9-946c-18c0a24d9935/session.v3.jsonl",
+          "steps": 17,
+          "total_tokens": 797589,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "bash",
+            "read",
+            "read",
+            "read",
+            "read",
+            "read",
+            "read",
+            "read",
+            "read",
+            "read",
+            "bash",
+            "read",
+            "read",
+            "read",
+            "bash",
+            "bash",
+            "read",
+            "bash",
+            "bash",
+            "bash",
+            "read",
+            "read",
+            "bash",
+            "bash",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "整条链路分两段：**写入时作为一条完整快照事件落进会话日志**，**检索时把这条事件抽成纯文本行喂给 SQLite FTS5**。待办清单本身没有独立存储，`todo/write` 事件就是唯一事实来源。\n\n## 1. 怎么被存进会话\n\n每次 `todo_write` 调用携带**整份清单**（不是增量），校验后作为一条 `todo/write` 事件追加到调用方 agent 的 session log：\n\n1. `packages/todo/tool-todo/src/index.ts` — `execute()` 里 `toTodoList()` 做 trim/去重/`in_progress` 数量校验，然后 `exec.agent.session.append('todo/write', { todos })`（第 210 行）。\n2. `packages/todo/tool-todo/src/types.ts` — `declare module '@deepseek-ai/dsh-session/types'` 声明 `'todo/write': { todos: TodoItem[] }`，语义是\"整表快照，replay 时 last-write-wins\"。纯类型，无载荷副本。\n3. `packages/core/session/src/index.ts` — `Session.append()`（第 719 行）：`snapshotJsonValue` 深拷贝校验 JSON 可序列化 → 分配 `seq`/`time` → `deepFreeze` → push 进 append-only `log` → 通过私有钩子同步发 `session/event`。日志内存即事实来源，热路径不阻塞 I/O。\n4. `packages/core/session/src/known-event-types.ts` — 生成的已知事件集合含 `'todo/write'`，读取路径才会接受该事件。\n5. 落盘由持久化插件接管：\n   - `packages/session/session-persistence-jsonl/src/storage.ts` — `install()` 订阅 `session/event` → `writer.enqueueLive()` 缓冲；`session/flush` → `drainLive()+flush()`；`session/disposed` 收尾。\n   - `packages/session/session-persistence-jsonl/src/index.ts` — `appendLines()` / 首次写时物化，写 JSONL。\n   - `packages/session/session-persistence-jsonl/src/format.ts` — 每事件一行，`sessionFormatCatalog.encodeCurrentEvent()` 编码。\n   - `packages/session/session-format-catalog/src/{current,generated,index}.ts` — 事件格式编解码目录（版本化）。\n   - `packages/session/session-persistence/src/{handle,storage-contract,index}.ts` — 持久化抽象缝（read/write handle）。\n\n> 注意：`todos` projection（`ctx.sessionProjections.register`，同在 tool-todo/src/index.ts）只是 UI fold，`turn/start` 清空、last-wins，**不参与检索**。\n\n## 2. 怎么变成可搜索文本\n\n索引是**派生、可丢弃**的读模型，不写回会话：\n\n1. `packages/session-query/session-query/src/extraction.ts` — 核心：`case 'todo/write'` 返回 `joinText(event.data.todos.flatMap(t => [t.status, t.content]))`，即把整份清单的每个条目拆成 `status` 与 `content` 两行、换行拼接。结构性事件（turn/step/request）返回空串。\n2. `packages/session-query/session-query/src/documents.ts` — `buildSessionEventSearchDocuments()` 对完整日志逐事件抽文本，空文本跳过，产出 `{sessionId, seq, type, time, surface, text}`；`foldSurface` 标注 current/shadowed/log-only。\n3. `packages/session-query/session-query-sqlite/src/index.ts` — `observeSession()` 深拷贝后调用上面的构文档；`_replacePersistedSession()` / `_replaceLiveSession()` 经 `sanitizeFtsText()` 后 `INSERT INTO persisted_docs / temp.live_docs`；`searchSessions()` / `searchEvents()` 用 `MATCH` 查询。\n4. `packages/session-query/session-query-sqlite/src/schema.ts` — FTS5 虚表 `persisted_docs`、`temp.live_docs`，`tokenize = 'unicode61'`；索引 schema 版本 8，不兼容就地重置。\n5. `packages/session-query/session-query-sqlite/src/query.ts` — `quoteFtsData()` 把查询当字面短语，`highlight()` + `makeSnippet()` 生成带省略号的高亮片段。\n6. `packages/session-query/session-query/src/index.ts` — `ctx.sessionQuery` 服务定义（读取/过滤/追踪/抽象搜索）。\n7. 读源：`packages/session-query/session-query/src/{corpus,cold-read,observation}.ts` — live 优先、冷读持久化日志。\n8. 工具入口：`packages/session-query/tool-session-query/src/operations.ts`（第 95/157 行调 `searchSessions`/`searchEvents`）及同目录 `index.ts`、`input.ts`、`presentation.ts`。\n\n## 文件清单（按链路顺序）\n\n**存储（写）**\n- `packages/todo/tool-todo/src/index.ts`\n- `packages/todo/tool-todo/src/types.ts`\n- `packages/core/session/src/index.ts`\n- `packages/core/session/src/known-event-types.ts`\n- `packages/session/session-persistence/src/{index,handle,storage-contract}.ts`\n- `packages/session/session-persistence-jsonl/src/{index,storage,format}.ts`\n- `packages/session/session-format-catalog/src/{index,current,generated}.ts`\n\n**检索（读/索引）**\n- `packages/session-query/session-query/src/extraction.ts` ← `todo/write` 文本抽取\n- `packages/session-query/session-query/src/documents.ts`\n- `packages/session-query/session-query/src/index.ts`\n- `packages/session-query/session-query/src/{corpus,cold-read,observation}.ts`\n- `packages/session-query/session-query-sqlite/src/index.ts`\n- `packages/session-query/session-query-sqlite/src/schema.ts`\n- `packages/session-query/session-query-sqlite/src/query.ts`\n- `packages/session-query/tool-session-query/src/{index,operations,input,presentation}.ts`\n\n一句话概括：`todo/write` 一条事件 = 整份清单；`extraction.ts` 的 `todo/write` 分支把 `status` + `content` 拼成 FTS5 文本；`session-query-sqlite` 把它物化进 `persisted_docs`/`live_docs` 供 `MATCH` 检索。",
+          "stderr_tail": ", t.content]))\n   - documents.ts: buildSessionEventSearchDocuments; skips empty (structural events); surface classification\n   - session-query-sqlite/src/index.ts: observeSession (structuredClone + buildSessionEventSearchDocuments) → _replaceLiveSession/_replacePersistedSession insert into FTS5 with sanitizeFtsText → searchSessions/searchEvents MATCH\n   - schema.ts: FTS5 virtual tables persisted_docs + temp.live_docs, unicode61 tokenizer\n   - query.ts: quoteFtsData, highlight/snippet\n   - tool-session-query/src/operations.ts + index.ts: tool surface\n   - session-query/src/index.ts: service definition\n   - cold-read/corpus/observation for reading persisted logs\n\nNote: todo/write is \"log-only UI state\" surface? In documents.ts classifySurface it's log-only likely. Search matches regardless of surface; filter by surface possible. Worth noting.\n\nAlso note the whole list is stored as one event each write (not partial edits), so searchable text is the concatenation of status+content of all items at that write; last write wins on replay.\n\nLet me provide the file list organized by path. I'll mention key line anchors.\n\nI should keep it focused. The answer should be in Chinese. Let me write it.\n\nI should double check whether the search text extraction includes all todo items — yes: `event.data.todos.flatMap(todo => [todo.status, todo.content])` joined with newlines. So each todo contributes two lines (status, content).\n\nOne subtlety: the \"整份待办清单\" — the entire list is written in a single `todo/write` event each call; there's no projection stored, just the event. Search indexes that event's text. And on replay, the `todos` projection (`sessionProjections`) folds last-write-wins, cleared on turn/start — but that's UI state, not search.\n\nThe user asks \"整份待办清单是怎么被存进会话里的\" — answer: as one `todo/write` event containing the entire list (whole-list snapshot), via `session.append`. Good.\n\nNow list files. Let me be precise with paths relative to repo root.\n\nLet me produce final answer.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "crossfile-tool-cancel-code",
+      "tags": [
+        "crossfile"
+      ],
+      "prompt": "工具还没真正执行就被取消时用的那个错误码，在哪定义、在哪写进结果、又被哪个检查点策略复用？列文件。",
+      "answer_paths": [
+        "packages/core/tools/src/index.ts",
+        "packages/core/agent-loop/src/tool-calls.ts",
+        "packages/session/session-checkpoint-policy/src/index.ts"
+      ],
+      "notes": "出处：core/tools/src/index.ts:469 `TOOL_ABORTED_BEFORE_DISPATCH`（定义）＋ core/agent-loop/src/tool-calls.ts:257（写进结果）＋ session-checkpoint-policy/src/index.ts:47（复用）。理由：『定义处 + 使用处』三文件链，是跨文件理解的标准形态。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'read', 'read', 'grep', 'grep', 'read', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 9.448,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/004-crossfile-tool-cancel-code/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-1ee84b89-9728-447c-8661-5111a4922199/session.v3.jsonl",
+          "steps": 5,
+          "total_tokens": 134399,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "read",
+            "read",
+            "grep",
+            "grep",
+            "read",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "错误码是 `ABORTED_BEFORE_DISPATCH`（区别于执行开始后才取消的 `ABORTED`）。三处：\n\n**1. 定义（导出常量）**\n- `packages/core/tools/src/index.ts:469` — `export const TOOL_ABORTED_BEFORE_DISPATCH = 'ABORTED_BEFORE_DISPATCH'`（JSDoc 在 468 行）\n\n**2. 写进结果**\n- `packages/core/tools/src/index.ts:1942-1952` — `toolAbortedBeforeDispatchResult()`，注册表在工具主体被调用前检测到取消时生成的规范结果（`toolAbortedResult()` 在 1928 行是执行后的 `ABORTED` 版本）。\n- `packages/core/agent-loop/src/tool-calls.ts:250-259` — `appendSkippedToolCall()`，轮次取消后为尚未分发的模型工具调用补写合成的 `tool/call` + `tool/result` 持久对，同样写 `ABORTED_BEFORE_DISPATCH`。\n\n**3. 被检查点策略复用**\n- `packages/session/session-checkpoint-policy/src/index.ts` — 第 10 行导入该常量；第 40-50 行 `abortedBeforeDispatchResult()` 复用它构造结果；第 70-75 行的 `tools/execute` 监听器在 `await ctx.sessions.flush(...)` 后若 `exec.signal.aborted` 就返回该结果，从而在检查点 flush 期间到达的取消不会进入工具正文。\n\n相关文档（非定义处，但陈述同一契约）：`packages/core/tools/README.md:121`、`packages/core/agent-loop/README.md:125,180`、`packages/session/session-checkpoint-policy/README.md:52`、`docs/subsystems/tools.md:577`。",
+          "stderr_tail": "ation before a tool body was invoked. */\". And packages/session/session-checkpoint-policy/src/index.ts line 40: \"Materialize the canonical result for a call cancelled before tool dispatch.\"\n\nLet me read those files.\ndsh: reasoning:\nWe have the definition and one reuse. But the question asks \"在哪定义、在哪写进结果、又被哪个检查点策略复用？\" — where defined, where written into result, and which checkpoint policy reuses it. Likely there are multiple writes. Let me search for TOOL_ABORTED_BEFORE_DISPATCH usages.\ndsh: reasoning:\nThe question: \"工具还没真正执行就被取消时用的那个错误码，在哪定义、在哪写进结果、又被哪个检查点策略复用？列文件。\"\n\nSo the code is ABORTED_BEFORE_DISPATCH. Three places:\n1. Defined: packages/core/tools/src/index.ts (line 469).\n2. Written into result: packages/core/tools/src/index.ts line 1949 (registry), and packages/core/agent-loop/src/tool-calls.ts line 257 (synthetic result for undispatched calls).\n3. Reused by checkpoint policy: packages/session/session-checkpoint-policy/src/index.ts (line 47).\n\nLet me verify line 1949 context and agent-loop tool-calls.ts line 257. Let me read.\ndsh: reasoning:\nNow I have all the answers. The user asked to \"列文件\" (list files). Let me compile concise answer.\n\nDefinition: packages/core/tools/src/index.ts line 469.\nResult writes:\n- packages/core/tools/src/index.ts line 1942-1952 (toolAbortedBeforeDispatchResult) — registry canonical result.\n- packages/core/agent-loop/src/tool-calls.ts line 250-259 (appendSkippedToolCall) — synthetic durable result for undispatched calls after cancellation.\n\nCheckpoint policy reuse: packages/session/session-checkpoint-policy/src/index.ts lines 10, 40-50, 73.\n\nAlso relevant docs/READMEs maybe. Let me answer with files and line numbers. Maybe mention README as docs references but the question specifically asks list files.\n\nLet me make sure that checkpoint policy is \"which checkpoint policy\" — session-checkpoint-policy. It reuses the code constant when cancellation lands after the checkpoint flush pending, before dispatch.\n\nI'll present a concise answer.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "locate-image-count-limit",
+      "tags": [
+        "locate"
+      ],
+      "prompt": "一条消息里最多能附几张图片？这个上限定义在哪个文件？",
+      "answer_paths": [
+        "packages/attachment/attachment-local/src/index.ts"
+      ],
+      "notes": "出处：packages/attachment/attachment-local/src/index.ts:36 `export const DEFAULT_MAX_IMAGES_PER_MESSAGE = 20`。理由：先要找出常量名（中文问句里没有任何标识符），再定位文件；答案含具体数字，可机械断言。 同类审计：仓库另有 `DEFAULT_MAX_IMAGES_PER_REQUEST = 600`（llm-deepseek 的按请求上限），与本条的「每条消息」不是同一概念；断言只认 `DEFAULT_MAX_IMAGES_PER_MESSAGE` 与 attachment-local，并加了『每个模型请求最多 600 张』这条应拒绝样例把这个区别钉住。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['grep', 'grep', 'read', 'read', 'grep', 'grep'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 8.88,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/005-locate-image-count-limit/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-fe0cf594-7d6e-4830-b4ff-27b6f54d787c/session.v3.jsonl",
+          "steps": 4,
+          "total_tokens": 95470,
+          "tool_calls": [
+            "grep",
+            "grep",
+            "read",
+            "read",
+            "grep",
+            "grep"
+          ],
+          "turn_end": "completed",
+          "final_text": "一条消息最多附 **20 张图片**（默认值，可由配置覆盖）。\n\n**上限定义位置：**\n\n- **默认常量**：`DEFAULT_MAX_IMAGES_PER_MESSAGE = 20`\n  `packages/attachment/attachment-local/src/index.ts:36`\n  同处的 `Config.maxImagesPerMessage`（第 66 行）允许部署通过配置覆盖，schema 默认值在第 151 行，实例化时在 `this.imageLimits`（第 180 行）解析。\n\n- **实际执行点**：`packages/attachment/attachment/src/index.ts:77-81` 的 `validateImageBatch()`，超限时抛出 `AttachmentError(..., 'TOO_MANY_IMAGES')`：\n  ```ts\n  if (inputs.length > maxImagesPerMessage) {\n    throw new AttachmentError('Image batch exceeds the configured image-count limit.', 'TOO_MANY_IMAGES')\n  }\n  ```\n  限制字段声明在 `packages/attachment/attachment/src/types.ts:76`（`maxImagesPerMessage: number`）。\n\n- **文档/默认值同步**：`packages/attachment/attachment-local/README.md:42`、`docs/config-catalog.md:317`。\n\n**注意区分**：`packages/llm/llm-deepseek/src/common/request-pricing.ts:22` 的 `DEFAULT_MAX_IMAGES_PER_REQUEST = 600` 是发往模型请求的出站图片预算（超出会触发 offload），不是\"一条消息能附几张图\"的准入上限。\n\n当前基础组合（`packages/bundle/base/cordis.patch.yml`）未覆盖该项配置，因此生效值为默认的 20。",
+          "stderr_tail": "attaching images to a message.\"\n\nLet me look at the attachment/src/index.ts validateBatch and the defaults, and check config in cordis.yml perhaps. Also there may be an actual deployment config setting. Let me look at the relevant files more carefully.\ndsh: reasoning:\nThe user's question: \"一条消息里最多能附几张图片？这个上限定义在哪个文件？\" \n\nI should answer clearly. There are two relevant limits:\n1. Attachment admission limit: DEFAULT_MAX_IMAGES_PER_MESSAGE = 20, in packages/attachment/attachment-local/src/index.ts line 36, enforced via validateImageBatch in packages/attachment/attachment/src/index.ts line 79.\n2. But the actual deployment may configure it. Let me check cordis.yml / the profile config to see what's actually set in shipped deployments.\n\nLet me check if there's a cordis.yml config that overrides maxImagesPerMessage. Also note the LLM provider maxImagesPerRequest default 600 — but that's about outbound request budget, not attachment admission.\n\nThe question likely maps to a code-retrieval benchmark (coderag). The expected answer is probably DEFAULT_MAX_IMAGES_PER_MESSAGE = 20 in packages/attachment/attachment-local/src/index.ts. Let me verify whether the shipped profile config sets it.\n\nLet me grep cordis.yml for maxImagesPerMessage.\ndsh: reasoning:\nConfirmed. The default is 20, configurable. The base bundle doesn't override it (line 125-126 just declares the plugin). Let me check the base cordis.patch.yml to see if config sets maxImagesPerMessage. It just lists id/name, no config. So default 20.\n\nLet me answer the user's question directly in Chinese. The answer: 默认 20 张，上限由 `DEFAULT_MAX_IMAGES_PER_MESSAGE = 20` 定义在 packages/attachment/attachment-local/src/index.ts，实际执行在 packages/attachment/attachment/src/index.ts 的 validateImageBatch。\n\nNote there's also llm-deepseek maxImagesPerRequest = 600, but that's an outbound model request image budget, not the attachment-per-message limit. Should mention distinction briefly.\n\nI'll answer concisely with file paths and line references.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "locate-repeat-tool-reminder",
+      "tags": [
+        "locate"
+      ],
+      "prompt": "助手连续好几次用完全一样的参数调用同一个工具时，系统会怎么提醒它？给我实现这个提醒的文件路径就行。",
+      "answer_paths": [
+        "packages/guard/repeat-tool-reminder/src/index.ts"
+      ],
+      "notes": "出处：packages/guard/repeat-tool-reminder/src/index.ts:63 `GENTLE_REMINDER`、:199-202 阈值判定与 `detailedReminder`。理由：纯中文行为描述，代码里的词是 reminder/remind，中文『提醒』猜不到；配 tools_called 同时测检索质量与工具采纳意愿。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 3.967,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/006-locate-repeat-tool-reminder/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-e585cb59-41f0-40b5-89d1-8113fd05e197/session.v3.jsonl",
+          "steps": 3,
+          "total_tokens": 44204,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "提醒由 `packages/guard/repeat-tool-reminder/src/index.ts`（包 `@deepseek-ai/dsh-repeat-tool-reminder`）实现。\n\n逻辑简述（便于对照）：在 `tools/post-execute` 上统计同一 agent 连续用相同工具+完全相同参数的调用，达到阈值（默认 `[3, 5, 8]`）时注入提醒——第 3 次是温和提示（`GENTLE_REMINDER`），第 5/8 次是详细提醒（`detailedReminder`，含工具名、连击次数和参数预览）；`agent/pre-step` 遇到真实用户消息会重置链条。它只做提醒，不拦截调用。",
+          "stderr_tail": "dsh: reasoning:\nThe user asks: when an assistant repeatedly calls the same tool with identical arguments, how does the system remind it? Give the file path implementing this reminder.\n\nThis is about the deepseek-harness repo. There's a \"guard\" package group — loop/tool guards. Let me search.\n\nLet me look in packages/guard.\ndsh: reasoning:\nThe implementation file is packages/guard/repeat-tool-reminder/src/index.ts. Let me read it to describe the reminder behavior.\ndsh: reasoning:\nThe user asks specifically: \"给我实现这个提醒的文件路径就行\" - just give the file path implementing the reminder. Answer concisely with the path. Maybe mention the package. Keep it brief.\n\nI should give the absolute-ish repo path: packages/guard/repeat-tool-reminder/src/index.ts. Also mention behavior briefly: thresholds [3,5,8], gentle then detailed. User said path is enough.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "locate-spill-notice",
+      "tags": [
+        "locate"
+      ],
+      "prompt": "工具输出太长被存到磁盘以后，模型看到的那段提示文本是谁生成的？给我文件路径。",
+      "answer_paths": [
+        "packages/spill/spill-policy/src/notice.ts"
+      ],
+      "notes": "出处：packages/spill/spill-policy/src/notice.ts:20 `formatSpillNotice`。理由：中文问『提示文本』，代码里是 notice/format…，词形不重叠；答案是一个小而专一的文件，适合 locate。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['grep', 'grep', 'grep', 'grep', 'read', 'bash', 'grep', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 10.141,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/007-locate-spill-notice/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-0a15b03c-a2ec-4ed5-8b76-67a314d55a76/session.v3.jsonl",
+          "steps": 5,
+          "total_tokens": 169598,
+          "tool_calls": [
+            "grep",
+            "grep",
+            "grep",
+            "grep",
+            "read",
+            "bash",
+            "grep",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "就是**`packages/spill/spill-policy/src/notice.ts`**——`formatSpillNotice()`（第 20–22 行）把预览与提示拼成模型看到的那段文本：\n\n```ts\nreturn `${OPEN}${describeOmitted(omitted, 'bytes')}${LOCATION}${ref.locator}${GUIDANCE_SEPARATOR}${ref.retrievalHint}${CLOSE}`\n```\n\n拆开来看，这段提示由三个来源拼成：\n\n| 片段 | 生成者 |\n|---|---|\n| `Omitted N bytes.` | `describeOmitted()` → `packages/util/output-retention/src/index.ts`（`TextRetainer` 的省略量描述） |\n| `Full formatted result stored at: <locator>. ` | 拼装逻辑在 `notice.ts`；`locator` 由 spill 后端给出 |\n| `Use read with offset/limit, or grep this path to search within it.` | `packages/spill/spill-local/src/index.ts:159` 的 `retrievalHint` |\n\n**调用方**是 `packages/spill/spill-policy/src/index.ts`（第 125–183 行的 `spillReplacement`）：超过 `maxInlineBytes` 时先 `spillStore.saveText()` 落盘，再调 `formatSpillNotice()` 生成 head/tail 预览 + 提示，用它替换模型可见的 tool result（第 200–203 行）。\n\n所以：**完整提示文本的组装文件路径是 `packages/spill/spill-policy/src/notice.ts`**；其中 `.spill/...` 路径来自 `spill-local`，尾部的检索指引也由 `spill-local` 提供。",
+          "stderr_tail": "t file and also the spill-policy src for context. Also `packages/util/output-retention/src/index.ts` generates \"Omitted N bytes\" preview. Let's read notice.ts.\ndsh: reasoning:\nThe user asks: \"After tool output is too long and saved to disk, who generated that paragraph of prompt text that the model sees? Give me the file path.\"\n\nThe notice text is generated by `formatSpillNotice` in `packages/spill/spill-policy/src/notice.ts`. But the \"Omitted N bytes\" part comes from `describeOmitted` in `packages/util/output-retention/src/index.ts`. The retrieval hint text (\"Use read with offset/limit, or grep this path...\") — where does that come from? The locator/retrievalHint in SpillRef, likely set by the spill service. Let me check. The user wants the file path where the model-visible text is generated. The primary answer: notice.ts. But let me be precise and find where the hint string is generated.\n\nLet me grep for \"Use read with offset/limit\".\ndsh: reasoning:\nI have the full answer. The notice text the model sees is composed by `formatSpillNotice` in `packages/spill/spill-policy/src/notice.ts` (line 20-22). The \"Omitted N bytes.\" component comes from `describeOmitted` in `packages/util/output-retention/src/index.ts` (imported). The locator and retrieval hint in the notice come from `SpillRef` produced by `packages/spill/spill-local/src/index.ts` (line 159 for the hint).\n\nLet me give a concise answer with file paths. The user specifically asked \"给我文件路径\" (give me the file path). Primary: `packages/spill/spill-policy/src/notice.ts`. I should mention the surrounding parts too since they asked \"谁生成的\" (who generated it).\n\nLet me quickly verify the output-retention describeOmitted function location for completeness. Already know line. Let me just present.\n\nShould I mention the exact file path of description \"Omitted N bytes\"? It's `packages/util/output-retention/src/index.ts`. Let me confirm the describeOmitted function exists there. Grep found it there. Good.\n\nAnswer in Chinese.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "locate-tool-timeout-default",
+      "tags": [
+        "locate"
+      ],
+      "prompt": "MCP 工具调用的默认超时是多少？这个默认值定义在哪个文件？",
+      "answer_paths": [
+        "packages/mcp/mcp-client/src/index.ts"
+      ],
+      "notes": "出处：packages/mcp/mcp-client/src/index.ts:37 `const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000`。理由：MCP 工具调用的默认超时，是 PROJECT.md 约束 E-01（MCP 工具调用 60 秒超时）的锚点常量，改动前必须定位。**更正记录（人工审核，2026-09-19）**：原问句是「工具调用默认多久算超时？」——DSH 里另有 `DEFAULT_WEB_TOOL_TIMEOUT_MS=30_000`、`DEFAULT_LSP_TOOL_TIMEOUT_MS=60_000`、bash/pwsh `timeoutMs=120_000`、persistent `timeoutMs=300_000` 共 6 处工具超时默认值，泛化的「工具」措辞**不唯一**；现明确限定为 MCP 工具调用。代价是问句里出现了英文 MCP（本可 grep），但唯一性优先于「纯中文」这一设计意图。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'read', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 5.263,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/008-locate-tool-timeout-default/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-4d67b974-1d51-4b48-86bb-2a10d7ea4946/session.v3.jsonl",
+          "steps": 4,
+          "total_tokens": 61198,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "read",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "## 答案\n\n**默认超时：60,000 毫秒（60 秒）**，适用于单个 MCP 工具调用和资源请求。\n\n**定义位置：** `packages/mcp/mcp-client/src/index.ts` 第 37 行\n\n```ts\n/** Default timeout for individual MCP tool calls and resource requests (ms). */\nconst DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000\n```\n\n该常量通过 Schemastery 的 `.default(...)` 应用到两种传输的 `toolCallTimeoutMs` 配置字段上：\n\n- stdio：`packages/mcp/mcp-client/src/index.ts:127`\n- streamable-http：`packages/mcp/mcp-client/src/index.ts:137`\n\n```ts\ntoolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),\n```\n\n调用时该值经 `tools.ts:140`（`{ signal, timeout: opts.toolCallTimeoutMs, ... }`）与 `connection.ts:370`（`{ signal, timeout: config.toolCallTimeoutMs }`）下传给 MCP SDK。\n\n补充说明：这是**每次工具调用/资源请求**的超时，可在 `cordis.yml` 中通过 `toolCallTimeoutMs` 按服务器实例覆盖。启动与发现阶段的超时不属于此配置，而是沿用 MCP SDK 自身的 60 秒请求默认值（见 `packages/mcp/mcp-client/README.md` 的 Known Limitations）。",
+          "stderr_tail": "dsh: reasoning:\nThe user asks: What is the default timeout for MCP tool calls? Which file defines this default?\n\nI'm in a repo /private/tmp/dsh-coderag-t3-03-corpus. Let me search. This looks like a code RAG task. Let me look at packages/mcp.\ndsh: reasoning:\nLet me read index.ts around line 36.\ndsh: reasoning:\nThe answer: default MCP tool call timeout is 60,000 ms (60 seconds), defined as DEFAULT_TOOL_CALL_TIMEOUT_MS in packages/mcp/mcp-client/src/index.ts line 37. Let me verify the Config default application via schemastery `.default(...)`. Let me read the rest.\ndsh: reasoning:\nAnswer is clear. 60 seconds (60,000 ms), defined as `DEFAULT_TOOL_CALL_TIMEOUT_MS` in `packages/mcp/mcp-client/src/index.ts` line 37, applied via Schemastery `.default()` on `toolCallTimeoutMs` for both transports (lines 127, 137). Also note resource requests use the same config. Mention README confirms.\n\nI should note the actual timeout enforcement is in tools.ts/connection.ts using opts.toolCallTimeoutMs.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 1,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "negative-elasticsearch",
+      "tags": [
+        "negative"
+      ],
+      "prompt": "项目里用了 Elasticsearch 做检索吗？没有的话直接说没有。",
+      "answer_paths": [],
+      "notes": "出处：全副本 grep `elasticsearch` **0 命中**。理由：同上的反臆造控制组，但这一条更贴近本项目的领域——被问『你们是不是也用 ES』时最容易顺着答。 断言要求「否定词 + 技术名」（或英文的 no X / not used），只写「我没有细看」不算——那种措辞没有陈述『不存在』。",
+      "attempts": [
+        {
+          "passed": true,
+          "failures": [],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 12.666,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/009-negative-elasticsearch/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-ef554c23-f8fc-43fe-931d-f5c44f989e6f/session.v3.jsonl",
+          "steps": 4,
+          "total_tokens": 50944,
+          "tool_calls": [
+            "grep",
+            "bash",
+            "bash",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "没有。项目没有使用 Elasticsearch 做检索。\n\n全仓库搜索 `elasticsearch` / `elastic` 仅命中一处 CI 笔记里的 “elastic capacity”（指 Blacksmith runner 的弹性容量），与检索无关，也没有 `@elastic` 相关依赖。",
+          "stderr_tail": "dsh: reasoning:\nThe user asks whether the project uses Elasticsearch for retrieval. Let me search the repository.\ndsh: reasoning:\nNo matches. Let me double check with a broader search maybe \"elastic\" alone, and check dependencies.\n\nActually the grep returned nothing. Let me check package.json deps quickly. But that's probably enough. Let me do one more search for \"elastic\" case-insensitive across tracked files.\ndsh: reasoning:\nThat file likely uses the word \"elastic\" in another sense (elastic scaling / failover). Let me peek.\ndsh: reasoning:\nThat's \"elastic capacity\" (CI runners), not Elasticsearch. So the answer: No, the project does not use Elasticsearch for retrieval.\n\nI can mention what it does use for retrieval briefly based on AGENTS.md: session-query for browsing/search. But the user said \"没有的话直接说没有\" — if not, just say no. So keep it concise. Maybe add one line that the only \"elastic\" hit is CI runner capacity. Keep it short in Chinese.\n"
+        }
+      ],
+      "successes": 1,
+      "trials": 1,
+      "pass@k": 1.0,
+      "pass^k": 1.0
+    },
+    {
+      "name": "negative-kafka",
+      "tags": [
+        "negative"
+      ],
+      "prompt": "这个仓库里有 Kafka 相关的集成代码吗？如果没有就直说没有，不要臆造。",
+      "answer_paths": [],
+      "notes": "出处：全副本 grep（排除 .git/node_modules/.coderag）`kafka` **0 命中**。理由：反臆造控制组（EVAL §2.9 与 RL-06 的同一个根因：空结果会被读成『不存在』，也可能被读成『我再编一个』）。断言只要求出现『没有/not found』一类措辞。 断言要求「否定词 + 技术名」（或英文的 no X / not used），只写「我没有细看」不算——那种措辞没有陈述『不存在』。",
+      "attempts": [
+        {
+          "passed": true,
+          "failures": [],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 17.613,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/010-negative-kafka/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-7ba5fed0-d234-4969-a654-441195336aec/session.v3.jsonl",
+          "steps": 4,
+          "total_tokens": 51798,
+          "tool_calls": [
+            "grep",
+            "bash",
+            "bash",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "没有。\n\n我在整个仓库（`/private/tmp/dsh-coderag-t3-03-corpus`）里做了大小写不敏感的全文搜索，`kafka` 零匹配（grep 退出码 1）。仓库中不存在任何 Kafka 生产者/消费者、Kafka 客户端依赖、配置项或相关文档。\n\n顺带说明仓库定位：这是一个 agent harness（`@deepseek-ai/dsh-*` 的 pnpm monorepo），负责 agent/session、LLM provider、sandbox、subagent、workflow 等，并不包含消息队列/事件流集成，因此没有 Kafka 代码是符合预期的。\n\n如果你需要，我可以再帮你查其它 broker（如 RabbitMQ、NATS、Redis Streams）是否被集成。",
+          "stderr_tail": "dsh: reasoning:\nThe user asks in Chinese: \"Does this repo have Kafka-related integration code? If not, say so directly, don't fabricate.\"\n\nLet me search the repo for Kafka.\ndsh: reasoning:\nThe grep found no matches case-insensitively. Let me double check with a broader search including dependency names, maybe \"kafka\" in lockfile, etc. grep tool might skip lockfile? It includes hidden/ignored. Let me also search bash for kafka across all files including binary.\n\nLet me run a broader check: node_modules not present presumably. Search all files.\ndsh: reasoning:\nNo matches at all (grep exits 1 when no matches, but pipeline head makes exit 0). Let me verify explicitly.\ndsh: reasoning:\nNo Kafka anywhere. Confirm honestly. Maybe also check for message broker / event streaming related names like \"rabbitmq\", \"nats\", \"redis\", \"bullmq\" — but the question is specifically Kafka. I can mention briefly that no Kafka integration exists. Don't fabricate.\n\nLet me be thorough: search case-insensitively for \"kafka\" already done across the whole tree (excluding node_modules which aren't present). Provide answer.\n"
+        }
+      ],
+      "successes": 1,
+      "trials": 1,
+      "pass@k": 1.0,
+      "pass^k": 1.0
+    },
+    {
+      "name": "regression-context-window-code",
+      "tags": [
+        "regression",
+        "identifier"
+      ],
+      "prompt": "`CONTEXT_WINDOW_EXCEEDED_CODE` 定义在哪个文件？",
+      "answer_paths": [
+        "packages/llm/llm/src/error.ts"
+      ],
+      "notes": "出处：packages/llm/llm/src/error.ts:25。理由：同上的回归题；这条同时是 L1 里 T3-13 修过的『标识符 + 中文』形态，用来确认端到端层面也不回退。",
+      "attempts": [
+        {
+          "passed": true,
+          "failures": [],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 2.503,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/011-regression-context-window-code/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-3ff4efa6-bdb7-4840-8ac9-77cdbe5febe9/session.v3.jsonl",
+          "steps": 2,
+          "total_tokens": 25832,
+          "tool_calls": [
+            "grep"
+          ],
+          "turn_end": "completed",
+          "final_text": "`CONTEXT_WINDOW_EXCEEDED_CODE` 定义在：\n\n**`packages/llm/llm/src/error.ts:25`**\n\n```ts\nexport const CONTEXT_WINDOW_EXCEEDED_CODE = 'CONTEXT_WINDOW_EXCEEDED'\n```\n\n它从 `@deepseek-ai/dsh-llm` 包导出，被 `llm-deepseek`、`llm-pi-ai` 等适配器以及 `compaction-basic` 消费使用。",
+          "stderr_tail": "dsh: reasoning:\nThe user asks: where is `CONTEXT_WINDOW_EXCEEDED_CODE` defined? Let me search the repo.\ndsh: reasoning:\nDefinition is in packages/llm/llm/src/error.ts line 25.\n"
+        }
+      ],
+      "successes": 1,
+      "trials": 1,
+      "pass@k": 1.0,
+      "pass^k": 1.0
+    },
+    {
+      "name": "regression-prune-marker",
+      "tags": [
+        "regression",
+        "identifier"
+      ],
+      "prompt": "`PRUNE_MARKER` 这个常量定义在哪个文件？",
+      "answer_paths": [
+        "packages/compaction/compaction-tool-result-pruner/src/config.ts"
+      ],
+      "notes": "出处：packages/compaction/compaction-tool-result-pruner/src/config.ts:7。理由：**不给 tools_called 断言**——这是一条『检索不该让简单题变差』的回归题。标识符可直接 grep，预期 A 组也能过；若 B 组反而失败，说明检索干扰了基线。",
+      "attempts": [
+        {
+          "passed": true,
+          "failures": [],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 2.593,
+          "session_log": "/Users/vermi/个人项目/python/dsh-coderag/eval/runs/a-smoke/.sessions/012-regression-prune-marker/attempt-1/sessions/--private-tmp-dsh-coderag-t3-03-corpus--/session-7c76fb25-19bc-4e69-81ae-73dd0aa358c6/session.v3.jsonl",
+          "steps": 2,
+          "total_tokens": 25292,
+          "tool_calls": [
+            "grep"
+          ],
+          "turn_end": "completed",
+          "final_text": "`PRUNE_MARKER` 定义在：\n\n**`packages/compaction/compaction-tool-result-pruner/src/config.ts`**（第 7 行）\n\n```ts\nexport const PRUNE_MARKER = '\\n\\n[... tool result middle pruned ...]\\n\\n'\n```\n\n相关位置：\n- `src/index.ts` 第 16 行导入它，第 24 行重新导出（`export { ... PRUNE_MARKER ... } from './config.ts'`），并在第 105 行使用。\n- 测试文件 `tests/tool-result-pruner.spec.ts` 也直接引用了它。\n\n也就是说，常量的**定义**在 `config.ts`，对外暴露的入口是包根 `index.ts`。",
+          "stderr_tail": "dsh: reasoning:\nThe user asks where the constant PRUNE_MARKER is defined. Let me search the workspace.\ndsh: reasoning:\nThe answer: defined in packages/compaction/compaction-tool-result-pruner/src/config.ts, and re-exported by src/index.ts.\n"
+        }
+      ],
+      "successes": 1,
+      "trials": 1,
+      "pass@k": 1.0,
+      "pass^k": 1.0
+    }
+  ],
+  "successes": 4,
+  "attempts": 13,
+  "task_success_rate": 0.3076923076923077
+}
