@@ -76,6 +76,7 @@ def build_report(run: EvalRun, *, tasks_file: str | None = None) -> dict[str, An
         "k": run.k,
         "corpus_root": str(run.corpus_root),
         "tasks_file": tasks_file,
+        "golden_version": run.golden_version,
         "task_count": len(run.results),
         "hit_count": sum(1 for result in run.results if result.hit),
         "class_counts": class_counts,
@@ -182,6 +183,7 @@ def diff_runs(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict[s
         "change_counts": change_counts,
         "regression_count": change_counts[CHANGE_REGRESSION],
         "improvement_count": change_counts[CHANGE_IMPROVEMENT],
+        "golden_version": _version_comparison(baseline, current),
         "only_in_baseline": sorted(set(baseline_by_id) - set(current_by_id)),
         "only_in_current": sorted(set(current_by_id) - set(baseline_by_id)),
         "rates": _rates(pairs),
@@ -220,14 +222,26 @@ def gate_diff(
     waiver_set = set(waivers)
     waived = [task_id for task_id in regressed if task_id in waiver_set]
     active = [task_id for task_id in regressed if task_id not in waiver_set]
+    version = diff.get("golden_version")
+    version_match = version.get("match") if isinstance(version, Mapping) else None
+    reasons: list[str] = []
+    if version_match is False:
+        reasons.append(
+            "golden_version 不一致：两份报告跑的不是同一份题集，逐条对比无效"
+            "（EVAL.md 2.7：改题集必须同步升版本号）"
+        )
+    if len(active) > max_regressions:
+        reasons.append(f"未豁免回归 {len(active)} 条 > 容忍 {max_regressions}")
     return {
         "schema": DIFF_SCHEMA,
         "regression_count": len(regressed),
         "waived_regressions": waived,
         "active_regressions": active,
         "unused_waivers": sorted(waiver_set - set(regressed)),
+        "golden_version_match": version_match,
         "max_regressions": max_regressions,
-        "passed": len(active) <= max_regressions,
+        "reasons": reasons,
+        "passed": not reasons,
     }
 
 
@@ -237,10 +251,18 @@ def render_diff_markdown(diff: Mapping[str, Any], verdict: Mapping[str, Any]) ->
     rates = rates if isinstance(rates, Mapping) else {}
     counts = diff.get("change_counts")
     counts = counts if isinstance(counts, Mapping) else {}
+    version = diff.get("golden_version")
+    version = version if isinstance(version, Mapping) else {}
+    version_note = ""
+    if version.get("match") is False:
+        version_note = " ｜ ⚠️ 不一致：两份报告的题集不同，逐条对比无效"
+    elif version.get("match") is None:
+        version_note = " ｜ （至少一份报告缺版本号，未能核验）"
     lines = [
         "# L1 逐 query diff",
         "",
         f"- 对比条数：{diff.get('compared')}（k={diff.get('k')}）",
+        f"- golden_version：{version.get('baseline')} → {version.get('current')}{version_note}",
         f"- 命中率：{_rate(rates.get('baseline_hit_rate'))} → "
         f"{_rate(rates.get('current_hit_rate'))}（{_pp(rates.get('delta'))}）",
         f"- 回归：{diff.get('regression_count')} ｜ 改善：{diff.get('improvement_count')} ｜ "
@@ -250,6 +272,7 @@ def render_diff_markdown(diff: Mapping[str, Any], verdict: Mapping[str, Any]) ->
         f"（未豁免回归 {len(verdict.get('active_regressions', []))} 条，"
         f"容忍 {verdict.get('max_regressions')}）",
     ]
+    lines += [f"  - {reason}" for reason in verdict.get("reasons", [])]
     if diff.get("only_in_baseline") or diff.get("only_in_current"):
         lines.append(
             f"- 仅单侧存在：baseline {diff.get('only_in_baseline')} ｜ "
@@ -332,6 +355,22 @@ def _rates(pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any]]]) -> dict
         ),
         "by_class": class_rates,
     }
+
+
+def _version_comparison(
+    baseline: Mapping[str, Any], current: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Compare the golden versions the two reports ran against.
+
+    `match` is None when either report predates the field: absent metadata is
+    not evidence of a mismatch, but it is also not verification.
+    """
+    baseline_version = _optional_str(baseline.get("golden_version"))
+    current_version = _optional_str(current.get("golden_version"))
+    match: bool | None = None
+    if baseline_version is not None and current_version is not None:
+        match = baseline_version == current_version
+    return {"baseline": baseline_version, "current": current_version, "match": match}
 
 
 def _hit_rate(entries: Sequence[Mapping[str, Any]]) -> float | None:

@@ -8,6 +8,7 @@ while individual queries regress.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -22,10 +23,12 @@ from dsh_coderag.eval.report import (
     MAX_REGRESSIONS_DEFAULT,
     REPORT_SCHEMA,
     ReportDiffError,
+    build_report,
     diff_runs,
     gate_diff,
     render_diff_markdown,
 )
+from dsh_coderag.eval.runner import EvalRun
 
 
 def entry(
@@ -48,9 +51,16 @@ def entry(
     }
 
 
-def report(*entries: dict[str, Any], k: int = 5) -> dict[str, Any]:
+def report(
+    *entries: dict[str, Any], k: int = 5, golden_version: str | None = "m3-b1"
+) -> dict[str, Any]:
     """Build a minimal run report around the given result rows."""
-    return {"schema": REPORT_SCHEMA, "k": k, "results": list(entries)}
+    return {
+        "schema": REPORT_SCHEMA,
+        "k": k,
+        "golden_version": golden_version,
+        "results": list(entries),
+    }
 
 
 def changes(diff: dict[str, Any]) -> list[str]:
@@ -303,3 +313,61 @@ def test_markdown_says_pass_and_flags_unused_waivers() -> None:
     assert "门禁：PASS" in text
     assert "未匹配到任何回归的 waiver" in text
     assert "## 回归" not in text
+
+
+# ── golden_version provenance ───────────────────────────────────────────
+def test_build_report_records_the_golden_version() -> None:
+    run = EvalRun(
+        corpus_root=Path("/tmp/anywhere"), k=5, results=(), golden_version="m3-b1"
+    )
+    assert build_report(run)["golden_version"] == "m3-b1"
+
+    unpinned = EvalRun(corpus_root=Path("/tmp/anywhere"), k=5, results=())
+    assert build_report(unpinned)["golden_version"] is None
+
+
+def test_a_matching_golden_version_is_reported_as_a_match() -> None:
+    diff = diff_runs(report(entry("A", hit=True)), report(entry("A", hit=True)))
+
+    assert diff["golden_version"] == {
+        "baseline": "m3-b1",
+        "current": "m3-b1",
+        "match": True,
+    }
+    assert gate_diff(diff)["passed"] is True
+
+
+def test_a_golden_version_mismatch_fails_the_gate_with_no_regression_at_all() -> None:
+    baseline = report(entry("A", hit=True), golden_version="m3-b1")
+    current = report(entry("A", hit=True), golden_version="m3-b2")
+    diff = diff_runs(baseline, current)
+    verdict = gate_diff(diff)
+
+    assert diff["regression_count"] == 0
+    assert diff["golden_version"]["match"] is False
+    assert verdict["passed"] is False
+    assert any("golden_version 不一致" in reason for reason in verdict["reasons"])
+
+
+def test_missing_versions_are_not_treated_as_a_mismatch() -> None:
+    """Absent metadata is not verification, so it must not read as a mismatch."""
+    baseline = report(entry("A", hit=True), golden_version=None)
+    current = report(entry("A", hit=True), golden_version="m3-b1")
+    diff = diff_runs(baseline, current)
+    verdict = gate_diff(diff)
+
+    assert diff["golden_version"]["match"] is None
+    assert verdict["golden_version_match"] is None
+    assert verdict["passed"] is True
+
+
+def test_markdown_flags_a_golden_version_mismatch() -> None:
+    diff = diff_runs(
+        report(entry("A", hit=True), golden_version="m3-b1"),
+        report(entry("A", hit=True), golden_version="m3-b2"),
+    )
+    text = render_diff_markdown(diff, gate_diff(diff))
+
+    assert "golden_version：m3-b1 → m3-b2" in text
+    assert "题集不同" in text
+    assert "门禁：FAIL" in text
