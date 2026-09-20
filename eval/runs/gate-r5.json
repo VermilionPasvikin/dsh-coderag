@@ -1,0 +1,141 @@
+{
+  "schema": "dsh-coderag/ab-gate/v1",
+  "baseline_group": "eval-coderag",
+  "current_group": "eval-coderag",
+  "baseline_task_success_rate": 0.5641025641025641,
+  "current_task_success_rate": 0.8717948717948718,
+  "delta_pp": 30.76923076923077,
+  "only_in_baseline": [],
+  "only_in_current": [],
+  "regressions": [
+    {
+      "case": "negative-elasticsearch",
+      "baseline_rate": 1.0,
+      "current_rate": 0.6666666666666666
+    }
+  ],
+  "improvements": [
+    {
+      "case": "crossfile-goal-round-limit",
+      "baseline_rate": 0.0,
+      "current_rate": 0.6666666666666666
+    },
+    {
+      "case": "crossfile-skill-precedence",
+      "baseline_rate": 0.6666666666666666,
+      "current_rate": 1.0
+    },
+    {
+      "case": "crossfile-subprocess-env-scrub",
+      "baseline_rate": 0.3333333333333333,
+      "current_rate": 1.0
+    },
+    {
+      "case": "crossfile-tool-cancel-code",
+      "baseline_rate": 0.3333333333333333,
+      "current_rate": 1.0
+    },
+    {
+      "case": "locate-image-count-limit",
+      "baseline_rate": 0.6666666666666666,
+      "current_rate": 1.0
+    },
+    {
+      "case": "locate-repeat-tool-reminder",
+      "baseline_rate": 0.0,
+      "current_rate": 0.6666666666666666
+    },
+    {
+      "case": "locate-spill-notice",
+      "baseline_rate": 0.0,
+      "current_rate": 0.6666666666666666
+    },
+    {
+      "case": "locate-tool-timeout-default",
+      "baseline_rate": 0.6666666666666666,
+      "current_rate": 1.0
+    }
+  ],
+  "per_case": [
+    {
+      "case": "crossfile-goal-round-limit",
+      "baseline_rate": 0.0,
+      "current_rate": 0.6666666666666666,
+      "delta": 0.6666666666666666
+    },
+    {
+      "case": "crossfile-skill-precedence",
+      "baseline_rate": 0.6666666666666666,
+      "current_rate": 1.0,
+      "delta": 0.33333333333333337
+    },
+    {
+      "case": "crossfile-subprocess-env-scrub",
+      "baseline_rate": 0.3333333333333333,
+      "current_rate": 1.0,
+      "delta": 0.6666666666666667
+    },
+    {
+      "case": "crossfile-todo-snapshot",
+      "baseline_rate": 0.6666666666666666,
+      "current_rate": 0.6666666666666666,
+      "delta": 0.0
+    },
+    {
+      "case": "crossfile-tool-cancel-code",
+      "baseline_rate": 0.3333333333333333,
+      "current_rate": 1.0,
+      "delta": 0.6666666666666667
+    },
+    {
+      "case": "locate-image-count-limit",
+      "baseline_rate": 0.6666666666666666,
+      "current_rate": 1.0,
+      "delta": 0.33333333333333337
+    },
+    {
+      "case": "locate-repeat-tool-reminder",
+      "baseline_rate": 0.0,
+      "current_rate": 0.6666666666666666,
+      "delta": 0.6666666666666666
+    },
+    {
+      "case": "locate-spill-notice",
+      "baseline_rate": 0.0,
+      "current_rate": 0.6666666666666666,
+      "delta": 0.6666666666666666
+    },
+    {
+      "case": "locate-tool-timeout-default",
+      "baseline_rate": 0.6666666666666666,
+      "current_rate": 1.0,
+      "delta": 0.33333333333333337
+    },
+    {
+      "case": "negative-elasticsearch",
+      "baseline_rate": 1.0,
+      "current_rate": 0.6666666666666666,
+      "delta": -0.33333333333333337
+    },
+    {
+      "case": "negative-kafka",
+      "baseline_rate": 1.0,
+      "current_rate": 1.0,
+      "delta": 0.0
+    },
+    {
+      "case": "regression-context-window-code",
+      "baseline_rate": 1.0,
+      "current_rate": 1.0,
+      "delta": 0.0
+    },
+    {
+      "case": "regression-prune-marker",
+      "baseline_rate": 1.0,
+      "current_rate": 1.0,
+      "delta": 0.0
+    }
+  ],
+  "s3_met": true,
+  "passed": false
+}
