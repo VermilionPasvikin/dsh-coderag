@@ -73,11 +73,14 @@ async def test_tool_descriptions_are_stable(client: ClientSession) -> None:
     tools = await client.list_tools()
     assert [tool.description for tool in tools.tools] == snapshot(
         [
-            "Search the workspace codebase for relevant code. Returns ranked code"
-            " snippets with exact file paths and line numbers. Prefer this over grep"
-            " when you do not know the exact identifier, or when searching for"
-            " behaviour across multiple files. When the index is not ready the result"
-            " reports a structured status instead of an empty list.",
+            "Find code in this workspace by describing what you are looking for, in"
+            " natural language or as an identifier. Use this first for any question"
+            " about where something lives, how a behaviour is implemented, or which"
+            " files are involved — including when you already know the exact"
+            " identifier, because a single call returns exact file paths and line"
+            " ranges. Use a literal text search only when you must match an exact"
+            " string or regex, and read the returned files to confirm. When nothing"
+            " is searchable yet, the result says so instead of reporting no matches.",
             "Return the symbol outline (classes, functions, methods) of one file, with"
             " line numbers. Use this to understand a file's structure before reading"
             " it in full.",

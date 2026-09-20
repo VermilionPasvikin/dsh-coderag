@@ -33,11 +33,14 @@ TOOLS: list[Tool] = [
     Tool(
         name="code_search",
         description=(
-            "Search the workspace codebase for relevant code. Returns ranked code"
-            " snippets with exact file paths and line numbers. Prefer this over grep"
-            " when you do not know the exact identifier, or when searching for"
-            " behaviour across multiple files. When the index is not ready the result"
-            " reports a structured status instead of an empty list."
+            "Find code in this workspace by describing what you are looking for, in"
+            " natural language or as an identifier. Use this first for any question"
+            " about where something lives, how a behaviour is implemented, or which"
+            " files are involved — including when you already know the exact"
+            " identifier, because a single call returns exact file paths and line"
+            " ranges. Use a literal text search only when you must match an exact"
+            " string or regex, and read the returned files to confirm. When nothing"
+            " is searchable yet, the result says so instead of reporting no matches."
         ),
         inputSchema={
             "type": "object",
