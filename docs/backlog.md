@@ -147,17 +147,14 @@
 - 关联：属 `T1-14`（patch 启动方式）/ `T4-02`（可分发的 bundle patch）范围；
   已在发布前修掉。
 
-## 编码规范欠账：12 个函数超过 50 行（发现于 T4-10）
+## 编码规范欠账：12 个函数超过 50 行（发现于 T4-10）—— **已还清**
 
-- 现象：`AGENTS.md` C-04 要求「函数超过 50 行必须拆分」，但 AST 统计显示 `src/` 里有 **12 个**函数超标。
-- 清单（按行数降序）：`indexer.index_sync` 99、`searcher.search` 93、`eval/ab.py:run_group` 83、
-  `eval/attribute.py:collect_evidence` 81、`eval/ab.py:parse_session` 76、`eval/ab.py:_run_attempt` 71、
-  `eval/__main__.py:_cmd_gate` 66、`eval/report.py:render_diff_markdown` 64、`server._index_status` 59、
-  `searcher._search` 58、`eval/tasks.py:validate_tasks` 56、`eval/report.py:gate_diff` 52。
-- 性质：**规范与实现不一致**（T4-10 审出）。**规范不放宽**——这是欠账，不是规则过时。
-- 建议：`indexer.index_sync` 与 `searcher.search` 是最值得先拆的两个，它们内部本来就有天然分段
-  （walk/prepare/write/cleanup、构造/执行/裁剪）；`eval/ab.py` 的三处可各自抽出纯函数。
-- **不要**用「给函数加注释说明它很长」或改 C-04 的方式消掉它。
+- 现状：`src/` 里 **0 个**函数超过 50 行（AST 复检 `end_lineno - lineno + 1`）；
+  `AGENTS.md` C-04 的「当前未达标」标注已移除，检查方式补上了这条 AST 口径。
+- 落地提交：`d48f87d`（`server`）、`387e224`（`searcher`）、`27efc2e`（`indexer`）、
+  `3b8f343`（`eval` 的 tasks / report / `__main__` / attribute）、`7dd986f`（`eval/ab`）。
+- 手法：一律**提取私有 helper**（如 `_search_sql`、`_TraceAcc`、`_plan_group`、`_IndexFacts`、
+  `_run_options`），公开 API 与行为不变；拆分后 445 条测试与 L1/L2 门禁全绿。
 
 ## 编码规范欠账：没有 Windows 风格路径的测试（发现于 T4-10）
 
