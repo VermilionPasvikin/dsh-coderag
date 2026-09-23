@@ -506,7 +506,7 @@ def fast_index_config():
 | 组 | 落点 | 要不要真实语料 |
 |---|---|---|
 | golden 集的 schema / 判定 / 指标 / diff / 版本校验 | `tests/test_eval.py`、`test_metrics.py`、`test_report_diff.py`、`test_golden_version.py`、`test_eval_gate_cli.py` | 不要——`eval_corpus` fixture 自建小语料 |
-| 真实 30 条在**已索引语料副本**上回放 | `tests/test_eval.py::test_a_batch_runs_against_indexed_corpus`（**opt-in**） | 要——由 `CODERAG_EVAL_CORPUS` 指向 |
+| 真实 30 条在**已索引语料副本**上回放 | `tests/test_eval.py::test_golden_set_runs_against_indexed_corpus`（**opt-in**） | 要——由 `CODERAG_EVAL_CORPUS` 指向 |
 
 ```python
 # tests/test_eval.py（示意形状；真实实现见该文件）
@@ -523,7 +523,7 @@ def test_validate_accepts_wellformed_task(eval_corpus: Path, tmp_path: Path) -> 
     assert validate_tasks(load_tasks(path), eval_corpus) == []
 ```
 
-**注意**：默认套件用的是 `eval_corpus` 这个 **`tmp_path` 小语料**，所以既不会因为评测语料变慢、也不依赖仓库外路径。真实语料的索引由**外部副本**承担（`CODERAG_EVAL_CORPUS` 指向一份预先 `index` 过的拷贝），**索引不进仓库**（`S-03`）。⚠️ 那条 opt-in 用例当前有一条已知欠账（仍断言 10 条），见 `docs/backlog.md` 与 `EVAL.md` §4.1。
+**注意**：默认套件用的是 `eval_corpus` 这个 **`tmp_path` 小语料**，所以既不会因为评测语料变慢、也不依赖仓库外路径。真实语料的索引由**外部副本**承担（`CODERAG_EVAL_CORPUS` 指向一份预先 `index` 过的拷贝），**索引不进仓库**（`S-03`）。那条 opt-in 用例的条数断言**锚在 `eval/tasks.jsonl` 的非空行数上**（不是字面量），所以 golden 集再扩也不会漂——它证的是"每一条都被回放、不被静默截断"。
 
 ### 3.11 分词器语义测试（**三条必测，且预期是"路由"行为**）
 

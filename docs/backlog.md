@@ -167,11 +167,11 @@
   可复用 `tests/test_walker.py` 的 `tmp_path` 模式。
 - 补齐后同步删掉 `AGENTS.md` C-07 行的「当前未达标」标注。
 
-## 测试：A 批回放用例的条数断言停在 10（发现于 T5-01）
+## ✅ 已解决：A 批回放用例的条数断言停在 10（发现于 T5-01，2026-09-23 由用户指示修复）
 
 - 现象：`tests/test_eval.py::test_a_batch_runs_against_indexed_corpus` 断言 `len(tasks) == 10`，
   而 `eval/tasks.jsonl` 在 `T3-02b` 补足 B 批后已是 **30 条**（12 exact + 11 crossfile + 7 natural）。
-- 复现（opt-in，需已索引语料）：
+- 复现（opt-in，需已索引语料）——**修复前**：
   ```sh
   CODERAG_EVAL_CORPUS=/tmp/dsh-coderag-t3-03-corpus python -m pytest tests/test_eval.py -q
   # E  AssertionError: assert 30 == 10
@@ -179,10 +179,15 @@
 - 影响：默认套件**不受影响**（该用例用 `CODERAG_EVAL_CORPUS` 门控，未设则 skip，`eval-gate.sh`
   默认也不设它）。但若按 `EVAL.md` §4.1 设了该变量跑真实语料回放，这一条会假红。
 - 根因：断言写的是 A 批的条数，B 批并入后没有同步；docstring 也仍写 "the frozen 10-task A-batch"。
-- 建议：把断言改成"与 `eval/tasks.jsonl` 的实际条数一致"（例如断言 30，或断言 `== len(load_tasks(REPO_TASKS))`
-  这种自指形式以避免再次漂移），并同步 docstring。**不要只在断言里改数字**——那样下次补 case 还会漂。
-- 归属：属 `tests/` 代码改动，不在 `T5-01` 的产出文件（`EVAL.md`）内，故未顺手修（`AGENTS.md` §9）。
-- `EVAL.md` §4.1 已在引用该用例处标注这一欠账。
+- **修法（不是把数字改成 30）**：新增 `_golden_task_count()`，把期望条数锚在 **`eval/tasks.jsonl` 的非空行数**上；
+  断言改为 `len(tasks) == _golden_task_count()`，并把 `run.results` / `task_count` / `results` 三处
+  `== 10` 一并改为 `== len(tasks)`。用例同时改名为
+  `test_golden_set_runs_against_indexed_corpus`（原名里的 "A-batch" 已不成立），docstring 与
+  `EVAL.md` §4.1、`TESTING.md` §3.10 的引用同步。**这样 golden 集再扩也不会漂**，而它真正要证的
+  "每一条都被回放、不被静默截断"仍然成立。
+- **修复后复跑**（同一条命令）：`28 passed in 6.86s`（修复前是 `1 failed`）。
+- 归属备注：本条属 `tests/` 代码改动，不在 `T5-01` 的产出文件（`EVAL.md`）内，当时按 `AGENTS.md` §9
+  **只记录未修**；2026-09-23 由用户明确指示修复，故在此闭环。
 
 ## 文档过期项审计（2026-09-23；由 `T5-01`–`T5-04` 修复）
 

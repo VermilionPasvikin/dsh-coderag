@@ -1,7 +1,7 @@
 """Tests for the L1 evaluation package (T3-03).
 
 Every filesystem test builds its corpus under tmp_path (TESTING.md T-03/T-04)
-and offline (T-02). One opt-in integration test replays the real A-batch
+and offline (T-02). One opt-in integration test replays the real golden set
 against an already-indexed corpus copy when CODERAG_EVAL_CORPUS is set; it is
 skipped otherwise so the default suite stays hermetic.
 """
@@ -331,23 +331,35 @@ def test_write_report_writes_parseable_json(eval_corpus: Path, tmp_path: Path) -
     assert json.loads(out.read_text(encoding="utf-8"))["task_count"] == 1
 
 
-# ── integration: the real A-batch (opt-in) ──────────────────────────────
+# ── integration: the real golden set (opt-in) ───────────────────────────
+def _golden_task_count() -> int:
+    """Count the golden set's tasks from the file itself.
+
+    Anchoring the expected count to the golden set rather than to a literal is
+    deliberate: T3-02b grew the set from 10 to 30 and left `== 10` behind, so
+    the opt-in test false-failed for two milestones. What the replay must prove
+    is that the loader replays *every* task (never a silent truncation), which
+    this makes drift-proof.
+    """
+    return sum(1 for line in REPO_TASKS.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
 @pytest.mark.skipif(
     INTEGRATION_CORPUS is None,
-    reason="set CODERAG_EVAL_CORPUS to an indexed DSH copy to replay the A-batch",
+    reason="set CODERAG_EVAL_CORPUS to an indexed DSH copy to replay the golden set",
 )
-def test_a_batch_runs_against_indexed_corpus(tmp_path: Path) -> None:
-    """Replay the frozen 10-task A-batch and write its per-query JSON."""
+def test_golden_set_runs_against_indexed_corpus(tmp_path: Path) -> None:
+    """Replay every task of the frozen golden set and write its per-query JSON."""
     corpus = Path(INTEGRATION_CORPUS or "")
     tasks = load_tasks(REPO_TASKS)
-    assert len(tasks) == 10
+    assert len(tasks) == _golden_task_count()
     assert validate_tasks(tasks, corpus) == []
     run = run_eval(tasks, corpus, k=DEFAULT_K)
-    assert len(run.results) == 10
+    assert len(run.results) == len(tasks)
     assert all(result.status != "indexing" for result in run.results)
     report = build_report(run, tasks_file=str(REPO_TASKS))
-    out = tmp_path / "a-batch.json"
+    out = tmp_path / "golden-set.json"
     write_report(report, out)
     written = json.loads(out.read_text(encoding="utf-8"))
-    assert written["task_count"] == 10
-    assert len(written["results"]) == 10
+    assert written["task_count"] == len(tasks)
+    assert len(written["results"]) == len(tasks)

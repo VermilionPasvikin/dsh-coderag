@@ -660,7 +660,7 @@ L1 的确定性回归由两部分组成，**都在 `pytest` 里**，都不需要
 | 部分 | 落点 | 覆盖什么 |
 |---|---|---|
 | golden 集本身 | `tests/test_eval.py`、`tests/test_metrics.py`、`tests/test_report_diff.py`、`tests/test_golden_version.py` | schema/路径校验、命中判定、分层指标、逐 query diff、`golden_version` 校验 |
-| golden 集 × 真实语料 | `tests/test_eval.py::test_a_batch_runs_against_indexed_corpus`（**opt-in**） | 把 `eval/tasks.jsonl` 真的跑在**一份已索引的语料副本**上，断言每条 query 都有结果、报告可写 |
+| golden 集 × 真实语料 | `tests/test_eval.py::test_golden_set_runs_against_indexed_corpus`（**opt-in**） | 把 `eval/tasks.jsonl` **每一条**真的跑在**一份已索引的语料副本**上，断言条数与 golden 集文件一致（防静默截断）、每条 query 都有结果、报告可写 |
 
 第二项要设 `CODERAG_EVAL_CORPUS` 指向已索引的语料副本才启用（`T-02`/`T-03`：默认套件保持离线、自足）：
 
@@ -668,10 +668,7 @@ L1 的确定性回归由两部分组成，**都在 `pytest` 里**，都不需要
 CODERAG_EVAL_CORPUS=/tmp/dsh-coderag-t3-03-corpus python -m pytest tests/test_eval.py -q
 ```
 
-⚠️ **该用例当前有一条已知欠账**：它仍断言 `len(tasks) == 10`（`T3-02b` 之前的 A 批条数），
-而 golden 集已是 30 条，所以设了 `CODERAG_EVAL_CORPUS` 后它会假红。默认套件与
-`scripts/eval-gate.sh` 都不设这个变量，因此不受影响。详见 `docs/backlog.md`
-「测试：A 批回放用例的条数断言停在 10」。
+> **它的条数断言锚在 golden 集文件上，不是字面量**：断言 `len(tasks) == 该文件非空行数`。早期版本写死 `== 10`（`T3-02b` 把集合从 10 扩到 30 时漏改），于是这条 opt-in 用例假红了两个里程碑；锚到文件后**集合再扩也不会漂**，而它真正要证的"每一条都被回放、不被截断"仍然成立。
 
 **这个测试的价值**：它把「检索质量」变成了一个**每次提交都会跑的回归测试**。任何让检索命中率下降的改动会立刻变红。
 
