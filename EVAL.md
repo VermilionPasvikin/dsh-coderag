@@ -539,6 +539,113 @@ runner 的每一次 fork 都由测试用**假 dsh** 替代：它按真实格式�
 
 ---
 
+### 3.7 C 组（混合）与天花板探针：**可执行方法**
+
+> 本节把 `ADR-14` §10.4 的 **V1–V4** 从判据变成**命令**（`ADR-16` §7.2 冻结了同一套判据）。§3.1–§3.6 讲 A/B 两组；这里讲 **C 组**（B + 向量 + RRF）以及它之前的**探针**。
+
+#### 3.7.1 先跑天花板探针（`T5-14`）——它决定值不值得实施
+
+**探针在写实现之前跑**（`ADR-15` §3.2、`ADR-16` §1.8）。它回答的是"向量**最多**能把这 30 条抬到哪"：
+
+| 项 | 规定 |
+|---|---|
+| 目标 | 对 **30 条 query 与全量 chunk** 做一次 embedding，测 `natural` / `crossfile` 两个桶的 `S@5` / `MRR` **上限** |
+| 语料 | 已索引的语料副本（`/tmp/dsh-coderag-t3-03-corpus`），与 L1 同源同版本 |
+| 脚本落点 | **一次性脚本，不进 `src/`**（它不是生产路径，也就不该有测试与覆盖率义务）；结论写进 `docs/m5-vector-probe.md` |
+| 必须记录 | 后端 / 模型 / 维度 / 耗时 / 两桶的四项指标 / **明确的 go-no-go 结论** |
+| 判定 | `natural` 的 `S@5` **上限都低于 `S5` 的 0.40** → **no-go**，按 `ADR-16` §7.3 直接走 V4：全量实施没有意义 |
+
+```sh
+# 探针自备，放在仓库之外（它不进 src/，也不进 scripts/）
+CODERAG_SEMANTIC=on CODERAG_SEMANTIC_URL=http://127.0.0.1:11434 \
+  python /tmp/m5-vector-probe.py --corpus /tmp/dsh-coderag-t3-03-corpus \
+  --tasks eval/tasks.jsonl --out docs/m5-vector-probe.md
+```
+
+> **探针与 C 组的区别**：探针用的是**全量向量的理论上限**（把 30 条 query 与所有 chunk 直接算余弦），它回答"天花板够不够高"；C 组走的是**真实检索链路**（RRF 融合、top-k、预算裁剪），它回答"落地之后还剩多少"。**先看天花板，是因为天花板不够就不必看落地。**
+
+#### 3.7.2 C 组怎么跑，以及**配对**的前提
+
+C 组 = B 组 + 可选后端。**唯一的差异是环境变量**，其余逐项相同——这是"配对"的全部含义：
+
+```sh
+CODERAG_SEMANTIC=on python scripts/ab_eval.py run --cases cases \
+    --group eval-coderag-vector --out eval/runs/c-v1 \
+    --profile headless --patch cordis.patch.yml \
+    --workspace <已索引的语料副本> --trials 3
+```
+
+（这就是 `T3-11` 的验收命令。`CODERAG_SEMANTIC=on` 由 `ADR-16` §4 冻结；**未设即关闭**，关闭时输出与纯 BM25 逐条一致。）
+
+| 配对要求 | 规定 | 违反的后果 |
+|---|---|---|
+| 同一批用例 | `cases/` 的 **13 条**，一条不增不减 | 增加/减少 case 会让 `pass@k` 不可比 |
+| 同一工作区 | 两次 run 的 `--workspace` 指向**同一份副本**（内容与索引都相同） | 语料不同 = 测的不是同一个检索问题 |
+| 同一 trials | 都是 **3**（§2.9 陷阱 6） | 不同 trials 的 `pass@k` 分母不同 |
+| 同一 profile / patch | 都是 `headless` + `cordis.patch.yml` | 多挂一个 patch 就多一个变量 |
+| **逐条对比** | 用 `cases[].successes` 逐条比，**不只看** `task_success_rate` | 均值涨了但关键 case 崩掉，看均值看不出来（§2.7） |
+
+#### 3.7.3 V1–V4 逐条落到命令
+
+**V1 与 V2 在 L1 侧判定**（`natural` 桶与 `exact` 桶都属于 L1 指标）：
+
+```sh
+# 在 C 配置下跑一次 L1，并与 B 基线做逐 query 门禁（gate 会自己跑一遍 eval）
+CODERAG_SEMANTIC=on python -m dsh_coderag.eval gate \
+    --tasks eval/tasks.jsonl --root <已索引的语料副本> \
+    --baseline eval/runs/l1-baseline.json \
+    --out eval/runs/l1-c.json --gate-out eval/runs/l1-c-gate.json \
+    --markdown eval/runs/l1-c-gate.md
+
+# V2：exact 桶必须仍是满分，且零单条回归
+python -c "import json;g=json.load(open('eval/runs/l1-c-gate.json'));m=g['metrics'];print('exact@5 =',m['exact']['success']['5'],'regressions =',g['regression_count'])"
+# V1：natural 桶的 S@5（B 组基线是 0.000）
+python -c "import json;print('natural@5 =',json.load(open('eval/runs/l1-c-gate.json'))['metrics']['natural']['success']['5'])"
+```
+
+| # | 判据 | PASS 条件 |
+|---|---|---|
+| **V1** | 主判据是 **`natural` 桶 `S@5` 的提升**，不是端到端（`ADR-14` §10.4） | `natural@5 ≥ 0.40`（`S5`）**且** > B 组的 0.000 |
+| **V2** | `exact` 必须保持 **1.000**，任何单条回归即失败 | `exact@5 == 1.0` **且** `regressions == 0` |
+
+**V3 在 L2 侧判定**（端到端、配对、**第二轮口径 α = 0.025**）：
+
+```sh
+# 配对符号检验：只数"方向不一致"的用例（better / worse），n = better + worse
+python - <<'PY'
+import json, math
+b = json.load(open("eval/runs/b-v1/report.json"))
+c = json.load(open("eval/runs/c-v1/report.json"))
+bs = {x["name"]: x["successes"] for x in b["cases"]}
+cs = {x["name"]: x["successes"] for x in c["cases"]}
+better = sum(1 for k in bs if cs[k] > bs[k])
+worse  = sum(1 for k in bs if cs[k] < bs[k])
+n = better + worse
+p = 1.0 if n == 0 else sum(math.comb(n, i) for i in range(better, n + 1)) / 2 ** n
+print(f"C better on {better}, worse on {worse}, discordant n={n}, one-sided p={p:.4f}")
+print("V3:", "PASS" if p < 0.025 else "FAIL —— 未达 alpha=0.025（ADR-14 10.4 V3 / EVAL.md 2.6）")
+PY
+```
+
+| 项 | 规定 |
+|---|---|
+| 检验 | **配对符号检验**（exact binomial），只统计 `successes` 不相等的用例 |
+| 方向 | **单侧**（方向事先写在 `ADR-14` §10.4：C 优于 B）；若改用双侧，对应阈值是 0.05 |
+| 阈值 | **α = 0.025**——这是**第二轮检验**，按 §2.6 的多重比较校正收紧（不是 0.05） |
+| 报告 | 必须显式声明"这是第二次检验，α 已收紧到 0.025"，并同时给出 `better` / `worse` / `n` |
+
+**V4 是发布决定，不是统计量**：
+
+| 情形 | 结论 |
+|---|---|
+| V1 未达 `natural@5 ≥ 0.40` | **不发布**向量路径 |
+| 或 V3 的 `p ≥ 0.025` | **不发布**向量路径 |
+| V1 **与** V3 都过 | 可以发布；`S6`（默认路径零回归）仍须无条件成立 |
+
+> **V4 的原文是"若 C 组不能显著优于 B 组，则不发布向量路径"**（`ADR-14` §10.4）。它的精神是：**不得为一个已达成的目标增加常驻复杂度**——端到端目标已由纯词法达成（`ADR-15` §2.1），所以向量必须**额外**证明自己在 L1 上值这个价，否则就留在仓库里不发布。
+
+---
+
 ## 4. L3：回归门禁
 
 ### 4.1 每次提交都跑（零成本）
