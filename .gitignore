@@ -88,6 +88,15 @@ id_ed25519*
 !tests/fixtures/secrets/id_rsa
 !tests/fixtures/secrets/.coderagignore
 
+# ── 6b. 本机私有 patch【项目特有，必须有】──────────────────────
+# RL-02 允许把密钥**字面值**写进"仓库之外"的 DSH 本机配置层
+# （$DSH_HOME/profiles/*/cordis.patch.yml 或 $DSH_HOME/cordis.patch.yml）。
+# 但用户很可能图省事在仓库里就地建一份——那等于把凭据提交进 git。
+# 这一节是防误提交的护栏；正确的字面 key 位置见 cordis.patch.yml 顶部。
+cordis.patch.local.yml
+cordis.local.yml
+*.local.yml
+
 # ── 7. macOS / 编辑器 ───────────────────────────────────────
 .DS_Store
 .idea/

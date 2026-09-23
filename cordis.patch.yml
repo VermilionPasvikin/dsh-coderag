@@ -10,6 +10,28 @@
 # with CODERAG_ROOT; both are set through config.env because stdio child
 # environments are scrubbed (E-02).
 #
+# --- Where to configure -----------------------------------------------------
+# This `config.env` block is THE configuration entry point for the engine: it is
+# the only channel that reliably reaches the MCP child process. DSH drops
+# ambient names matching /KEY|PASSWORD|SECRET|TOKEN/i and every DSH_* name when
+# it spawns the child, then merges the entries below on top — so whatever is
+# written here survives, and whatever is merely exported in your shell may not.
+# Notably `CODERAG_MAX_TOKENS` contains "TOKEN" and is dropped from the ambient
+# environment, which is why it is spelled out explicitly below.
+#
+# Two ways to set a value:
+#   1. `!!js process.env.X ?? '<default>'` — read X from the shell that launches
+#      dsh, falling back to the default. Works for every variable, and keeps
+#      secrets out of this file. (This is the form used below.)
+#   2. a literal value — edit this file. Suits non-secret tuning.
+#
+# Overriding from outside the repo: keep machine-local settings in
+# `$DSH_HOME/profiles/<profile>/cordis.patch.yml` (or `$DSH_HOME/cordis.patch.yml`,
+# which outranks it) instead of editing this file. Those layers are applied after
+# every bundle layer and are NOT part of the repository — which matters for
+# secrets (see the warning below). An id-targeted patch replaces the whole
+# `config` object, so a local override must restate the fields it keeps.
+#
 # `args` uses `-c`, not `-m`. The child runs with cwd set to the workspace being
 # indexed, and `python -m` imports `runpy` before any of our code runs, so a
 # workspace file shadowing a module runpy needs (e.g. `types.py`) aborts the
@@ -28,3 +50,67 @@
         args: ['-c', 'import dsh_coderag.server as s; s.run()']
         env:
           CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
+
+          # Spelled out because "TOKEN" in the name gets scrubbed from the
+          # ambient environment (see "Where to configure" above).
+          CODERAG_MAX_TOKENS: !!js process.env.CODERAG_MAX_TOKENS ?? '4000'
+
+          # ==================================================================
+          #  OPTIONAL SEMANTIC BACKEND — OFF BY DEFAULT
+          # ==================================================================
+          # Both backends stay disabled until CODERAG_SEMANTIC=on. Empty string
+          # means "unset", so the engine's own defaults still apply. See
+          # `docs/adr/ADR-16-optional-vector-backend.md` (local, Ollama) and
+          # `docs/adr/ADR-17-optional-cloud-embedding.md` (cloud).
+          CODERAG_SEMANTIC: !!js process.env.CODERAG_SEMANTIC ?? ''
+          CODERAG_SEMANTIC_BACKEND: !!js process.env.CODERAG_SEMANTIC_BACKEND ?? ''
+          CODERAG_SEMANTIC_URL: !!js process.env.CODERAG_SEMANTIC_URL ?? ''
+          CODERAG_SEMANTIC_MODEL: !!js process.env.CODERAG_SEMANTIC_MODEL ?? ''
+          CODERAG_SEMANTIC_TIMEOUT: !!js process.env.CODERAG_SEMANTIC_TIMEOUT ?? ''
+          CODERAG_SEMANTIC_BATCH: !!js process.env.CODERAG_SEMANTIC_BATCH ?? ''
+          CODERAG_SEMANTIC_MAX_CHUNKS: !!js process.env.CODERAG_SEMANTIC_MAX_CHUNKS ?? ''
+          CODERAG_SEMANTIC_ALLOW_REMOTE: !!js process.env.CODERAG_SEMANTIC_ALLOW_REMOTE ?? ''
+          CODERAG_SEMANTIC_API_KEY: !!js process.env.CODERAG_SEMANTIC_API_KEY ?? ''
+
+          # ------------------------------------------------------------------
+          #  !!  SECURITY WARNING — READ BEFORE ENABLING THE CLOUD BACKEND  !!
+          # ------------------------------------------------------------------
+          # Enabling the cloud backend (CODERAG_SEMANTIC_BACKEND=openai) SENDS
+          # PART OF YOUR SOURCE CODE OFF THIS MACHINE. Specifically: the text of
+          # every indexed chunk, INCLUDING its context prefix line
+          # (`// file: <path> | symbol: ... | lines a-b`) — so workspace-relative
+          # file paths and symbol names leave the machine too. Files stopped by
+          # the three-layer secret filter never become chunks, so they are never
+          # sent. Cloud embedding is billed per token and the first index embeds
+          # every chunk (CODERAG_SEMANTIC_MAX_CHUNKS is the hard cap). Only send
+          # code you are allowed to send to that provider.
+          # Full statement: ADR-17 section 5. It must stay verbatim in this file,
+          # in README.md, in config.py, and in the ADRs (AGENTS.md D-08).
+          #
+          # NEVER PUT A REAL API KEY IN THIS FILE. It is tracked by git and ships
+          # inside the bundle. Keep secrets in one of these two places instead:
+          #
+          #   (a) export in the shell that launches dsh — the `!!js process.env.`
+          #       expression above already reads it. Nothing secret is written.
+          #   (b) a literal value in `$DSH_HOME/profiles/<profile>/cordis.patch.yml`
+          #       (or `$DSH_HOME/cordis.patch.yml`) — those layers live outside the
+          #       repository and are never committed. See AGENTS.md RL-02.
+          #
+          # A key must never reach logs, structured status or exception text.
+          # A non-loopback URL only takes effect when CODERAG_SEMANTIC_ALLOW_REMOTE=1
+          # is set as well (a second, deliberate key); use https:// for it.
+          #
+          # Worked example — cloud backend, key from the environment:
+          #   CODERAG_SEMANTIC: 'on'
+          #   CODERAG_SEMANTIC_BACKEND: 'openai'
+          #   CODERAG_SEMANTIC_URL: 'https://api.openai.com/v1'
+          #   CODERAG_SEMANTIC_MODEL: 'text-embedding-3-small'
+          #   CODERAG_SEMANTIC_ALLOW_REMOTE: '1'      # required for any non-loopback URL
+          #   CODERAG_SEMANTIC_API_KEY: !!js process.env.CODERAG_SEMANTIC_API_KEY ?? ''
+          #
+          # Worked example — local backend (nothing leaves the machine):
+          #   CODERAG_SEMANTIC: 'on'
+          #   CODERAG_SEMANTIC_BACKEND: 'ollama'
+          #   CODERAG_SEMANTIC_URL: 'http://127.0.0.1:11434'
+          #   CODERAG_SEMANTIC_MODEL: 'bge-m3'
+          # ------------------------------------------------------------------

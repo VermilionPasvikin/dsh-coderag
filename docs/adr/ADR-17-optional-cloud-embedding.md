@@ -60,6 +60,8 @@
 | `CODERAG_SEMANTIC_ALLOW_REMOTE` | 未设 = 不允许 | **非 loopback 地址的第二把钥匙**，必须为 `1` | 本地后端不受它影响 |
 | `CODERAG_SEMANTIC_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS` | `30` / `16` / `100000` | 同 `ADR-16` | 云端下 `_BATCH` 直接对应请求里的 `input` 数组长度；`_MAX_CHUNKS` 是**费用硬闸** |
 
+**空字符串 = 未设（冻结）**：bundle 的 `cordis.patch.yml` 会把上表这些项以**空字符串**下发（"关闭态配置入口"），因此实现必须把 `""`（以及纯空白）当作**未配置**处理，让上表的默认值继续生效。**这不是新发明**——`config.py` 既有的 `_read_positive_int` / `_read_optional_positive_int` 就是这个语义（`if raw is None or not raw.strip(): return default`），新代码沿用即可。反例（必须避免）：`os.environ.get(name, default)` 会把 `""` 当成"用户显式设成空"，从而用空串覆盖 `bge-m3` 这类默认值——`T5-20` 的验收包含这一条。
+
 **Key 的投递路径（已核实，`E-02` 的坑）**：
 
 stdio 子进程的环境会被清洗——**环境里**名字匹配 `/KEY|PASSWORD|SECRET|TOKEN/i` 的变量与所有 `DSH_*` 变量都会被丢掉（`E-02`）。所以**用户直接在 shell 里 `export CODERAG_SEMANTIC_API_KEY=...` 是到不了子进程的**。已核实的正确做法（读已安装的 `@deepseek-ai/dsh-mcp-client`：`{...scrubbedParentEnv(), ...extra}`——**显式配置的 `env` 在清洗之后合并，能存活**）：

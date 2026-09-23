@@ -165,10 +165,41 @@ export CODERAG_PYTHON="$(command -v python)"
 
 ## 配置
 
-stdio 子进程的环境会被清洗（匹配 `*KEY*` / `*PASSWORD*` / `*SECRET*` / `*TOKEN*` 的环境变量
-与**所有** `DSH_*` 变量都会被删除），所以需要传给 Python 进程的配置要么通过 `cordis.patch.yml`
-的 `config.env`，要么在**启动 dsh 的那个 shell** 里 export（后者对 `CODERAG_PYTHON` 有效，
-因为它在 DSH 进程内求值）。
+stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*` / `*PASSWORD*` / `*SECRET*` / `*TOKEN*`
+的变量与**所有** `DSH_*` 变量都会被删除。清洗之后，`cordis.patch.yml` 的 `config.env` 会**合并到最上面**
+（已核实：`{...scrubbedParentEnv(), ...extra}`）——所以**写进 patch 的一定到得了子进程，只是 export 的不一定**。
+
+**配置写在哪**（按推荐顺序）：
+
+| 写在哪 | 适合什么 | 会不会入库 |
+|---|---|---|
+| `$DSH_HOME/profiles/<profile>/cordis.patch.yml` | 本机持久设置，**包括密钥字面值** | ❌ 仓库之外，不会 |
+| `$DSH_HOME/cordis.patch.yml` | 同上，且**优先级更高**（对所有 profile 生效） | ❌ 仓库之外，不会 |
+| 启动 dsh 的那个 shell 里 `export` | 只对"名字不含 `KEY/PASSWORD/SECRET/TOKEN`"的变量有效（见下） | ❌ 不涉及文件 |
+| 仓库里的 `cordis.patch.yml`（本文件的 `env:` 块） | 非密钥的默认值；**密钥只能用 `!!js` 表达式** | ⚠️ 会（**RL-02：绝不能写真实 key**） |
+
+> **哪些变量 export 不生效**：`CODERAG_MAX_TOKENS` 的名字里含 `TOKEN`，会被清洗掉；云端 API key 同理。
+> 这两个**必须**写进上面任一处 patch 的 `env:` 里。其余变量 export 后能被继承。
+> `CODERAG_ROOT` 与 `CODERAG_PYTHON` 例外——它们在 `cordis.patch.yml` 里已被 `!!js` 引用，由宿主进程读取你的 shell 环境。
+
+**覆盖时注意**：DSH 的 patch 是**整体替换**而不是深合并——写 `- id: mcp-coderag` 覆盖时，必须把
+`serverName` / `transport` / `command` / `args` 与**所有想保留的 `env` 项**一并重写，否则它们会消失。
+
+### 可选后端的配置项
+
+以下变量**默认全部为空**（= 关闭），加进 `cordis.patch.yml` 的 `env:` 里即可用：
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `CODERAG_SEMANTIC` | **总开关**，只有 `on` 启用 | 未设/空 = 关闭 |
+| `CODERAG_SEMANTIC_BACKEND` | `ollama`（本地）或 `openai`（云端兼容服务） | 未设 = 关闭时不生效 |
+| `CODERAG_SEMANTIC_URL` | 本地：`http://127.0.0.1:11434`；云端：如 `https://api.openai.com/v1` | 未设 |
+| `CODERAG_SEMANTIC_MODEL` | 模型名（**本地可用任何 Ollama embedding 模型**） | 未设 → 本地默认 `bge-m3` |
+| `CODERAG_SEMANTIC_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS` | 超时（秒）/ 批大小 / 参与向量化的 chunk 上限 | 未设 → `30` / `16` / `100000` |
+| `CODERAG_SEMANTIC_ALLOW_REMOTE` | **非 loopback 地址的第二把钥匙**，必须为 `1` | 未设 = 不允许 |
+| `CODERAG_SEMANTIC_API_KEY` | 云端后端的 API key | 未设 → 不发起任何请求 |
+
+> 空字符串等价于"未设"，因此引擎自己的默认值仍然生效（与 `CODERAG_MAX_TOKENS` 等既有变量一致）。
 
 | 变量 | 作用 | 默认 |
 |---|---|---|
@@ -219,6 +250,53 @@ ollama pull bge-m3                      # 约 1.2 GB
 | 端到端（`S3`） | 已达标 | **不变**；端到端瓶颈是工具采纳（R5），与向量正交 |
 | 依赖与安装 | 4 个依赖、**零向量依赖** | 多一个 `numpy` + 一个你自己装的 Ollama |
 | 默认路径行为 | —— | **硬门禁**：未配置时必须与纯 BM25 基线逐条一致（成功标准 `S6`） |
+
+### 云端后端（`CODERAG_SEMANTIC_BACKEND=openai`）
+
+任何兼容 **OpenAI `/v1/embeddings`** 的线上服务都能用（OpenAI、Azure OpenAI、SiliconFlow、自建 vLLM 等）——
+只需改 `CODERAG_SEMANTIC_URL` 与 `CODERAG_SEMANTIC_MODEL`。**不需要额外 Python 依赖**（HTTP 走标准库）。
+本地已有 Ollama 就用 `ollama`，不必走云端。
+
+> ## ⚠️ 开启云端后端的安全风险
+>
+> **开启它 = 你的部分源码文本会离开这台机器。**
+>
+> - **外发内容**：已入库 chunk 的文本，**包括每个 chunk 的上下文前缀行**
+>   （形如 `// file: <工作区相对路径> | symbol: <种类 名字> | lines <起>-<止>`）。
+>   也就是说**文件路径与符号名也会一并外发**。
+> - **仍然受保护的部分**：三层过滤在入库前执行，被拦下的密钥文件（`.env*`、`*.pem`、`id_rsa*` 等）
+>   **从来没有 chunk**，不可能被外发。
+> - **不再成立的部分**：本地后端承诺的"代码不出机器"在云端后端下**不成立**。
+> - **费用**：云端按 token 计费；首次索引会对**全量 chunk** 做 embedding，是一次性真实支出。
+>   `CODERAG_SEMANTIC_MAX_CHUNKS` 是硬上限，超过会**显式失败并报实际数量**，不静默截断。
+> - **合规**：代码可能是公司资产或含第三方许可限制。**外发前请自行确认你有权发给该服务商。**
+> - **API key**：只从环境读，**绝不**写进仓库、配置文件字面值、README 示例、测试或日志。
+> - **传输**：非 loopback 地址必须显式设 `CODERAG_SEMANTIC_ALLOW_REMOTE=1`，**请使用 `https://`**。
+
+**配置示例**（写进 `$DSH_HOME/profiles/<profile>/cordis.patch.yml`，注意整体替换规则）：
+
+```yaml
+- id: mcp-coderag
+  config:
+    serverName: coderag
+    transport: stdio
+    command: !!js process.env.CODERAG_PYTHON ?? '/opt/anaconda3/envs/forBSH/bin/python'
+    args: ['-c', 'import dsh_coderag.server as s; s.run()']
+    env:
+      CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
+      CODERAG_MAX_TOKENS: "6000"
+      CODERAG_SEMANTIC: "on"
+      CODERAG_SEMANTIC_BACKEND: "openai"
+      CODERAG_SEMANTIC_URL: "https://api.openai.com/v1"
+      CODERAG_SEMANTIC_MODEL: "text-embedding-3-small"
+      CODERAG_SEMANTIC_ALLOW_REMOTE: "1"          # 非 loopback 必需
+      CODERAG_SEMANTIC_API_KEY: "sk-..."          # 也可以：!!js process.env.CODERAG_SEMANTIC_API_KEY ?? ''
+```
+
+**失败行为**：无 key / 401 / 403 / 429 / 超时 / 5xx 都**回退纯 BM25**并给出结构化状态，
+**不会**变成 `isError`、**不会**返回空列表。未启用时**零网络调用**。
+
+> 完整条文见 [`docs/adr/ADR-17-optional-cloud-embedding.md`](docs/adr/ADR-17-optional-cloud-embedding.md)。
 
 ## 工具（固定 4 个，不动态增删）
 
