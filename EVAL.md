@@ -26,8 +26,8 @@
 | 层 | 回答什么问题 | 需要 API key 吗 | 成本 | 工具 |
 |---|---|---|---|---|
 | **L1 · 检索质量** | 检索**本身**准不准？（Success@k / MRR） | ❌ 不需要 | 零 | **自己写，pytest 内嵌** |
-| **L2 · 端到端 A/B** | 有了检索，Agent**干活**是不是真的更好了？ | ✅ 需要（可录制后回放） | 中 | **`dsh-eval-harness`（现成）** |
-| **L3 · 回归门禁** | 这次改动有没有让之前的效果**变差**？ | 否（跑 L1）+ 可选（跑 L2） | 低 | pytest + `eval_gate` |
+| **L2 · 端到端 A/B** | 有了检索，Agent**干活**是不是真的更好了？ | ✅ 需要（可录制后回放） | 中 | **自建薄 runner `scripts/ab_eval.py run`**（§3.6；现成框架的选型结论见 §3.1） |
+| **L3 · 回归门禁** | 这次改动有没有让之前的效果**变差**？ | 否（跑 L1）+ 可选（跑 L2） | 低 | pytest + `scripts/eval-gate.sh`（L1 `eval gate` + `scripts/ab_eval.py gate`） |
 
 **关键设计**：**L1 完全不需要 LLM**。它是纯函数式的——给定 query 和 golden 标注，算出 Recall/MRR。这意味着：
 
@@ -35,7 +35,7 @@
 - 它**零成本、零外部依赖、完全确定性**
 - 它把「检索质量」从一个主观问题变成一个**可回归的单元测试**
 
-**L2 才是真正贵的部分**，所以它只在 M3 决策门跑一次（外加版本发布前跑）。
+**L2 才是真正贵的部分**，所以它只在需要端到端结论时跑（M3 决策门、以及之后每次改工具描述或召回策略），不是每次提交都跑。到 `T3-06` 为止已经跑过 `a-v1` / `b-v1` / `b-r5` 与 `a-smoke` / `b-smoke` 多轮，历史报告都留在 `eval/runs/` 下可复算。
 
 ---
 
@@ -162,13 +162,13 @@ Elastic Search Labs 的第一方实践建议原文是 ***"Start small, but start
 Step 1（30 min） 选 3 个"入口文件"
    挑项目中你确实读过的 3 个文件。它们将成为多数 expect_paths 的来源。
 
-Step 2（60 min） 写 10 条 exact
-   打开这些文件，找 10 个"如果我要改它，我得先搜什么"的标识符。
+Step 2（60 min） 写 12 条 exact
+   打开这些文件，找 12 个"如果我要改它，我得先搜什么"的标识符。
    → query 就写那个标识符（可加少量上下文词）。
-   自检：把 query 贴进 ripgrep，能不能找到？应该能——这 10 条是基线。
+   自检：把 query 贴进 ripgrep，能不能找到？应该能——这 12 条是基线。
 
-Step 3（60 min） 写 9 条 crossfile
-   找 9 组"概念上在一起、文件上分开"的东西。例如：
+Step 3（60 min） 写 11 条 crossfile
+   找 11 组"概念上在一起、文件上分开"的东西。例如：
      - 某个错误码的定义处 + 抛出处置 + 捕获处置
      - 某个接口的声明 + 实现 + 唯一的调用方
      - 某个配置项的 schema 定义 + 读取处 + 默认值处
@@ -180,7 +180,7 @@ Step 4（60 min） 写 7 条 natural
    ⚠️ 写完检查：query 里一个标识符都不能有。
 
 Step 5（15 min） 机器校验
-   python -m dsh_coderag.eval validate eval/tasks.jsonl
+   python -m dsh_coderag.eval validate --tasks eval/tasks.jsonl --root <已索引的语料副本>
    → 校验 schema、路径存在性（expect_paths 必须真实存在）、query 不含路径片段或符号名
 
 Step 6（60 min） ⚠️ 三道人工保险（**这一步不能跳**）
@@ -222,16 +222,16 @@ Step 6（60 min） ⚠️ 三道人工保险（**这一步不能跳**）
 
 **⚠️ k 必须等于实际喂给模型的条数。**
 
-这条约束容易被忽略但很关键：`PROJECT.md` §3.5 里 `code_search` 的 `limit` 默认是 **12**。如果你评测时报 `Success@5`，那**测的是一个模型根本看不到的场景**——实际返回 12 条，你只看了前 5 条。
+这条约束容易被忽略但很关键：`PROJECT.md` §3.5 里 `code_search` 的 `limit` 默认是 **5**。如果你评测时报 `Success@5`，就必须让检索**真的只返回 5 条**——否则你测的是一个模型根本看不到的场景（报告 k=5，实际喂给模型 12 条）。
 
 **两个选项，选一个并保持一致**：
 
 | 选项 | 做法 | 代价 |
 |---|---|---|
-| **A（推荐）** | 评测时也传 `limit=5`，报 **Success@5** | 返回的 token 更少（利于 S4），但模型可用的上下文更窄 |
-| B | 评测时报 **Success@12**，与默认 `limit` 一致 | 指标数字会因 k 大而虚高，跨项目不可比 |
+| **A（本方案采用，已落地）** | 默认 `limit` 与评测都用 **5**，报 **Success@5** | 返回的 token 更少（利于 S4），但模型可用的上下文更窄 |
+| B | 把默认 `limit` 调大，评测与报告都用同一个更大的 k | 指标数字会因 k 大而虚高，跨项目不可比 |
 
-**本方案选 A**：把 `T3-03` 的 runner 里的查询参数固定为 `limit=5`，并在报告中**显式写出 `k=5`**。同时把 `PROJECT.md` §3.5 的 `code_search` 默认 `limit` 从 12 调整为 **5**（保持全项目一致）。
+**本方案选 A**：`PROJECT.md` §3.5 的 `code_search` 默认 `limit` 是 **5**，`T3-03` 的 runner 也固定 `k=5`（`DEFAULT_K`），并在报告中**显式写出 `k=5`**。
 
 **不使用 nDCG**：nDCG 需要分级相关性（0/1/2/3），而代码检索的相关性很难分级——一个文件要么包含答案要么不包含。**强行分级只会引入主观噪声。**
 
@@ -367,18 +367,20 @@ Carterette (2012) 证明：**12 个系统做 66 次配对检验时，"至少出�
 
 ---
 
-## 3. L2：端到端 A/B（**用现成工具，不要自己写**）
+## 3. L2：端到端 A/B（**自建薄 runner**）
 
-### 3.1 现成工具调研结论
+### 3.1 工具选型：调研过什么、结论是什么
 
-DSH 生态里已经有两个评测框架。我逐一核实过：
+DSH 生态里有两个现成评测框架。我逐一核实过：
 
 | 工具 | Star | 最后推送 | 断言能力 | 可靠性统计 | A/B | 结论 |
 |---|---|---|---|---|---|---|
-| [**BiBoyang/dsh-eval-harness**](https://github.com/BiBoyang/dsh-eval-harness) | 13 | 2026-09-03 | ⭐ 14 种断言 | ⭐ `trials` + `pass@k` / `pass^k`（无偏估计） | 通过 baseline 对比 | **主选** |
-| [hccccc01333/dsh-eval](https://github.com/hccccc01333/dsh-eval) | 3 | 2026-08-14 | 基础 | 无 | ⭐ `compare` 出 B−A | 备选，成熟度存疑 |
+| [**BiBoyang/dsh-eval-harness**](https://github.com/BiBoyang/dsh-eval-harness) | 13 | 2026-09-03 | ⭐ 14 种断言 | ⭐ `trials` + `pass@k` / `pass^k`（无偏估计） | 通过 baseline 对比 | **已否决**——`T3-00` 实测与本机 DSH 不兼容（§3.2） |
+| [hccccc01333/dsh-eval](https://github.com/hccccc01333/dsh-eval) | 3 | 2026-08-14 | 基础 | 无 | ⭐ `compare` 出 B−A | **已否决**——成熟度存疑，未验证 |
 
-**`dsh-eval-harness` 胜出的理由**（全部来自其 README 的一手核实）：
+**两者都未采用。实际使用的是自建 runner `src/dsh_coderag/eval/ab.py` + `scripts/ab_eval.py`，见 §3.6。**
+
+**当时看中 `dsh-eval-harness` 的理由**（记录用，日后若要重估可从这里接手；全部来自其 README 的一手核实）：
 
 1. **断言词汇丰富**：`tools_called`（保序子序列）、`tools_not_called`、`tool_args_contains`、`tool_result_contains`、`output_contains`、`output_matches`（正则）、`max_steps`、`max_tokens`、`no_tool_errors`、`output_judge`（LLM 语义评审，**结构断言全过后才调用**，不白烧 token）
 2. **可靠性统计用了无偏估计**：README 明确写了 `pass^k` 用 `C(c,k)/C(n,k)` 而非 plug-in 的 `(c/n)^k`，理由是「x^k 上凸，Jensen 不等式保证它向上偏」。**这说明作者懂统计，不是随手写的。**
@@ -387,7 +389,9 @@ DSH 生态里已经有两个评测框架。我逐一核实过：
 5. **报告带 `dshVersion`**：排障时能直接区分「dsh 变了」还是「模型变了」
 6. **有 12 条真实用例可参考**（`cases/real/`）
 
-### 3.2 ⚠️ 使用前必须验证的兼容性风险
+**上面 1–3 条已被自建 runner 吸收**：断言集实现了 §3.4 的 9 类机械断言，`pass@k`/`pass^k` 用同一个无偏估计；`output_judge` 显式拒绝而不是静默忽略（§3.6 表）。
+
+### 3.2 ⚠️ `dsh-eval-harness` 的兼容性风险（**`T3-00` 实测结论：不兼容**）
 
 `dsh-eval-harness` v0.4.0 的 `package.json` 把 DSH 内部包放在 **`dependencies`** 而非 `peerDependencies`：
 
@@ -408,17 +412,16 @@ DSH 生态里已经有两个评测框架。我逐一核实过：
 
 `dsh-tools@0.0.1-rc.1` 确实是 `latest`，所以**能装上**。但 DSH 的约定是 *"`@deepseek-ai/cordis` 是每个 harness 包的 peerDependency (+ dev)"*，而把 `dsh-*` 放进 `dependencies` 会引入**进程内两份 `dsh-tools`** 的风险——这正是 DSH discussion **#572 / #783** 记录的事故：*双份 `@deepseek-ai/dsh-tools` → Symbol key 不匹配 → 调度器静默返回 undefined*。
 
-**因此 `T3-00` 是一个新增的前置任务**：在一个干净 profile 里装上 `dsh-eval-harness`，跑通 `cases/real/` 里的一条用例，确认不发生上述问题。**不通过则改用第 3.6 节的降级方案。**
+**`T3-00` 实测**（`docs/m3-eval-harness-check.md` 有完整原始输出）：插件可以安装、可以装载（`--dump-config` 里出现 `dsh-eval-harness` 层），但跑 `cases/real/01-bash-tool.yml` 得到 `summary: total 1 / passed 0 / failed 0 / errored 1`，报错是 `no session log (session.jsonl / session.jsonl.zstd)`——该版本 0.4.0 的 trace 采集器只认 v0 文件名，而本机 DSH 落盘 `session.v3.jsonl.zstd`。**判定不兼容**，因此按 §3.6 的自建路线实施。
 
 ### 3.3 A/B 怎么配
 
-`dsh-eval-harness` 的 `eval_run` 有 `profile` 参数。用它做 A/B 最干净：
+两组的差异**只有"有没有挂上本项目的 bundle"**，用 `scripts/ab_eval.py run --group` 记录组名：
 
 ```sh
-# 准备两个 profile
-dsh plugin --profile eval-baseline add github:BiBoyang/dsh-eval-harness
-dsh plugin --profile eval-coderag   add github:BiBoyang/dsh-eval-harness
-dsh plugin --profile eval-coderag   add .        # 加上我们的 bundle
+# A 组（基线）：eval-baseline profile，不挂本项目 bundle
+# B 组（词法）：eval-coderag profile，挂上本项目 bundle
+./scripts/dsh plugin --profile eval-coderag add .        # 加上我们的 bundle
 ```
 
 | 组 | profile | 检索工具 | 用途 |
@@ -469,24 +472,28 @@ dsh plugin --profile eval-coderag   add .        # 加上我们的 bundle
 
 ### 3.5 判分与门禁
 
-> ⚠️ **下面代码块里的 `eval_run` / `eval_gate` 是 `dsh-eval-harness` 的 API。** `T3-00` 已实测该插件
-> 与本机 DSH 的会话日志格式不兼容，实际使用的是**自建 runner**：`scripts/ab_eval.py run|gate`
-> （见 §3.6）。此处的调用示例**仅为记录原始方案**，不要照着执行。
+> ⚠️ 原始方案写的是 `dsh-eval-harness` 的 `eval_run` / `eval_gate`（该方案**已被 `T3-00` 判定不兼容并否决**，
+> 见 §3.1/§3.2）。下面给出的是**实际可执行**的自建 runner 命令，实现见 §3.6。
 
 ```sh
-# B 组跑一次，产出报告
-eval_run(cases_dir="cases", output_dir="eval/runs/b-v1", profile="eval-coderag", trials=3)
+# B 组跑一次，产出报告（--patch 把本项目 bundle 挂上）
+python scripts/ab_eval.py run --cases cases --group eval-coderag \
+    --out eval/runs/b-v1 --profile headless --patch cordis.patch.yml \
+    --workspace <已索引的语料副本> --trials 3
 
-# A 组跑一次
-eval_run(cases_dir="cases", output_dir="eval/runs/a-v1", profile="eval-baseline", trials=3)
+# A 组跑一次（不带 --patch，模型只有 grep/glob/read）
+python scripts/ab_eval.py run --cases cases --group eval-baseline \
+    --out eval/runs/a-v1 --profile headless \
+    --workspace <已索引的语料副本> --trials 3
 
-# 与基线对比出门禁判定
-eval_gate(baseline="eval/runs/a-v1/report.json", current="eval/runs/b-v1/report.json")
+# 与基线对比出门禁判定；退出码 0 = 无回归，1 = 有回归
+python scripts/ab_eval.py gate --baseline eval/runs/a-v1/report.json \
+    --current eval/runs/b-v1/report.json --markdown eval/runs/gate.md
 ```
 
-**注意 `trials: 3`**：LLM 有随机性，单次结果不可信。`trials > 1` 时工具会忽略 `retries`（README 明确说明：*"测量必须是无重试干预的原始单次成功率"*），并输出 `successRate` / `pass@k` / `pass^k`。
+**注意 `--trials 3`**：LLM 有随机性，单次结果不可信。runner 输出 `pass@k` / `pass^k`（`C(c,k)/C(n,k)` 无偏估计，不是 plug-in 的 `(c/n)^k`），门禁**看回归条数**而不只看均值（§2.7）。
 
-**S3 的判定**：比较 A 组与 B 组的 `taskSuccess` 率。**S3 成立 = B 组比 A 组高 ≥ 10 个百分点。**
+**S3 的判定**：比较 A 组与 B 组的用例通过率。**S3 成立 = B 组比 A 组高 ≥ 10 个百分点。**
 
 ### 3.6 降级方案（**已被 T3-00 触发并落地**）
 
@@ -517,7 +524,7 @@ eval_gate(baseline="eval/runs/a-v1/report.json", current="eval/runs/b-v1/report.
 ```sh
 python scripts/ab_eval.py run --cases cases --group eval-coderag \
     --out eval/runs/b-v1 --profile headless --patch cordis.patch.yml \
-    --workspace <DSH 副本> --trials 3
+    --workspace <已索引的语料副本> --trials 3
 python scripts/ab_eval.py gate --baseline eval/runs/a-v1/report.json \
     --current eval/runs/b-v1/report.json --markdown eval/runs/gate.md
 ```
@@ -538,22 +545,30 @@ runner 的每一次 fork 都由测试用**假 dsh** 替代：它按真实格式�
 
 ```sh
 # L1 是确定性的纯函数测试，毫秒级，进 pytest
-python -m pytest tests/test_retrieval_quality.py -q
+python -m pytest -q
 ```
 
-`tests/test_retrieval_quality.py` 把 `eval/tasks.jsonl` 当作参数化数据源：
+L1 的确定性回归由两部分组成，**都在 `pytest` 里**，都不需要网络与 API key：
 
-```python
-@pytest.mark.parametrize("task", load_tasks("eval/tasks.jsonl"), ids=lambda t: t["id"])
-def test_recall_at_5(task, indexed_workspace):
-    hits = search(indexed_workspace, task["query"], k=5)
-    assert any(h.path in task["expect_paths"] for h in hits), \
-        f"{task['id']} 未命中。实际返回: {[h.path for h in hits]}"
+| 部分 | 落点 | 覆盖什么 |
+|---|---|---|
+| golden 集本身 | `tests/test_eval.py`、`tests/test_metrics.py`、`tests/test_report_diff.py`、`tests/test_golden_version.py` | schema/路径校验、命中判定、分层指标、逐 query diff、`golden_version` 校验 |
+| golden 集 × 真实语料 | `tests/test_eval.py::test_a_batch_runs_against_indexed_corpus`（**opt-in**） | 把 `eval/tasks.jsonl` 真的跑在**一份已索引的语料副本**上，断言每条 query 都有结果、报告可写 |
+
+第二项要设 `CODERAG_EVAL_CORPUS` 指向已索引的语料副本才启用（`T-02`/`T-03`：默认套件保持离线、自足）：
+
+```sh
+CODERAG_EVAL_CORPUS=/tmp/dsh-coderag-t3-03-corpus python -m pytest tests/test_eval.py -q
 ```
 
-**这个测试的价值**：它把「检索质量」变成了一个**每次提交都会跑的回归测试**。任何让 Recall 下降的改动会立刻变红。
+⚠️ **该用例当前有一条已知欠账**：它仍断言 `len(tasks) == 10`（`T3-02b` 之前的 A 批条数），
+而 golden 集已是 30 条，所以设了 `CODERAG_EVAL_CORPUS` 后它会假红。默认套件与
+`scripts/eval-gate.sh` 都不设这个变量，因此不受影响。详见 `docs/backlog.md`
+「测试：A 批回放用例的条数断言停在 10」。
 
-⚠️ **注意**：`indexed_workspace` 这个 fixture 会对评测仓库建一次索引。为了不让测试变慢，**索引结果应该被缓存**（用一个固定路径的 SQLite 文件 + `mtime` 校验），而不是每次重建。
+**这个测试的价值**：它把「检索质量」变成了一个**每次提交都会跑的回归测试**。任何让检索命中率下降的改动会立刻变红。
+
+⚠️ **注意**：`eval_corpus` fixture 自己建索引（`tmp_path`，小语料），所以默认套件不会因为评测语料而变慢；真实语料的索引由**外部副本**承担（`CODERAG_EVAL_CORPUS` 指向一份预先 `index` 过的拷贝），而不是每次重建。**索引不进仓库、也不写在工作区之外**（`S-03`）。
 
 ### 4.2 版本发布前跑（有成本）
 
@@ -569,8 +584,8 @@ bash scripts/eval-gate.sh          # 跑 L1 + L2，输出报告，退出码即�
 
 | 资源 | 是什么 | 怎么用 |
 |---|---|---|
-| [**dsh-eval-harness**](https://github.com/BiBoyang/dsh-eval-harness) | DSH 插件回归评测门禁（YAML 用例 + headless 驱动 + trace 断言 + baseline 对比） | **L2 主选**。`eval_run` / `eval_gate` / `eval_judge_validate` |
-| 它的 `cases/real/` | 12 条针对真实插件（bash/fs/search/todo/web_search/subagent/workflow）的实测用例 | **照抄格式**，见 3.4 |
+| [**dsh-eval-harness**](https://github.com/BiBoyang/dsh-eval-harness) | DSH 插件回归评测门禁（YAML 用例 + headless 驱动 + trace 断言 + baseline 对比） | **未采用**——`T3-00` 实测与本机 DSH 的会话日志格式不兼容（§3.2）；L2 用自建 `scripts/ab_eval.py`（§3.6） |
+| 它的 `cases/real/` | 12 条针对真实插件（bash/fs/search/todo/web_search/subagent/workflow）的实测用例 | **只借鉴用例形状**，见 3.4（我们用 JSON，不是 YAML） |
 | 它的 `skills/eval` | 一个教模型帮你写评测用例的 Skill | 可以让你和 AI 一起写 cases |
 | [hccccc01333/dsh-eval](https://github.com/hccccc01333/dsh-eval) | Agent 评测平台（paired A/B、keyless replay、跨 harness 导入） | L2 备选；**注意它 3★、创建与最后推送同为 2026-08-14，成熟度存疑** |
 | [RAGAS](https://docs.ragas.io/) | RAG 评测指标库（faithfulness / context precision / recall） | **本项目第一版不引入**——它的指标针对文档问答，代码检索用不上。若 M3 之后做向量，再考虑 |
@@ -626,7 +641,7 @@ bash scripts/eval-gate.sh          # 跑 L1 + L2，输出报告，退出码即�
 | **新增 `T3-04b`**：失败归因 | 只报一个 Success 数字**没有诊断价值**。`A1`–`A4`/`A6`/`A7` 是**实现问题**，只有 `A5`（零词法重叠）支持"上向量"。没有归因表，R2/R3 无法机械判定 |
 | **新增 `T3-04c`**：逐 query diff + 回归条数 | *"You'll routinely see a change that lifts the mean nDCG by 0.03 while **quietly tanking three head queries**."* 门禁必须看**回归条数**，不能只看均值 |
 | **新增 `T3-04d`**：`golden_version` 校验 | 改了 golden 集却不改版本号 → 分数变化无法归因，原文称之为 *"a silent methodology break"*。**改 golden 集必须单独成一次提交**（`AGENTS.md` §7.0） |
-| **`T3-05`/`T3-06` 改用 `dsh-eval-harness`** | 自建 A/B runner 要花掉 M3 两天。该工具已提供 `trials`（`pass@k`/`pass^k` 用**无偏估计**）、`no_tool_errors`（拦"工具报错但 Agent 兜底答对"的假通过）、14 种断言与 baseline 门禁 |
+| **`T3-05`/`T3-06` 改用 `dsh-eval-harness`**（**已撤销**） | 当时的理由：自建 A/B runner 要花掉 M3 两天。该工具已提供 `trials`（`pass@k`/`pass^k` 用**无偏估计**）、`no_tool_errors`（拦"工具报错但 Agent 兜底答对"的假通过）、14 种断言与 baseline 门禁。<br>**该改动已由 `T3-00` 撤销**：实测该插件与本机 DSH 的会话日志格式不兼容（§3.2）。L2 改走 §3.6 的自建 runner（`T3-15`），上面这些能力由它承担 |
 | **`T3-07` 的 R2 条件精确化** | 原表述"失败案例中 ≥50% 是语义改写"**无法机械判定**。改为"`natural` 类失败中 **`A5` 占比 ≥50%**"，与 §2.8 的归因表对齐 |
 | **`ADR-14` 取代原 `ADR-12` 的编号** | `PROJECT.md` §3.7 已用掉 ADR-12（`Success@k`）与 ADR-13（标点路由），语义检索的决策记录顺延为 **ADR-14** |
 
@@ -637,13 +652,15 @@ bash scripts/eval-gate.sh          # 跑 L1 + L2，输出报告，退出码即�
 ```
 要造评测集？
   → 30 条：12 exact + 11 crossfile + 7 natural
-  → 流程见 §2.4（3~4 小时）
-  → 写完跑 `python -m dsh_coderag.eval validate`
+  → 流程见 §2.4（4–5 小时）
+  → 写完跑 `python -m dsh_coderag.eval validate --tasks eval/tasks.jsonl --root <已索引语料>`
   → 提交后冻结，新 case 进 tasks.next.jsonl
 
 要跑评测？
-  → L1（检索质量，零成本）  : pytest tests/test_retrieval_quality.py
-  → L2（端到端 A/B，需 key）: eval_run × 2 个 profile → eval_gate
+  → L1（检索质量，零成本）  : python -m pytest -q
+                              （再设 CODERAG_EVAL_CORPUS=<已索引语料> 可跑真实 30 条）
+  → L2（端到端 A/B，需 key）: python scripts/ab_eval.py run × 2 组 → ab_eval.py gate
+  → 一次跑完 L1 + L2        : bash scripts/eval-gate.sh
 
 看到失败怎么办？
   → 先填归因码（§2.8 的 A1~A7）
@@ -660,8 +677,7 @@ bash scripts/eval-gate.sh          # 跑 L1 + L2，输出报告，退出码即�
 
 ## 8. 未能核实的事项
 
-1. **`dsh-eval-harness` 与 dsh `0.1.5-rc.1` 的实际兼容性** —— 未实测（需在干净 profile 中安装验证，即 `T3-00`）。其 `dependencies` 中 `dsh-tools@0.0.1-rc.1` 与运行时版本是否会导致 discussion #572/#783 的双份包问题，**必须实测**。
-2. **`hccccc01333/dsh-eval` 的可用性** —— 该仓库 3★、创建与最后推送同为 2026-08-14、无后续提交，**未验证其是否真的能在当前 dsh 上运行**。
-3. **30 条对本项目的具体统计功效（statistical power）** —— 有下界依据（Buckley & Voorhees 的"至少 25 条，50 条更好"；Anthropic 的"20-50 simple tasks"），但**没有针对"本项目这个效应量"的功效计算**。若你要写论文级报告，应在收集数据**之前**做一次 power analysis。
-4. **OpenAI「停用 SWE-bench Verified」的原文** —— 英文原文返回 403，**无法直读**。流传的"约 59% 被审样例测试用例有缺陷"等数字全部来自二手转述（Latent Space 访谈与 HN 讨论）。**引用前请用可访问网络复核原文。**
-5. **中文 2 字词在真实代码库中的占比** —— 本文件据此调整了分词方案，但**未量化统计**过真实项目里 2 字中文标识符/注释词的比例。
+1. **`hccccc01333/dsh-eval` 的可用性** —— 该仓库 3★、创建与最后推送同为 2026-08-14、无后续提交，**未验证其是否真的能在当前 dsh 上运行**。
+2. **30 条对本项目的具体统计功效（statistical power）** —— 有下界依据（Buckley & Voorhees 的"至少 25 条，50 条更好"；Anthropic 的"20-50 simple tasks"），但**没有针对"本项目这个效应量"的功效计算**。若你要写论文级报告，应在收集数据**之前**做一次 power analysis。
+3. **OpenAI「停用 SWE-bench Verified」的原文** —— 英文原文返回 403，**无法直读**。流传的"约 59% 被审样例测试用例有缺陷"等数字全部来自二手转述（Latent Space 访谈与 HN 讨论）。**引用前请用可访问网络复核原文。**
+4. **中文 2 字词在真实代码库中的占比** —— 本文件据此调整了分词方案，但**未量化统计**过真实项目里 2 字中文标识符/注释词的比例。
