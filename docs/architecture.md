@@ -48,7 +48,8 @@ DSH 侧不加载任何 JavaScript：仓库根的 `cordis.patch.yml` 只 `insert`
 | `walker` | `walker.py` | 遍历工作区、应用忽略规则与密钥黑名单、上报 skip 原因与文件数上限 | 不读文件内容 |
 | `chunker` | `chunker.py` | 声明感知分块、超大声明切片、module 头、无 grammar 降级、上下文前缀 | 不写数据库 |
 | `indexer` | `indexer.py` | schema、连接 pragma、增量写入、批量写库、内容级 redact、审计转储 | 不做检索 |
-| `searcher` | `searcher.py` | FTS5 查询构造、bm25 排序、顺序保持、预算裁剪、标点路由、`code_outline` | 不做索引 |
+| `searcher` | `searcher.py` | FTS5 查询构造、bm25 排序、顺序保持、预算裁剪、标点路由、`code_outline`；**可选后端启用时**再做向量召回与 RRF 融合（k=60） | 不做索引；**关闭时不得 import `numpy`**（`RL-10`） |
+| `embed` | `embed.py` | **可选后端（默认关闭）**：调用本机 Ollama 生成/缓存 embedding，读写 `<root>/.coderag/vectors/{embeddings.npy,manifest.json}` | 不排序、不融合（融合在 `searcher`）；不参与 BM25 路径；未启用时整个模块不得成为导入或启动的阻塞点 |
 | `taskman` | `taskman.py` | 任务 id 与 `pending/running/ready/failed/cancelled` 状态机（落 `index_runs` 表） | 不执行索引本身 |
 | `render` | `render.py` | 把 search/status 结果渲染成模型可见文本（字节稳定契约） | 不检索、不排序、不裁剪 |
 | `log` | `log.py` | stderr 上的 JSON-Lines 日志 + `.coderag/last-index.json` 审计 | 不写 stdout、不索引/检索 |
@@ -68,6 +69,7 @@ walker  ──► {sanitize, config, types}
 chunker ──► {parser, types}
 render  ──► types
 eval    ──► {searcher, indexer, walker, text, config, types}
+searcher ──► embed      （**仅在可选后端启用时**；延迟导入，关闭时这条边不存在）
             （`runner` 复用生产 `searcher`；`attribute` 另外读 `walker`/`indexer`/`text` 做归因；
               markdown 渲染是 eval 自己的，不经过 render）
 ```
@@ -213,9 +215,12 @@ MCP 的 `isError`**（RL-09）。
 
 ## 11. 不做什么（非目标）
 
-- **v1.0.0 不含向量检索**：没有任何 embedding / 向量库依赖。R2 的事实判断仍成立
-  （纯词法够不到"零词法重叠"的中文自然语言），但执行按
-  [`ADR-15`](adr/ADR-15-defer-semantic-retrieval.md) 推迟到后续版本，以**可选后端**引入（默认关闭）。
+- **默认路径不含向量检索**：默认安装没有任何 embedding / 向量库依赖——这是 `RL-10` 的硬要求，
+  不是"暂时没做"。R2 的事实判断仍成立（纯词法够不到"零词法重叠"的中文自然语言），
+  执行先按 [`ADR-15`](adr/ADR-15-defer-semantic-retrieval.md) 推迟，再由
+  [`ADR-16`](adr/ADR-16-optional-vector-backend.md) 重启为**可选后端路径**：
+  **默认关闭 + opt-in**，未配置时输出与纯 BM25 **逐条一致**（成功标准 `S6`），
+  依赖只进可选 extra，索引落在 `<root>/.coderag/vectors/`。
 - **不做 prompt 注入**：走 MCP 工具路线；`complete: true` 的 preset 会静默丢弃 system-prompt
   型注入（`AGENTS.md` E-03）。
 - **不修改宿主**：不改 DSH 仓库中任何被 git 跟踪的文件（RL-01）；`cordis.patch.yml` 只 `insert`。
