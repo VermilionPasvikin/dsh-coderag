@@ -19,6 +19,8 @@
 | 干净 profile 的端到端验证 | ⏳ 属 `T4-08` | 本任务用 `coderag-dev`；`T4-08` 在一个从未装过本项目的 profile 中复验 |
 | 从 registry 安装 | ⏳ 未发布 | 本任务只证明本地路径可装载 |
 
+> **后续状态（2026-09-23）**：表中"干净 profile 的端到端验证 ⏳ 属 `T4-08`"**已完成**——`T4-08` 在一个从未装过本项目的 `DSH_HOME`（`/tmp/dsh-coderag-t4-08`）与全新 profile（`clean-test`）里装成功，再用 `--dump-config` 里那条**原样 argv** 起子进程走完 `initialize` / `tools/list` / `tools/call`：4 次调用 `isError` 全为 `false`、子进程退出码 `0`、stdout 每一行都是合法 JSON-RPC（产物入库 `ab94dcf`，逐条记录见 `docs/m4-install-verification.md` §5）。**"从 registry 安装 ⏳ 未发布"仍然有效**——本项目迄今没有发布到 PyPI/npm，故那一行不属本注。**§5「已知边界」里同源的两条**（"真正的'一条命令安装'要到 `T4-03` 与 `T4-08` 才闭合"、"工具真正可用属 `T4-08`"）**也以此注为准**：两个前置都已完成。**本文件其余结论未变。**
+
 ## 2. 分发形态
 
 两个文件构成一个完整的 DSH bundle：
