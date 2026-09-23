@@ -656,17 +656,19 @@ CREATE TABLE IF NOT EXISTS workspace_index (
 
 **存储位置**：`<root>/.coderag/index.sqlite3`（与工作区同目录，便于随项目迁移；必须在 `.gitignore` 中排除）。
 
-**预留的向量表（M3 决策通过后才创建，此前不建）**：
+**向量索引的落点（2.0.0 的可选后端，**默认关闭**、默认不创建）**（`ADR-16` §5）
 
-```sql
--- 仅当 M3-DECIDE 判定需要语义检索时创建
-CREATE TABLE IF NOT EXISTS embeddings (
-  chunk_id  INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
-  model     TEXT NOT NULL,
-  dim       INTEGER NOT NULL,
-  vector    BLOB NOT NULL          -- float32 little-endian，dim*4 字节
-);
+向量**不进 `index.sqlite3`**，而是与它并列放在 `.coderag/` 下——暴力余弦要的是"一整块 float32 矩阵 + 一次向量化点积"，把 BLOB 逐行取出再拼矩阵反而更慢：
+
+```text
+<root>/.coderag/
+├── index.sqlite3          # BM25 索引（上面那张表）
+└── vectors/               # 仅当 CODERAG_SEMANTIC=on 时才创建
+    ├── embeddings.npy     # float32，行序 = chunk_id 升序
+    └── manifest.json      # model / dim / chunk 数 / 逐 chunk 内容哈希 / 生成时间 / 格式版本
 ```
+
+**被否决的方案**：在 `index.sqlite3` 里建 `embeddings(chunk_id, model, dim, vector BLOB)` 表（本文件 1.0 版的预留设计）。理由：① 逐行读 BLOB 再拼矩阵抵消了 `numpy` 的向量化收益；② 与 BM25 共用一个库会让"只重建向量"变成对同一文件的写放大；③ 独立文件可以整体丢弃/重建，而 `manifest.json` 里的模型与维度正是判断"旧向量还能不能用"的依据（`ADR-16` §5.4）。**两种落点都在 `<root>/.coderag/` 之内**（`S-03`/`S-04`），2.0.0 采用文件形式。
 
 ### 3.7 关键设计决策记录（ADR）
 
@@ -705,7 +707,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
 | conda | `/opt/anaconda3` | |
 | 环境 `forBSH` | **Python 3.10.21** | 满足 MCP SDK 的 `>=3.10` |
 | SQLite（forBSH 内） | **3.53.4**，FTS5 已验证；中文需 bigram 预处理（§5.3.1） | ADR-07 的前提 |
-| Ollama | 未安装 | M3 决策通过后才需要 |
+| Ollama | 未安装 | **仅可选后端需要**，默认关闭（`ADR-16` §3.1）；未启用时与 `1.0.0` 行为一致 |
 | gh CLI | 已安装但**未登录** | 发布阶段才需要 |
 | dsh（运行时） | **`0.1.5-rc.1`** | 经 `./scripts/dsh` 调用（§4.3.1）。**这是本项目的开发基线**——它决定实际行为 |
 | dsh（参考源码） | **`0.1.6-alpha.1`**（commit `0d1f50007f`） | 见 §4.1.1；它决定文档里的源码路径 |
@@ -741,20 +743,21 @@ CREATE TABLE IF NOT EXISTS embeddings (
 
 > 这些依赖自 T1-01 起就写进 `pyproject.toml`；实际使用时间：`mcp` 从 T1-11、`tree-sitter` 从 T2-01、`pathspec` 从 T2-06。
 
-**可选（M3 决策通过后才加）**
+**可选：2.0.0 的 extra `semantic`（**默认关闭**、默认不装）**（`ADR-16` §3.2）
 
 | 依赖 | 用途 | 备注 |
 |---|---|---|
-| `ollama`（外部服务）+ `bge-m3` 模型 | 本地 embedding | 约 1.2 GB，免费、中文强 |
-| `numpy` | 暴力余弦相似度 | 10 万 chunk 以内不需要向量数据库 |
-| `httpx` | 调用云端 embedding API | 仅当用户显式配置 |
+| `numpy` | 暴力余弦相似度 | **extra `semantic` 的内容，仅此一项**。安装：`pip install -e ".[semantic]"`，或 `CODERAG_WITH_SEMANTIC=1 bash scripts/install.sh` |
+| `ollama`（外部服务）+ `bge-m3` 模型 | 本地 embedding 后端 | 约 1.2 GB，免费、中文强。**由用户自己安装的系统服务，不是本项目的 Python 依赖，也不是安装前置**；本项目用 HTTP 调用它，客户端走标准库 `urllib.request` |
+
+> **不装这个 extra 时，默认安装的依赖仍只有上面那四项**（`RL-10`、`ADR-16` §7.1）。**`httpx` 与云端 embedding 都不在 2.0.0 的范围内**——`ADR-16` §3.1 已否决云端后端（需 API key、会把代码文本发出机器，违反 `S-01`/`S-02`），HTTP 客户端因此退回标准库。
 
 **明确不引入（第一版）**
 
 | 不引入 | 理由 |
 |---|---|
 | LangChain / LlamaIndex | 已在 DSH 之上，再套一层编排是重复抽象；且带来版本破坏性风险 |
-| ChromaDB / Qdrant / Milvus | 第一版没有向量，不需要向量库。将来优先考虑 `sqlite-vec` 或纯 numpy 暴力检索 |
+| ChromaDB / Qdrant / Milvus / faiss | **默认路径与可选路径都不引入**：`ADR-16` §3.1 已定——≤10 万 chunk 用 `numpy` 暴力余弦足够，引入向量库是过早优化（`AGENTS.md` §8） |
 | `sqlite-vec` | 有已知问题：部分平台的 `node:sqlite`/扩展加载受限；纯 numpy 在 10 万量级足够快 |
 
 ### 4.3 环境搭建步骤
@@ -996,15 +999,21 @@ GitHub 官方博客《The technology behind GitHub's new code search》原文（
 | `symbol_name` 包含该标识符 | +0.15 |
 | 同一文件已有其他命中（局部性） | +0.05 |
 
-**第 2 阶段（M3 决策通过后）：混合检索**
+**第 2 阶段：可选后端路径（`ADR-16`；**默认关闭**）**
+
+> ⚠️ **这一段不是默认路径。** 它只在 `CODERAG_SEMANTIC=on` 且本机 Ollama 可用时才走；**未配置时引擎只跑上面的第 1 阶段（纯 BM25），输出与 `1.0.0` 逐条一致**（成功标准 `S6`）。后端不可用、URL 非 loopback、模型缺失等情况一律**干净回退纯 BM25**并给结构化状态，不报 `isError`、不返回空列表（`ADR-16` §2/§6、`RL-06`/`RL-09`）。
 
 ```
 BM25 排名 ─┐
             ├─► RRF 融合（k=60）─► 截断 ─► 顺序保持 ─► 预算裁剪
-向量排名 ─┘
+向量排名 ─┘   （仅当可选后端已启用且可用）
 ```
 
 RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / Azure / Weaviate 的默认值）。
+
+> **为什么用 RRF 而不是加权分数**：BM25 分数与余弦相似度**量纲不可比**（前者是无界负数、量级由 IDF 决定，后者在 `[-1, 1]`），加权就需要先归一化，而归一化要引入两套参数并随语料漂移；RRF 只用**排名**，因此免调参、也对分数尺度不敏感。这是 `ADR-14` 选它的理由。
+>
+> **"补齐而非替换"**：融合后 `exact` 桶必须保持 `S@5 = 1.000`（`ADR-14` §10.4 的 V2、`ADR-16` §7.2）——词法在精确标识符上本来满分，向量只负责把 `natural`/`crossfile` 抬起来。
 
 > ⚠️ **不要把 `k` 设成 2**：Qdrant 的默认值是 2，与主流不同。跨库迁移时这是个经典陷阱。
 
@@ -1104,7 +1113,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 |---|---|
 | A · 基线 | 禁用 `code_search`，模型只能用 `grep`/`glob`/`read` |
 | B · 词法 | 本项目的 BM25 检索 |
-| C · 混合 | （M3 决策后）BM25 + 向量 + RRF |
+| C · 混合 | **可选后端路径**（`ADR-16`）：B 组 + 向量 + RRF。**默认关闭**，只在 `T3-11` 的 C 组实验里以 `CODERAG_SEMANTIC=on` 开启 |
 
 同一批任务、同一模型、同一随机种子，各跑 1 次（时间允许则 3 次取均值）。
 
