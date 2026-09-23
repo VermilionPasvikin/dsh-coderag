@@ -52,7 +52,7 @@
 | # | 禁止事项 | 后果 | 依据 |
 |---|---|---|---|
 | **RL-01** | **禁止修改 DSH 仓库中任何被 git 跟踪的文件**（`packages/`、`apps/`、`docs/`、`vendor/`、根配置文件等） | 违反「不修改 DSH 核心」这一项目根本约束；上游升级将产生冲突 | PROJECT.md §1.3 |
-| **RL-02** | **禁止把任何形式的凭据写入仓库**（API key、token、私钥、密码），包括测试 fixture、示例配置、注释 | 安全事故。且 DSH 的 stdio 环境清洗会删掉这类变量，写进去也不生效 | PROJECT.md §2.4 C2 |
+| **RL-02** | **禁止把任何形式的凭据写入仓库**（API key、token、私钥、密码），包括测试 fixture、示例配置、注释。**云端 embedding 的 `CODERAG_SEMANTIC_API_KEY` 只从运行时环境读取**：`cordis.patch.yml` 里只允许出现 `!!js process.env.…` **表达式**，不得出现字面值；日志、结构化状态与异常文本里也不得出现 key（`S-05`） | 安全事故。且 DSH 的 stdio 环境清洗会删掉**环境里**这类变量（匹配 `/KEY\|PASSWORD\|SECRET\|TOKEN/i`）——但**显式写进 `config.env` 的项在清洗之后合并、能存活**，这正是 key 的投递路径（`E-02`、`ADR-17` §4）。把 key 写进仓库则等于泄露，写进去也不会因此生效 | PROJECT.md §2.4 C2、`ADR-17` §4/§5 |
 | **RL-03** | **禁止让索引器读取或入库被过滤规则命中的文件**（`.env*`、`*.pem`、`id_rsa*` 等）。**任何为"方便调试"而临时放宽过滤的改动都禁止提交** | 真实信息泄露事故：Kilo #11637 中 `.kilocodeignore` 未能阻止 `read` 返回 `.env.local` | PROJECT.md §2.4 C7 |
 | **RL-04** | **禁止在 MCP 服务器中向 stdout 写入任何非协议内容**（`print`、日志、进度条都不行） | stdout 是 MCP 的 JSON-RPC 通道，任何多余字节都会破坏协议，导致宿主端连接失败 | MCP 协议规范 |
 | **RL-05** | **禁止新增或删除 MCP 工具**。工具集固定为 `code_search` / `code_outline` / `code_index` / `index_status` 四个 | MCP `list_changed` 重同步可能撞 namespace 抢占，导致工具集在会话中被清空 | DSH discussion #618 |
@@ -60,7 +60,7 @@
 | **RL-07** | **禁止硬编码并发度、批大小、文件数上限**。这些值必须从配置或运行时环境推导 | Roo #8875：硬编码 `BATCH_SEGMENT_THRESHOLD` 等参数在 4 核 i5/16GB 上直接卡死 VS Code | PROJECT.md §2.4 C8 |
 | **RL-08** | **禁止静默截断**。任何达到容量上限的情况都必须显式失败并报告实际数量 | Roo/Kilo 源码硬编码 `MAX_LIST_FILES_LIMIT_CODE_INDEX = 50_000`；Kilo #4080 的仓库有 80,138 文件被静默截断，用户只看到"结果变少" | PROJECT.md §2.4 C9 |
 | **RL-09** | **禁止让内部异常冒泡成 MCP 的 `isError`**。所有异常必须转换为带 `status` 与 `code` 的结构化返回值 | 模型需要一个可据以决策的状态，而不是一个它无法解释的传输层错误 | PROJECT.md §5.6 |
-| **RL-10** | **向量不得进入默认路径或必需依赖；未配置时必须干净回退 BM25。**具体地：`dependencies`、bundle 的 tarball、`scripts/install.sh` 的默认路径、README 的安装前置条件里都**不得**出现 embedding / `numpy` / 向量库；向量只能是**可选的 extra**，且**默认关闭**；未配置时输出必须与纯 BM25 **逐条一致** | 旧的 RL-10（"`T3-07` 决策门前禁止引入 embedding"）**历史使命已完成**——`T3-07` 已裁定，`ADR-15` §4 明确它不因暂缓而恢复。**新红线保护的对象换了**：不再是"别过早引入"，而是"**别把可选做成必需**"——`ADR-15` §2.4 记录的现实是向量要求用户装 Ollama + 1.2 GB 模型 + 首次索引几十分钟，而 v1 的承诺是"clone + `pip install .` + 一个 YAML、零 install script、默认不联网"（`S-01`）。可验收形式见 `docs/adr/ADR-16-optional-vector-backend.md` | PROJECT.md §2.3、`ADR-16` §1/§3.2/§7.1 |
+| **RL-10** | **向量不得进入默认路径或必需依赖；未配置时必须干净回退 BM25。**具体地：`dependencies`、bundle 的 tarball、`scripts/install.sh` 的默认路径、README 的安装前置条件里都**不得**出现 embedding / `numpy` / 向量库 / 任何厂商 SDK；向量只能是**可选的 extra**，且**默认关闭**；未配置时输出必须与纯 BM25 **逐条一致**。**本地与云端两条后端同等适用**——云端也不能成为安装前置，也不需要额外 Python 依赖（HTTP 走标准库 `urllib`，`ADR-17` §2） | 旧的 RL-10（"`T3-07` 决策门前禁止引入 embedding"）**历史使命已完成**——`T3-07` 已裁定，`ADR-15` §4 明确它不因暂缓而恢复。**新红线保护的对象换了**：不再是"别过早引入"，而是"**别把可选做成必需**"——`ADR-15` §2.4 记录的现实是向量要求用户装 Ollama + 1.2 GB 模型 + 首次索引几十分钟，而 v1 的承诺是"clone + `pip install .` + 一个 YAML、零 install script、默认不联网"（`S-01`）。可验收形式见 `docs/adr/ADR-16-optional-vector-backend.md` | PROJECT.md §2.3、`ADR-16` §1/§3.2/§7.1 |
 | **RL-11** | **禁止带着未提交的改动开始下一个任务；禁止把两个任务的改动合并进一个提交；禁止用无信息量的提交信息（`update` / `fix` / 无正文的 `wip`）** | 失去可追溯性——**无法 bisect、无法单独 revert、无法把评测分数变化归因到具体改动**。`EVAL.md` §2.7 的"逐 query diff"和 §2.7 的 `golden_version` 规则**都建立在提交粒度之上**，没有它就执行不了 | 工作区必须先干净再开工；一个任务至少一个提交，主题行 ≤72 字符；完整规则见 **§7.0** |
 
 ---
@@ -72,7 +72,7 @@
 | # | 约束 | 你必须怎么做 | 依据 |
 |---|---|---|---|
 | **E-01** | MCP 工具调用**默认 60 秒超时** | `code_index` 必须**立刻返回** taskId，实际索引在后台线程进行。任何可能超过 5 秒的操作都必须异步化 | `packages/mcp/mcp-client/README.md`：`toolCallTimeoutMs` 默认 `60,000` |
-| **E-02** | stdio 子进程环境会被清洗：匹配 `/KEY\|PASSWORD\|SECRET\|TOKEN/i` 的环境变量**与所有 `DSH_*` 变量**都会被删除 | 任何需要传给 Python 进程的配置，必须显式写进 `cordis.patch.yml` 的 `config.env`。**不要**依赖"用户在 shell 里 export 一下" | 同上，「Environment scrubbing (stdio)」 |
+| **E-02** | stdio 子进程环境会被清洗：匹配 `/KEY\|PASSWORD\|SECRET\|TOKEN/i` 的环境变量**与所有 `DSH_*` 变量**都会被删除 | 任何需要传给 Python 进程的配置，必须显式写进 `cordis.patch.yml` 的 `config.env`。**不要**依赖"用户在 shell 里 export 一下"。**已核实的细节**：清洗只作用于**继承来的**环境，**显式配置的 `env` 在清洗之后合并、能存活**（已安装的 `@deepseek-ai/dsh-mcp-client` 源码即 `{...scrubbedParentEnv(), ...extra}`）——因此需要保密的配置项（如云端 API key）走"用户在 shell 里 export → patch 里写 `!!js process.env.X` 表达式（宿主侧求值）→ 合并进子进程"这条路，**仓库里只留表达式、不留值**（`ADR-17` §4） | 同上，「Environment scrubbing (stdio)」；本机核实：`@deepseek-ai/dsh-mcp-client` 的 `lib/index.js` 与 README「Environment scrubbing (stdio)」（*"...the configured `env` merges on top, so explicit overrides survive."*） |
 | **E-03** | preset 若声明 `complete: true`（如 `minimal` 预设），**system-prompt 型注入会被静默丢弃且不报错** | 本项目走 MCP 路线，**不做任何 prompt 注入**。若将来要注入上下文，必须用 `agent.inject()` 或 `agent/pre-step`，**绝不用 `ctx.systemPrompt.section()`** | `packages/preset/persona/README.md` 第 49 行 |
 | **E-04** | 安装了 DSH 插件 = 授予它**与本机账号同等的机器权限**。三档权限（read-only/workspace-write/danger-full-access）**不约束插件** | 这是官方明示的设计取舍。所以：(a) 我们的 README 顶部必须披露这一点；(b) 我们自己也必须谨慎，不做任何用户未预期的文件访问 | 已安装的 `@deepseek-ai/dsh-tool-cordis` 的 `README.md` 第 182 行：「The sandbox is containment for honest code, not a security boundary … load this plugin as deliberately as you would grant a bash tool」；`.agents/notes/implemented/architecture/2026-07-08-agent-scope-contexts.zh.md` 第 147 行。**注意**：本机 `~/projects/dsh` 的参考源码副本较旧（该 README 只有 76 行、无此句），核实这类引用要读**已安装的包** |
 | **E-05** | pnpm 10+ 默认拒绝运行依赖的 install script，`dsh plugin add` 会把非零退出判为失败并**静默跳过 bundle 登记**（插件装了但永不加载） | 我们的 bundle **不能依赖任何 install script**。所有 Python 依赖通过文档化的安装脚本显式安装，不在 npm 的 `postinstall` 里做 | PROJECT.md §2.4 C11；DSH discussion #656 |
@@ -158,8 +158,8 @@
 
 | # | 要求 |
 |---|---|
-| **S-01** | 默认**不联网**。云端 embedding 必须是用户显式配置的 opt-in 且**默认关闭**；**本地后端（如 Ollama）同样不得默认启用**——`CODERAG_SEMANTIC` 未设即为关闭，且 `CODERAG_SEMANTIC_URL` 只允许 loopback 地址（`ADR-16` §4/§8、RL-10） |
-| **S-02** | 不采集任何遥测，不外发任何数据（包括文件内容、路径、统计） |
+| **S-01** | 默认**不联网**。两条可选后端（本地 `ollama` / 云端 `openai`）**都不得默认启用**——`CODERAG_SEMANTIC` 未设即为关闭。**本地后端**的 URL 只允许 loopback（`ADR-16` §8.1）；**云端后端**需要**双重开关**：`CODERAG_SEMANTIC=on` **且** `CODERAG_SEMANTIC_ALLOW_REMOTE=1`，缺后者一律拒绝启用（`ADR-17` §1.3） |
+| **S-02** | 不采集任何遥测，不外发任何数据（含文件内容、路径、统计）。**唯一例外**：用户**显式启用**的云端 embedding 后端——外发内容仅限已入库 chunk 的文本**及其上下文前缀行（含工作区相对路径与符号名）**，且**必须在配置处与 README 逐字声明风险**（`ADR-17` §5、`D-08`）。**除此之外任何路径都不得外发**，本地后端与遥测/统计上报一并禁止 |
 | **S-03** | 索引数据库固定存放在 `<root>/.coderag/index.sqlite3`，**不得写入工作区之外** |
 | **S-04** | 索引数据库路径必须被本项目的 `.gitignore` 模板自动排除 |
 | **S-05** | 日志中的路径可以是绝对路径（便于排查），但**日志中绝不能出现代码内容** |
@@ -235,6 +235,7 @@
 | **D-05** | 任何新增的「已知限制」必须写进 README 的 `## 已知限制` 小节，不得只留在代码注释里 |
 | **D-06** | 文档描述**当前状态**，不写"以前是…现在改成…" |
 | **D-07** | 每个 Markdown 文件末尾恰好一个换行符 |
+| **D-08** | **云端后端的风险声明必须随每一处配置出现**：凡出现"启用云端 embedding 后端"的位置——`cordis.patch.yml` 的注释、README 的小节、`config.py` 的字段说明、ADR、任何示例或说明性文档——都必须带上 `ADR-17` §5 那段声明（外发内容 = 已入库 chunk 文本**含上下文前缀行，因此含工作区相对路径与符号名**；费用按 token；合规自负；key 只从环境读；远端需 `ALLOW_REMOTE=1` 且建议 https）。**缺一处即文档缺陷**，与 `D-04` 同级对待 |
 
 ### 6.1 调研报告的定位：**只读证据库，不是工作指令**
 

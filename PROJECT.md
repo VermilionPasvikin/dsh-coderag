@@ -14,7 +14,7 @@
 | MCP `serverName` | `coderag` | `cordis.patch.yml` 的 `config.serverName`；工具在模型侧的名字是 **`mcp__coderag__code_search`** |
 | 索引数据目录 | `.coderag/` | `<工作区根>/.coderag/index.sqlite3` |
 | 项目忽略文件 | `.coderagignore` | 工作区根 |
-| 环境变量 | `CODERAG_*` | `CODERAG_ROOT` / `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_PYTHON`；可选向量后端另用 `CODERAG_SEMANTIC`（开关，默认未设=关闭）/ `_BACKEND` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS`（命名与默认值冻结于 `ADR-16` §4），安装侧开关为 `CODERAG_WITH_SEMANTIC` |
+| 环境变量 | `CODERAG_*` | `CODERAG_ROOT` / `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_PYTHON`；可选向量后端另用 `CODERAG_SEMANTIC`（开关，默认未设=关闭）/ `_BACKEND` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS`（冻结于 `ADR-16` §4），**云端后端**再加 `_API_KEY`（只从环境读）与 `_ALLOW_REMOTE`（非 loopback 的第二把钥匙，冻结于 `ADR-17` §4），安装侧开关为 `CODERAG_WITH_SEMANTIC` |
 | 开发用 DSH profile | `coderag-dev` | 本地开发，**不要用 `web`** |
 | 评测用 DSH profile | `eval-coderag` / `eval-baseline` | A/B 对照 |
 
@@ -209,6 +209,9 @@ dsh-coderag/                      ← 仓库根
 | 是否进 tarball | **否**。bundle 仍未含任何 JS，也仍未含任何 Python 依赖——tarball 依旧只有 `package.json` / `cordis.patch.yml` / `LICENSE` / `README.md` | `ADR-16` §7.1 |
 | 是否进 `install.sh` 默认路径 | **否**。`CODERAG_WITH_SEMANTIC` 未设时脚本**不装任何向量依赖** | `ADR-16` §3.2 |
 | 用户侧的另一半 | **Ollama + `bge-m3`**：由用户自己安装的系统服务，**不是**本项目的 Python 依赖，也**不是**安装前置 | `ADR-16` §3.1 |
+| **可选后端之二：云端**（`CODERAG_SEMANTIC_BACKEND=openai`） | 任何兼容 **OpenAI `/v1/embeddings`** 的线上服务；**不需任何额外 Python 依赖**（HTTP 走标准库 `urllib`）。需 `CODERAG_SEMANTIC_ALLOW_REMOTE=1` 才允许非 loopback 地址，key 只从环境读（`RL-02`） | `ADR-17` §1/§2/§4 |
+
+> ⚠️ **云端后端的安全风险（`ADR-17` §5，逐字同源）**：**开启它 = 你的部分源码文本会离开这台机器。**外发内容是已入库 chunk 的文本**及其上下文前缀行——因此包含工作区相对路径与符号名**；被三层过滤拦下的密钥文件从来没有 chunk，不会被外发；云端按 token **计费**，首次索引是全量支出（`CODERAG_SEMANTIC_MAX_CHUNKS` 是硬闸，超限显式失败）；代码可能是公司资产，**外发前请自行确认授权**；API key 只从环境读、**绝不写入仓库/日志/状态**；远端地址需 `ALLOW_REMOTE=1` 且**请使用 `https://`**。**默认安装与此无关**——两条后端都默认关闭（`RL-10`）。
 
 > **为什么不把 `numpy` 放进 `dependencies`**：默认安装的承诺是"clone + `pip install .` + 一个 YAML、零 install script"。多一个依赖就多一份装不上的概率，而**大多数用户用不到语义检索**。`RL-10` 把这条写成了红线。
 - **Apache-2.0**：多了明确的专利授权，对企业用户更友好。**如果你将来发现有大公司要用，可以再换成 Apache-2.0**——两者兼容，迁移只需改 `LICENSE` 与 `package.json`/`pyproject.toml` 的 `license` 字段。
@@ -690,6 +693,7 @@ CREATE TABLE IF NOT EXISTS workspace_index (
 | **ADR-14** | **R2 命中：引入向量检索**——词法为底，本地 `bge-m3` embedding + RRF（k=60）**只做补齐、不替换** | 30 条 L1 实测：exact `S@5 = 1.000`（词法对标识符已满分），crossfile `0.091`、natural `0.000`；17 条失败中 **16 条是 `A5`（零词法重叠）**。`S@5 = 0.433 < 0.80` 且 `natural` 的 A5 占比 `1.0 ≥ 50%`，R2 两项条件同时成立；且此前已按 §2.8 的但书修完 A1（T3-13）与 A4（T3-14）。完整证据与限制见 `docs/adr/ADR-14-semantic-retrieval.md` | 全面替换为向量（exact 已满分，替换只会回退）；在修完 A1/A4 前就上向量（`EVAL.md` §2.9 陷阱 8） |
 | **ADR-15** | **暂缓语义检索**：v1 不含向量，`T3-08`–`T3-11` **暂缓**；后续版本以**可选后端**引入（**默认关闭**、未配置时退回纯 BM25） | 端到端 S3 已由纯词法 + 采纳率修复达成（0.308 → 0.897，**+59.0pp**），且**调用了工具的 31 个 attempt 里只失败 1 个**、残余失败无一条归因排序；分块修复实验 S1/S2 **逐条零变化**（失败全在 `A5` 词表）；而向量要求用户装 Ollama + 1.2 GB 模型 + 首次索引几十分钟，与 v1"一条命令安装"冲突。完整依据与**重启条件**见 `docs/adr/ADR-15-defer-semantic-retrieval.md` | 以 S1/S2 未达标为由在 v1 就引入向量（部署门槛与发布目标冲突）；把"暂缓"读成"撤销 R2 结论"（R2 事实判断仍成立） |
 | **ADR-16** | **向量作为可选后端（2.0.0）**：默认关闭 + opt-in、未配置时**输出与 1.0.0 逐字节一致**、RRF(k=60) 只补齐不替换、后端为**本地 Ollama + `bge-m3`**、依赖冻结为 extra **`semantic`（只有 numpy，用 stdlib `urllib` 不引入 httpx、不引入向量库）**、向量索引落在 **`<root>/.coderag/vectors/`**（`S-03`）、失败一律结构化状态并回退 BM25（不 `isError`、不空列表）、发布服从 `ADR-14` §10.4 的 V1–V4（V3 用 **α = 0.025**，V4：C 不显著优于 B 就不发布），且**探针 `T5-14` 先行、由数据给 go/no-go** | `ADR-15` §3 的重启条件逐条兑现；本地后端是为了满足 `S-01`（默认不联网）与 `S-02`（不外发数据）——云端 embedding 需要 key 且会把代码发出机器；`numpy` 只进 extra 是为了 `RL-10`（改写后）的"不得进入必需依赖"；探针先行是因为在没有上限数据前全量实施是过早优化。完整条文见 `docs/adr/ADR-16-optional-vector-backend.md` | 默认开启或默认安装向量依赖（把"可选"做成"必需"）；云端 embedding；引入向量数据库（≤10 万 chunk 用暴力余弦足够）；把向量做成**替换**而非补齐（exact 已满分，替换只会回退）；跳过探针直接全量实施 |
+| **ADR-17** | **云端的向量后端也是可选的**：新增与 `ollama` 平级的 `openai` 后端（兼容 OpenAI `/v1/embeddings`），**双重开关**（`CODERAG_SEMANTIC=on` **且** `CODERAG_SEMANTIC_ALLOW_REMOTE=1` 才允许非 loopback 地址），key 只从环境读，形态与本地后端完全对称（默认关闭 + 干净回退 + RRF + V1–V4） | 用户需求变更（2026-09-23）要求可选的线上模型 API；选兼容协议是为了**一份实现覆盖多家**（改 URL + model 就能换供应商/换模型），且继续用标准库 `urllib`、**不引入任何厂商 SDK**（`RL-10`）。代价是**代码文本会离开本机**，故必须：默认关闭、双重开关、风险声明随每一处配置出现（`D-08`）。完整条文见 `docs/adr/ADR-17-optional-cloud-embedding.md` | 各厂商官方 SDK（依赖树随支持家数膨胀，且与"HTTP 走标准库"的冻结条文冲突）；把云端做成默认或必需依赖（`RL-10`）；**不加第二把钥匙就让远端地址生效**（那样改一个 URL 就能把代码发出去） |
 
 ---
 
@@ -1306,7 +1310,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 
 ### 6.5 M5 — 向量可选后端（v2.0.0）
 
-**目标**：把「纯中文自然语言检索不可用」（L1 `natural` 桶 `S@5 = 0.000`，失败 100% 归因 `A5` 零词法重叠）这一已知短板，以**可选、默认关闭**的后端补齐；**默认路径与 `1.0.0` 逐条一致**。
+**目标**：把「纯中文自然语言检索不可用」（L1 `natural` 桶 `S@5 = 0.000`，失败 100% 归因 `A5` 零词法重叠）这一已知短板，以**可选、默认关闭**的后端补齐；**默认路径与 `1.0.0` 逐条一致**。**后端有两个，都默认关闭、都可选**：本地 `ollama`（`ADR-16`）与云端 `openai` 兼容服务（`ADR-17`，2026-09-23 需求变更追加）。
 
 **发布范围约束**（`ADR-15` §3；由 `T5-05` 的 `ADR-16` 冻结成可验收条文）：
 
@@ -1314,9 +1318,10 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 - **不得进入必需依赖**：`pyproject.toml` 的 `dependencies`、bundle 的 tarball、安装脚本的前置条件都不许出现 embedding 相关依赖；
 - 后端不可用或未配置时，工具必须返回**结构化状态**并继续以 BM25 工作（`RL-09`），**不得**变成 `isError` 或空列表（`RL-06`）；
 - 实施前**必须先跑向量天花板探针**（`ADR-15` §3.2，见 `T5-14`）：用数据决定是否值得全量实施；
-- 是否发布向量路径服从 `ADR-14` §10.4 的 **V1–V4**（`V4`：C 组不能显著优于 B 组就不发布）。
+- 是否发布向量路径服从 `ADR-14` §10.4 的 **V1–V4**（`V4`：C 组不能显著优于 B 组就不发布）；
+- **云端后端额外约束**（`ADR-17`）：非 loopback 地址需要**第二把钥匙** `CODERAG_SEMANTIC_ALLOW_REMOTE=1`；key **只从环境读**、绝不入库入日志（`RL-02`）；**风险声明必须随每一处配置出现**（`D-08`）；`S5`/`V1–V4` **由实际启用的那个后端独立满足**，不得互相背书。
 
-**下表按两批排列**：`T5-01`–`T5-13` 是**实现前的文档前置**（全部依赖 `T5-05` 的 `ADR-16`），`T5-14`–`T5-17` 是**探针、安装收尾、冒烟与发布**；核心实现是已重启的 `T3-08`–`T3-11`。
+**下表按三批排列**：`T5-01`–`T5-13` 是**实现前的文档前置**（依赖 `T5-05` 的 `ADR-16`），`T5-14`–`T5-17` 是**探针、安装收尾、冒烟与发布**，`T5-18`–`T5-22` 是**云端后端**（2026-09-23 需求变更追加：`ADR-17` + 约束/评测对齐 + 实现 + 打包与风险声明 + 安全评审）；核心实现是已重启的 `T3-08`–`T3-11`。
 
 | ID | 任务 | 产出文件 | 验收命令 | 期望结果 | 依赖 | 估时 |
 |---|---|---|---|---|---|---|
@@ -1336,7 +1341,12 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T5-14 | 跑**向量天花板探针**（`ADR-15` §3.2）：用一次性脚本对 30 条 query + 全量 chunk 做 embedding，测 `natural` / `crossfile` 的 `S@5` / `MRR` **上限**，给出 go/no-go 结论。**结论决定 `T3-08` 是否继续**；探针脚本不进 `src/`（它不是生产路径） | `docs/m5-vector-probe.md` | `test -f docs/m5-vector-probe.md` 且 `grep -c -e natural -e crossfile -e "S@5" docs/m5-vector-probe.md` | 文件存在；四项指标各自可查；含明确的 go/no-go 结论与所用后端 / 模型 / 耗时 | T5-05 | 2h |
 | T5-15 | **可选安装的打包与配置收尾**：`pyproject.toml` 增加可选 extra（名字由 `ADR-16` 冻结，如 `semantic`）；默认 `dependencies` 保持**不含** numpy / httpx；`scripts/install.sh` 增加"装可选后端"的显式开关且默认不装；`cordis.patch.yml` 的 `config.env` 增加**关闭态**的向量配置；README 写清装法与开关 | `pyproject.toml`, `scripts/install.sh`, `cordis.patch.yml`, `README.md` | `python3 -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(sorted(d['project']['optional-dependencies']))"` 且 `grep -c CODERAG_WITH_SEMANTIC scripts/install.sh` | extra 出现；`dependencies` 不含 numpy / httpx；`install.sh` 默认路径不装任何向量依赖 | T3-10 | 2h |
 | T5-16 | **可选安装的端到端冒烟测试**（用户指定）：在**全新** `DSH_HOME` 与全新 profile 里跑三件事——（a）默认安装 → 确认没装任何向量依赖、检索逐条与 1.0.0 一致；（b）装可选 extra 并开启后端 → 在 `examples/demo-workspace` 的干净副本上跑通**一次真实语义检索**；（c）后端不可用时 → 返回结构化 `status` 且不报 `isError`（`RL-09`） | `docs/m4-install-verification.md` | `bash scripts/install.sh`（默认态）与 `CODERAG_WITH_SEMANTIC=1 bash scripts/install.sh`（可选态），两态各跑一次 `--dump-config` 与一次 MCP `tools/call` | 两次安装退出码都是 `0`；默认态的解释器里没有 numpy / httpx；可选态下 `code_search` 命中 demo 工作区的目标文件；后端不可用时是结构化状态而不是 `isError` | T5-15 | 2h |
-| T5-17 | **发布 v2.0.0**：版本号 `1.0.0` → `2.0.0`（`pyproject.toml`、`package.json`、README 的"当前版本"与示例输出、`docs/architecture.md` 的"实现版本"），`CHANGELOG.md` 增加 `[2.0.0]` 条目；并核对**发布范围**——默认安装没有新增任何必需的 embedding 依赖（`T5-05` 冻结的约束） | `pyproject.toml`, `package.json`, `CHANGELOG.md`, `README.md`, `docs/architecture.md` | `python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"` 且 `node -e "console.log(require('./package.json').version)"` | 两者都打印 `2.0.0`；`CHANGELOG.md` 含 `## [2.0.0]`；README / `docs/architecture.md` 的"当前版本"类字样已是 `2.0.0`（历史证据里的 `1.0.0` 保留不动） | T5-16, T5-13 | 1.5h |
+| T5-17 | **发布 v2.0.0**：版本号 `1.0.0` → `2.0.0`（`pyproject.toml`、`package.json`、README 的"当前版本"与示例输出、`docs/architecture.md` 的"实现版本"），`CHANGELOG.md` 增加 `[2.0.0]` 条目；并核对**发布范围**——默认安装没有新增任何必需的 embedding 依赖（`T5-05` 冻结的约束） | `pyproject.toml`, `package.json`, `CHANGELOG.md`, `README.md`, `docs/architecture.md` | `python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"` 且 `node -e "console.log(require('./package.json').version)"` | 两者都打印 `2.0.0`；`CHANGELOG.md` 含 `## [2.0.0]`；README / `docs/architecture.md` 的"当前版本"类字样已是 `2.0.0`（历史证据里的 `1.0.0` 保留不动）；`CHANGELOG.md` 的 `[2.0.0]` 条目要覆盖**两条**可选后端（本地/云端）与风险声明 | T5-16, T5-13, T5-22 | 1.5h |
+| T5-18 | **立 `ADR-17`「云端可选后端」并同步约束与矩阵**：冻结形态（与本地对称）、OpenAI 兼容协议、双重开关、key 只从环境读、**风险声明必须随每一处配置出现**（`D-08`）；同时改 `AGENTS.md` 的 `S-01`/`S-02`/`RL-02`/`RL-10`/`E-02` 与 `PROJECT.md` 的 §3.7/§6.8/§1.6.4。**ADR 行与 §6.8 矩阵行必须同一次提交**（`verify-plan` 的 `B1` 强制） | `docs/adr/ADR-17-optional-cloud-embedding.md`, `AGENTS.md`, `PROJECT.md` | `test -f docs/adr/ADR-17-optional-cloud-embedding.md`，`grep -c "^## " docs/adr/ADR-17-optional-cloud-embedding.md`，再跑 `python3 scripts/verify-plan.py .` | 文件存在；`≥6` 个二级小节；门禁全绿且 `ADR` 计数 `17`、矩阵含 `ADR-17` 行（`D-08` 属 `AGENTS.md` 的 `D-0x` 点号系列，与 `D-01`–`D-07` 一样**不进** §6.8 矩阵——那里的 `D1`–`D5` 是 §1.5 的另一套编号） | T5-05 | 2h |
+| T5-19 | 按 `ADR-17` 对齐**评测与测试**口径：`EVAL.md` §3.7 补"判据按后端独立判定"与云端失败注入方式；`TESTING.md` 的 `M11` 扩到云端（无 key / 401 / 429 / 超时四种失败都是结构化回退，且**key 不出现在日志/状态/异常**） | `EVAL.md`, `TESTING.md` | `grep -c -e "ALLOW_REMOTE" -e "按后端" EVAL.md TESTING.md` 再跑 `python3 scripts/verify-plan.py .` | 两项各 `≥1`；`M11` 的离线约束仍成立（用不可达地址与假 key，不联网）；门禁全绿 | T5-18 | 1.5h |
+| T5-20 | **实现云端后端**（OpenAI 兼容 `/v1/embeddings`）：`urllib` POST + `Authorization: Bearer`、批处理、超时、**重试上限 2**、维度以响应为准；`_BACKEND=openai` 与 `ollama` 共存互斥；**未设 key 时不发起任何请求** | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 离线（无网络、无真 key）覆盖：无 key → `SEMANTIC_AUTH_MISSING` 且**零请求**；401/429/5xx/超时 → 结构化回退 BM25；**key 绝不出现在日志、状态与异常文本里**；`_MAX_CHUNKS` 超限显式失败并报实际数量 | T3-08, T5-18 | 3h |
+| T5-21 | **云端后端的打包、配置与风险声明**：`cordis.patch.yml` 的 `config.env` 加**关闭态**云端配置与 `!!js` 形式的 key 投递（**仓库里只留表达式**），紧邻处写风险注释；README 的云端小节与配置表带同一段声明；`install.sh` 不因云端改变默认路径 | `cordis.patch.yml`, `README.md`, `scripts/install.sh` | `grep -c "CODERAG_SEMANTIC_ALLOW_REMOTE" cordis.patch.yml README.md` 且 `grep -c -e "安全风险" -e "离开这台机器" cordis.patch.yml README.md` | 两文件都出现 `ALLOW_REMOTE` 与风险声明；`cordis.patch.yml` 里**没有任何真实 key 字面值**（只有 `!!js` 表达式）；默认安装仍零向量依赖 | T5-20 | 2h |
+| T5-22 | **云端后端的安全评审与冒烟**（离线优先）：逐条留原始输出——(a) 仓库与 git 历史无 key（含 `sk-` 模式扫描）；(b) 日志/结构化状态/异常无 key；(c) **外发内容清单**与声明一致（chunk 文本 + 上下文前缀行，含路径）；(d) 无 key / 401 / 429 / 超时四种失败都结构化回退、不 `isError` 不空列表；(e) 未开启时**零网络调用**。**没有真 key 就不跑在线路径**，如实标注"已实现未验证" | `docs/m5-cloud-security-review.md` | `test -f docs/m5-cloud-security-review.md` 且 `grep -c -e "外发" -e "key" -e "回退" docs/m5-cloud-security-review.md` | 文件存在；三项各自可查；含明确的"离线已验证 / 在线未验证"边界与所用命令 | T5-21 | 2h |
 
 ---
 
@@ -1436,7 +1446,12 @@ T5-13  ← T5-05
 T5-14  ← T5-05
 T5-15  ← T3-10
 T5-16  ← T5-15
-T5-17  ← T5-13, T5-16
+T5-17  ← T5-13, T5-16, T5-22
+T5-18  ← T5-05
+T5-19  ← T5-18
+T5-20  ← T3-08, T5-18
+T5-21  ← T5-20
+T5-22  ← T5-21
 ```
 
 ### 6.7 进度追踪表
@@ -1556,6 +1571,7 @@ T5-17  ← T5-13, T5-16
 | ADR-14 | T3-07, T3-08, T3-09, T3-10, T3-11 | R2 命中：词法为底 + 向量补齐自然语言查询；执行由已重启的 `T3-08`–`T3-11` 落地，判据是 `ADR-14` §10.4 的 V1–V4 |
 | ADR-15 | T3-08, T3-11, T5-16 | **已重启为可选后端（2.0.0）**：默认关闭、未配置时干净退回纯 BM25、**不得进入必需依赖**；重启条件见 `ADR-15` §3，形态由 `ADR-16`（`T5-05`）冻结 |
 | ADR-16 | T3-08, T3-09, T3-10, T3-11, T5-15 | **可选后端的可验收形态（2.0.0）**：默认关闭 + opt-in、未配置时输出与 1.0.0 逐字节一致、extra 名 `semantic`（只有 numpy）/后端 `ollama`+`bge-m3`/索引落点 `<root>/.coderag/vectors/`/失败码 `SEMANTIC_*` 并回退 BM25；发布服从 `ADR-14` §10.4 的 V1–V4（V3 `α = 0.025`、V4 不显著优于 B 就不发布），探针 `T5-14` 先行 |
+| ADR-17 | T5-20, T5-21, T5-22 | **云端后端也是可选的（2.0.0）**：`openai` 兼容 `/v1/embeddings`、双重开关（`ALLOW_REMOTE=1` 才允许非 loopback）、key 只从环境读、形态与本地对称；**风险声明随每一处配置出现**（`D-08`）；判据按后端独立满足 |
 | C1 | T1-12 | MCP 工具 60s 超时 → 索引必须异步 |
 | C2 | T1-14 | stdio 环境清洗 → key 必须走 `config.env` |
 | C3 | *全局* | preset `complete:true` 吞注入 → 本项目不做 prompt 注入（见 `AGENTS.md` E-03） |
