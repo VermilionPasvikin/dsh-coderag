@@ -74,7 +74,7 @@
 | **E-01** | MCP 工具调用**默认 60 秒超时** | `code_index` 必须**立刻返回** taskId，实际索引在后台线程进行。任何可能超过 5 秒的操作都必须异步化 | `packages/mcp/mcp-client/README.md`：`toolCallTimeoutMs` 默认 `60,000` |
 | **E-02** | stdio 子进程环境会被清洗：匹配 `/KEY\|PASSWORD\|SECRET\|TOKEN/i` 的环境变量**与所有 `DSH_*` 变量**都会被删除 | 任何需要传给 Python 进程的配置，必须显式写进 `cordis.patch.yml` 的 `config.env`。**不要**依赖"用户在 shell 里 export 一下" | 同上，「Environment scrubbing (stdio)」 |
 | **E-03** | preset 若声明 `complete: true`（如 `minimal` 预设），**system-prompt 型注入会被静默丢弃且不报错** | 本项目走 MCP 路线，**不做任何 prompt 注入**。若将来要注入上下文，必须用 `agent.inject()` 或 `agent/pre-step`，**绝不用 `ctx.systemPrompt.section()`** | `packages/preset/persona/README.md` 第 49 行 |
-| **E-04** | 安装了 DSH 插件 = 授予它**与本机账号同等的机器权限**。三档权限（read-only/workspace-write/danger-full-access）**不约束插件** | 这是官方明示的设计取舍。所以：(a) 我们的 README 顶部必须披露这一点；(b) 我们自己也必须谨慎，不做任何用户未预期的文件访问 | `packages/extensions/tool-cordis/README.md` 第 182 行；`.agents/notes/implemented/architecture/2026-07-08-agent-scope-contexts.zh.md` 第 145 行 |
+| **E-04** | 安装了 DSH 插件 = 授予它**与本机账号同等的机器权限**。三档权限（read-only/workspace-write/danger-full-access）**不约束插件** | 这是官方明示的设计取舍。所以：(a) 我们的 README 顶部必须披露这一点；(b) 我们自己也必须谨慎，不做任何用户未预期的文件访问 | 已安装的 `@deepseek-ai/dsh-tool-cordis` 的 `README.md` 第 182 行：「The sandbox is containment for honest code, not a security boundary … load this plugin as deliberately as you would grant a bash tool」；`.agents/notes/implemented/architecture/2026-07-08-agent-scope-contexts.zh.md` 第 147 行。**注意**：本机 `~/projects/dsh` 的参考源码副本较旧（该 README 只有 76 行、无此句），核实这类引用要读**已安装的包** |
 | **E-05** | pnpm 10+ 默认拒绝运行依赖的 install script，`dsh plugin add` 会把非零退出判为失败并**静默跳过 bundle 登记**（插件装了但永不加载） | 我们的 bundle **不能依赖任何 install script**。所有 Python 依赖通过文档化的安装脚本显式安装，不在 npm 的 `postinstall` 里做 | PROJECT.md §2.4 C11；DSH discussion #656 |
 | **E-06** | Python 路径在不同机器上不同 | `cordis.patch.yml` 中的 `command` 必须可通过环境变量覆盖，且 README 要给出如何查找本机 python 路径的方法 | — |
 | **E-07** | **`dsh` 不一定在 PATH 上**。它只在两种情况可见：① 全局安装过；② **当前正处于某个 dsh 会话内**（会话会把 npx 缓存的 `.bin` **临时**注入 PATH）。干净终端里是 `dsh: command not found`——实测 `env -i … zsh -lic 'which dsh'` → not found | **注意：跑 dsh 命令一律用 `./scripts/dsh X`，不要直接敲 `dsh X`**（见 [`PROJECT.md`](./PROJECT.md) §4.3.1）。包装脚本：有全局安装就走快路径，否则回退到**钉版本**的 npx | `PROJECT.md` §4.3.1（含实测证据）。**这一条特别危险**：在 dsh 会话内测试时 `dsh X` 看起来能用，一离开会话就失效——属于"测的时候通过、别人跑就失败" |
@@ -88,12 +88,12 @@
 | # | 要求 | 检查方式 |
 |---|---|---|
 | **C-01** | **所有公开函数与方法必须有类型注解**（参数 + 返回值） | `mypy --strict src/` 零错误 |
-| **C-02** | **每个模块、每个公开导出必须有 docstring**，说明契约（不说明实现步骤） | 人工审阅 + `pydocstyle` |
+| **C-02** | **每个模块、每个公开导出必须有 docstring**，说明契约（不说明实现步骤） | 人工审阅（`pydocstyle` 未安装、`ruff` 的 `D` 规则也未启用——docstring 质量目前**只靠人看**） |
 | **C-03** | **禁止裸 `except:` 和 `except Exception: pass`**。捕获必须指定具体异常类型，且必须记录日志 | 代码审查 |
-| **C-04** | **函数单一职责**：一个函数只做一件事。超过 50 行必须拆分 | 人工审阅 |
+| **C-04** | **函数单一职责**：一个函数只做一件事。超过 50 行必须拆分 | 人工审阅。**当前未达标**：12 个函数 > 50 行（最长 `indexer.index_sync` 99 行），已登记 `docs/backlog.md`——**规则不放宽，这是欠账** |
 | **C-05** | **禁止可变默认参数**（`def f(x=[])`） | `ruff` 规则 B006 |
 | **C-06** | **所有文件路径必须用 `pathlib.Path`**，禁止字符串拼接路径 | 代码审查 |
-| **C-07** | **所有跨平台路径在存入数据库前必须转成正斜杠的工作区相对路径** | 单元测试覆盖 Windows 风格输入 |
+| **C-07** | **所有跨平台路径在存入数据库前必须转成正斜杠的工作区相对路径** | 单元测试覆盖 Windows 风格输入。**当前未达标**：代码里 6 处 `as_posix()` 确实做了转换，但**一个 Windows 风格输入的测试都没有**，登记在 `docs/backlog.md` |
 | **C-08** | 行长度上限 100 字符 | `ruff` |
 | **C-09** | 使用 `from __future__ import annotations` 让注解延迟求值 | 每个模块首行 |
 
@@ -318,7 +318,7 @@ Refs: T2-06
 | `wip` | **仅用于失败的尝试**，必须带具体内容 |
 | `chore` | 构建/依赖 |
 
-**`scope` 用模块名**（取自 `PROJECT.md` §3.4 的模块表）：`config` / `walker` / `chunker` / `indexer` / `searcher` / `taskman` / `render` / `server` / `eval` / `cli` / `dsh`（bundle）。
+**`scope` 用模块名**（取自 `PROJECT.md` §3.4 的模块表）：`config` / `types` / `parser` / `text` / `sanitize` / `sqlite_caps` / `walker` / `chunker` / `indexer` / `searcher` / `taskman` / `render` / `log` / `server` / `eval` / `cli`。**非代码改动**用交付面或文档名：`bundle` / `install` / `dsh`（DSH 集成与打包）、`adr` / `backlog` / `readme` / `project` / `testing`（文档）、`cases`（L2 用例集）、`repo`（仓库级杂项）。
 
 **好的与坏的示例**（照抄左列）：
 
@@ -339,8 +339,9 @@ Refs: T2-06
 
 ### 7.3 分支
 
-- `main` 保持可运行
-- 每个里程碑一个分支：`m1-close-the-loop`、`m2-retrieval-quality`、`m3-eval-and-decide`、`m4-distribute`
+- `main` 保持可运行。**本项目实际就在 `main` 上按任务粒度提交**——M1–M4 都没有开里程碑分支
+  （`git branch -a` 只有 `main`），真正提供可追溯性的是 §7.0 的提交粒度。
+- 需要并行推进时才开里程碑分支：`m1-close-the-loop`、`m2-retrieval-quality`、`m3-eval-and-decide`、`m4-distribute`。
 
 ---
 

@@ -396,7 +396,7 @@ code_search(query, path, limit, mode)
 | `render` | `src/dsh_coderag/render.py` | 把 search/status 结果渲染成模型可见文本 | 不做检索决策 |
 | `log` | `src/dsh_coderag/log.py` | JSON-Lines 日志（stderr）与 `last-index.json` 审计 | 不写 stdout、不索引/检索 |
 | `server` | `src/dsh_coderag/server.py` | MCP 协议实现、4 个工具注册、outline 文本渲染 | 不含业务逻辑（薄层） |
-| `eval` | `src/dsh_coderag/eval/` | 评测集加载、运行、指标计算、报告（**M3 规划，当前未创建**） | 不参与生产路径 |
+| `eval` | `src/dsh_coderag/eval/` | 评测集加载与校验、L1 运行/指标/归因/报告、L2 A/B runner、门禁 CLI（`tasks.py` / `runner.py` / `metrics.py` / `attribute.py` / `report.py` / `ab.py`） | 不参与生产检索路径；除 `ab.py` 拉起 headless DSH 外不调模型 |
 | `cli` | `src/dsh_coderag/__main__.py` | 命令行入口（`index` / `search`） | 供人调试用，非模型接口 |
 
 **模块依赖方向（禁止反向依赖）**：
@@ -410,10 +410,10 @@ indexer ─► {walker, chunker, sanitize, text, log, sqlite_caps, config, types
 walker ──► {sanitize, config, types}
 chunker ─► {parser, types}
 render ──► types
-eval ────► searcher（M3 规划）
+eval ────► {searcher, indexer, walker, text, config, types}（`runner` 复用生产检索；`attribute` 读 walker/indexer/text 做归因；markdown 渲染是 eval 自己的）
 
 config / types / parser / text / sanitize / log / sqlite_caps：叶子模块，不依赖其它 dsh_coderag 模块；
-config 与 types 被所有模块只读引用。render 只被 server（以及 M3 的 eval）调用。
+config 与 types 被所有模块只读引用。render 只被 server 调用（eval 有自己的 markdown 渲染器）。
 ```
 
 ### 3.5 MCP 工具契约

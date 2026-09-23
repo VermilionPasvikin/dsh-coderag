@@ -319,6 +319,7 @@ L2 A/B 评测（**需要模型 API key**）见 `EVAL.md` §3.6 与 `docs/eval-re
 | `PROJECT.md` | 项目概况、架构、ADR、任务表与进度 |
 | `AGENTS.md` | 强制性约束：红线、DSH 环境坑、安全、提交规范 |
 | `EVAL.md` / `TESTING.md` | 评测方案 / 测试方案 |
+| [`docs/architecture.md`](docs/architecture.md) | **已实现**的架构：模块与依赖方向、索引/检索数据流、数据模型、工具契约 |
 | `docs/eval-report-m3.md` | M3 的 L1/L2 评测报告（分层 + 逐条 + 归因） |
 | `docs/adr/ADR-14-semantic-retrieval.md` | 决策门 `T3-07` 的裁决与证据 |
 | `docs/adr/ADR-15-defer-semantic-retrieval.md` | 执行推迟：v1 不含向量，后续以可选后端引入（默认关闭） |

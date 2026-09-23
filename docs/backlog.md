@@ -146,3 +146,25 @@
   请使用 `cordis.patch.yml` 的启动方式。
 - 关联：属 `T1-14`（patch 启动方式）/ `T4-02`（可分发的 bundle patch）范围；
   已在发布前修掉。
+
+## 编码规范欠账：12 个函数超过 50 行（发现于 T4-10）
+
+- 现象：`AGENTS.md` C-04 要求「函数超过 50 行必须拆分」，但 AST 统计显示 `src/` 里有 **12 个**函数超标。
+- 清单（按行数降序）：`indexer.index_sync` 99、`searcher.search` 93、`eval/ab.py:run_group` 83、
+  `eval/attribute.py:collect_evidence` 81、`eval/ab.py:parse_session` 76、`eval/ab.py:_run_attempt` 71、
+  `eval/__main__.py:_cmd_gate` 66、`eval/report.py:render_diff_markdown` 64、`server._index_status` 59、
+  `searcher._search` 58、`eval/tasks.py:validate_tasks` 56、`eval/report.py:gate_diff` 52。
+- 性质：**规范与实现不一致**（T4-10 审出）。**规范不放宽**——这是欠账，不是规则过时。
+- 建议：`indexer.index_sync` 与 `searcher.search` 是最值得先拆的两个，它们内部本来就有天然分段
+  （walk/prepare/write/cleanup、构造/执行/裁剪）；`eval/ab.py` 的三处可各自抽出纯函数。
+- **不要**用「给函数加注释说明它很长」或改 C-04 的方式消掉它。
+
+## 编码规范欠账：没有 Windows 风格路径的测试（发现于 T4-10）
+
+- 现象：`AGENTS.md` C-07 要求「单元测试覆盖 Windows 风格输入」，但 `tests/` 里**一个都没有**
+  （搜 `C:\`、`PureWindowsPath`、`ntpath`、反斜杠路径输入均无命中）。
+- 现状：**生产代码是合规的**——`walker.py` / `indexer.py` / `chunker.py` / `searcher.py` / `sanitize.py`
+  共 6 处用 `Path.as_posix()` 把入库路径转成正斜杠的工作区相对路径；缺的是**把这些行为钉住的测试**。
+- 建议：补一条参数化测试，喂入 Windows 风格（如 `a\\b\\c.py`）与绝对路径，断言入库路径为正斜杠且相对；
+  可复用 `tests/test_walker.py` 的 `tmp_path` 模式。
+- 补齐后同步删掉 `AGENTS.md` C-07 行的「当前未达标」标注。
