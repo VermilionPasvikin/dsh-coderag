@@ -129,7 +129,7 @@ def mutate_fake_matrix_key():
 
 def mutate_empty_matrix():
     def f(files: dict[str, str]) -> dict[str, str]:
-        files["PROJECT.md"] = files["PROJECT.md"].replace("### 6.7 覆盖矩阵", "### 6.7x 覆盖矩阵", 1)
+        files["PROJECT.md"] = files["PROJECT.md"].replace("### 6.8 覆盖矩阵", "### 6.8x 覆盖矩阵", 1)
         return files
     return f
 
@@ -197,7 +197,7 @@ def mutate_zero_definitions():
 def mutate_drop_whole_matrix_section():
     def f(files: dict[str, str]) -> dict[str, str]:
         lines = files["PROJECT.md"].splitlines(keepends=True)
-        s = next(i for i, l in enumerate(lines) if l.startswith("### 6.7"))
+        s = next(i for i, l in enumerate(lines) if l.startswith("### 6.8"))
         e = next(i for i, l in enumerate(lines) if l.startswith("## 7.") and i > s)
         files["PROJECT.md"] = "".join(lines[:s] + lines[e:])
         return files
@@ -212,14 +212,14 @@ CASES: list[tuple[str, str, callable]] = [
     ("B1", "删掉矩阵里的 C7 行", mutate_drop_matrix_row("C7")),
     ("B1", "删掉矩阵里的 ADR-05 行", mutate_drop_matrix_row("ADR-05")),
     ("B3", "把所有 ADR 定义去掉加粗（解析为 0）", mutate_zero_definitions()),
-    ("B3", "整段删除 §6.7 覆盖矩阵", mutate_drop_whole_matrix_section()),
+    ("B3", "整段删除 §6.8 覆盖矩阵", mutate_drop_whole_matrix_section()),
     ("B4", "往矩阵塞一个虚构键 ADR-99", mutate_fake_matrix_key()),
     ("B5", "把矩阵里 ADR-07 行复制一份（重复键）", mutate_dup_matrix_key()),
     ("B6", "把 C3 行改成「—」且说明留空", mutate_dash_without_note()),
     ("B7", "把 ADR-07 的强制点改成任意文字", mutate_bad_force_token()),
     ("C1", "把任务 T2-05 复制一份（重复 ID）", mutate_duplicate_task()),
     ("C3", "让 T2-09 依赖自身", mutate_self_dep()),
-    ("C5", "把 §6.5 里的一条边改错（图漂移）", mutate_graph_drift()),
+    ("C5", "把 §6.6 里的一条边改错（图漂移）", mutate_graph_drift()),
     ("C-CYCLE", "制造环 T1-02 ⇄ T1-04", mutate_cycle()),
     ("D1", "清空 T1-06 的依赖（孤立 T1 任务）", mutate_orphan_t1()),
     ("A5", "在 EVAL.md §6 塞一个不存在的任务 ID", mutate_eval_ghost()),

@@ -175,7 +175,7 @@ natural_a5_share = 1.0
 
 ### 10.1 新增证据：S3 已经由**纯词法**达成
 
-L2 端到端 A/B（13 条用例 × 3 trials，`docs/eval-report-m3.md`、`PROJECT.md` §6.6 的 T3-05/T3-06）：
+L2 端到端 A/B（13 条用例 × 3 trials，`docs/eval-report-m3.md`、`PROJECT.md` §6.7 的 T3-05/T3-06）：
 
 | 组 | 检索工具 | taskSuccess |
 |---|---|---:|

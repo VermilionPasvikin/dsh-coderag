@@ -504,7 +504,7 @@ eval_gate(baseline="eval/runs/a-v1/report.json", current="eval/runs/b-v1/report.
 | “用同一套断言” | 实现 §3.4 的 **9 类**机械断言 | `output_judge` 需要模型评审，**runner 直接报错拒绝**而不是静默忽略——静默忽略会让用例看起来更严、实际更松 |
 | 提取 tool/最终文本/token | 另加：步数、`turn_end` 原因、`interrupted`、tool 结果错误 | §3.4/§3.5 的 `max_steps`、`turn_end`、`no_tool_errors` 需要它们 |
 
-两处骨架未规定、但实现已固定下来的行为（均由 `T3-05` 冒烟暴露；成因与修复见 `PROJECT.md` §6.6 的 `T3-15` 备注）：
+两处骨架未规定、但实现已固定下来的行为（均由 `T3-05` 冒烟暴露；成因与修复见 `PROJECT.md` §6.7 的 `T3-15` 备注）：
 
 - **工具名先按 DSH 的 MCP 命名空间归一化，再参与断言。** DSH 把 MCP 工具记为 `mcp__<serverName>__<toolName>`（如 `mcp__coderag__code_search`），而用例按工具自身的名字写 `code_search`。匹配时折叠 `mcp__<server>__` 前缀，**原始名字仍保留在 trace 与报告里**（可追溯）。不折叠的后果不是"断言变松"，而是**任何 MCP 工具断言恒为假**——用例看起来更严，实际把已经成功的 attempt 判成失败。
 - **所有路径先按调用目录解析为绝对路径，再 fork 子进程。** 每次 attempt 都用 `cwd=workspace` 启动 DSH（这是必须的：`cordis.patch.yml` 的 `CODERAG_ROOT` 和 DSH 自己的工作区都取自 `process.cwd()`），所以相对形式的 `--dsh` / `--patch` / `--out` 会被重新基准化到 workspace 上而静默失败。`run_group` 入口统一 `resolve()`；**裸命令**（`dsh` / `npx`）保持原样以便走 `PATH`；启动器、patch、workspace 缺失时**明确报错**，而不是让子进程抛出不可操作的 `[Errno 2]`。

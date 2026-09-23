@@ -71,7 +71,7 @@
 
 ## 5. 后果
 
-- `T3-08`–`T3-11` 在 `PROJECT.md` §6.3 标为**暂缓**；§6.7 覆盖矩阵已同步（`ADR-15` 一行）。
+- `T3-08`–`T3-11` 在 `PROJECT.md` §6.3 标为**暂缓**；§6.8 覆盖矩阵已同步（`ADR-15` 一行）。
 - `README.md` 的「当前状态 / 已知限制」必须写明：**纯中文自然语言检索仍不可用**（`natural` S@5 = 0），且这是**已知的、暂缓修复的**局限——不得因为要发版而隐去（`AGENTS.md` D-05）。
 - M4 继续；`T4-01` 的 bundle 清单已确认**不含任何 embedding 依赖**（tarball 只有 `package.json` + `cordis.patch.yml` + LICENSE/README）。
 

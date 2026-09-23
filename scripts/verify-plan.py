@@ -3,7 +3,7 @@
 
 用法:
     python3 scripts/verify-plan.py .                # 全量校验
-    python3 scripts/verify-plan.py . --emit-graph   # 只输出 §6.5 依赖图正文（用于重新生成）
+    python3 scripts/verify-plan.py . --emit-graph   # 只输出 §6.6 依赖图正文（用于重新生成）
 
 设计原则（对应清单 F 组）：
   * **不静默通过**：关键解析结果为 0 或低于下限 → 失败，而不是打印 "0 条 ✅"
@@ -120,13 +120,13 @@ def check_eval_drift(ev_lines: list[str], tasks: dict[str, dict]) -> set[str]:
 
 # ══ B. 覆盖矩阵 ═══════════════════════════════════════════════════════
 def parse_matrix(proj_lines: list[str]) -> dict[str, tuple[str, str, int]]:
-    start = next((i for i, l in enumerate(proj_lines) if l.startswith("### 6.7")), None)
+    start = next((i for i, l in enumerate(proj_lines) if l.startswith("### 6.8")), None)
     if start is None:
         return {}
     matrix: dict[str, tuple[str, str, int]] = {}
     for i in range(start + 1, len(proj_lines)):
         line = proj_lines[i]
-        if line.startswith("### 6.8") or line.startswith("## 7."):
+        if line.startswith("### 6.9") or line.startswith("## 7."):
             break
         m = MATRIX_ROW.match(line)
         if not m:
@@ -144,7 +144,7 @@ def parse_matrix(proj_lines: list[str]) -> dict[str, tuple[str, str, int]]:
 def check_matrix(proj_lines: list[str], agents_lines: list[str], tasks: dict[str, dict],
                  matrix: dict[str, tuple[str, str, int]]) -> None:
     if not matrix:
-        fail("B3", "§6.7 覆盖矩阵解析为空（标题应为 `### 6.7`）")
+        fail("B3", "§6.8 覆盖矩阵解析为空（标题应为 `### 6.8`）")
         bad("B3", "矩阵为空")
         return
     if len(matrix) < MIN_MATRIX:
@@ -215,7 +215,7 @@ def check_matrix(proj_lines: list[str], agents_lines: list[str], tasks: dict[str
 
 # ══ C. 任务 ID 与依赖 ═════════════════════════════════════════════════
 def parse_tasks(proj_lines: list[str]) -> dict[str, dict]:
-    body = section(proj_lines, "## 6. 工作计划", ("### 6.5", "### 6.6", "## 7."))
+    body = section(proj_lines, "## 6. 工作计划", ("### 6.6", "### 6.7", "## 7."))
     tasks: dict[str, dict] = {}
     lineno_of: dict[int, int] = {}
     for i, l in enumerate(proj_lines):
@@ -328,24 +328,24 @@ def emit_graph(tasks: dict[str, dict]) -> str:
 
 
 def check_graph_sync(proj_lines: list[str], tasks: dict[str, dict]) -> None:
-    body = section(proj_lines, "### 6.5", ("### 6.6",))
+    body = section(proj_lines, "### 6.6", ("### 6.7",))
     if not body:
-        fail("C5", "§6.5 任务依赖图未找到")
-        bad("C5", "§6.5 缺失")
+        fail("C5", "§6.6 任务依赖图未找到")
+        bad("C5", "§6.6 缺失")
         return
     actual_lines = [l.rstrip() for l in body
                     if (l.startswith("T") or l.startswith("# 由 scripts/")) and l.strip()]
     actual = "\n".join(actual_lines).strip()
     expected = "\n".join(l for l in emit_graph(tasks).splitlines() if l.strip()).strip()
     if actual != expected:
-        bad("C5", "§6.5 与任务表不一致")
-        fail("C5", "§6.5 依赖图已过期 —— 运行 `python3 scripts/verify-plan.py . --emit-graph` 覆盖")
+        bad("C5", "§6.6 与任务表不一致")
+        fail("C5", "§6.6 依赖图已过期 —— 运行 `python3 scripts/verify-plan.py . --emit-graph` 覆盖")
         for a, e in zip(actual.splitlines(), expected.splitlines()):
             if a != e:
                 fail("C5", f"  首个差异：图 `{a}`  vs  表 `{e}`")
                 break
     else:
-        ok("C5", f"§6.5 与任务表逐行一致（{len(tasks)} 行）")
+        ok("C5", f"§6.6 与任务表逐行一致（{len(tasks)} 行）")
 
 
 # ══ E. TESTING.md ═════════════════════════════════════════════════════

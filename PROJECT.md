@@ -103,7 +103,7 @@ DeepSeek Harness（下称 DSH）是一个"一切皆插件"的 Agent 框架，但
 | **S3** | **端到端有提升** | 评测集任务通过率：有检索 vs 无检索 | 相对提升 ≥ 10 个百分点 |
 | **S4** | **成本可接受** | 单次 `code_search` 返回的 token 数 | 中位数 ≤ 4000 |
 
-> `S1`–`S4` 是本项目的稳定标识——`§6.7 覆盖矩阵` 与 `EVAL.md` 都按这些 ID 引用它们，**不要改名**。
+> `S1`–`S4` 是本项目的稳定标识——`§6.8 覆盖矩阵` 与 `EVAL.md` 都按这些 ID 引用它们，**不要改名**。
 
 > **为什么把 S3 设成必要条件**：调研中有一条关键实证——Repoformer 的测量显示**最多 80% 的检索结果并不提升下游任务性能**，只有约 20% 的实例真正受益。如果 S3 不成立，说明检索在做无用功，**此时砍掉它是正确的工程决策，而不是项目失败**（依据：CodeRAG-Bench / Repoformer，见第 8 章）。
 
@@ -117,7 +117,7 @@ DeepSeek Harness（下称 DSH）是一个"一切皆插件"的 Agent 框架，但
 | **D4** | 评测集与评测脚本 | `eval/tasks.jsonl` + `src/dsh_coderag/eval/` | 可重复跑出 S1–S4 的数字 |
 | **D5** | README（含安全声明与限制） | `README.md` | 顶部披露插件权限范围；含实测数据与已知限制 |
 
-> `D1`–`D5` 是稳定标识，被 `§6.7 覆盖矩阵` 引用，**不要改名**。
+> `D1`–`D5` 是稳定标识，被 `§6.8 覆盖矩阵` 引用，**不要改名**。
 
 ---
 
@@ -1080,8 +1080,11 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | **M2** | Day 3–4 | **检索质量**：tree-sitter 分块、安全过滤、增量索引、outline | 分块抽检 20 个无"半个函数"；`.env` 未被索引；二次索引耗时 < 首次的 20% |
 | **M3** | Day 5–6 | **评测与决策**：证明价值，决定是否上向量 | S1/S2/S4 达标；S3 有结论；决策门有明确裁决 |
 | **M4** | Day 7 | **可分发**：一条命令安装 | 在干净环境 `dsh plugin add` 成功并可用 |
+| **M5** | v0.2.0 | **向量可选后端**：默认关闭的 opt-in 语义检索，补齐 `natural` 桶 | `T5-17`：0.2.0 已发布；**默认路径与 0.1.0 逐条一致**；可选后端开启时 `natural` 桶达标（判据见 `ADR-16`） |
 
 **任务编号规则**：`T<里程碑>-<序号>`，例如 `T1-03`。每个任务必须独立可验收。**带字母后缀的（如 `T3-02a`）是同一任务的批次拆分**，各自独立提交。
+
+> **M5 的两批划分**：`T5-01`–`T5-13` 是**实现前必须完成的文档前置**（决定来源是 `T5-05` 的 `ADR-16`）；`T5-14`–`T5-17` 是探针、安装收尾、冒烟与发布。核心实现复用**已重启**的 `T3-08`–`T3-11`。
 
 ---
 
@@ -1094,10 +1097,17 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | **ID** | 任务编号 | 一个任务一个提交（`AGENTS.md` §7.0）。**带字母后缀的（如 `T3-02a`）是同一任务的批次拆分**，仍各自独立提交 |
 | **任务** | 要做什么 | 一句话，无歧义。括号里的"（条件）"表示仅在决策门命中时执行 |
 | **产出文件** | 只允许改这些文件 | 超出范围即为越界，见 `AGENTS.md` §9 |
-| **验收命令** | 必须实际执行 | 输出要贴进 §6.6 |
+| **验收命令** | 必须实际执行 | 输出要贴进 §6.7 |
 | **期望结果** | 命令输出应满足的条件 | 不满足即未完成 |
 | **依赖** | **硬阻塞**：必须先完成的任务 | 见下方约定 |
 | **估时** | 参考工时 | 超过 3 倍请停下来报告（`AGENTS.md` §9） |
+
+> **单元格里禁止出现竖线**——包括转义写法 `\|`。`scripts/verify-plan.py` 解析任务表时按朴素的
+> `split("|")` 切分、**不认转义**，任何多余竖线都会把行拆错，让「依赖」列读到隔壁单元格的内容
+> （`C4`/`D1` 会立刻报错）。验收命令里要表达"或"就用 `grep -e A -e B`；要匹配表格行时，改用
+> `scripts/verify-plan.py` 自己的检查结论（它会把计数打进输出），不要用 `grep` 去匹配竖线。
+> **例外**：进度表（§6.7）与覆盖矩阵（§6.8）不在 `parse_tasks` 的扫描范围内，那两张表在必须
+> 贴表格行时照旧用 `\|`（见 `T4-05` 的证据写法）。
 
 **依赖列的约定（重要）**：
 
@@ -1110,7 +1120,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 
 > ⚠️ 判据的精确形式是"**追溯到 `T1-01`**"，不是"追溯到任意 `T1-*`"。后者会让所有 M1 任务自动通过，等于没检查。
 
-这条约束（以及本节的其余约定）由 `scripts/verify-plan.py` 机械校验，见 §6.7。
+这条约束（以及本节的其余约定）由 `scripts/verify-plan.py` 机械校验，见 §6.8。
 
 **执行顺序**：严格按 `T1-01 → T1-02 → … → T4-10` 的 ID 升序，**遇到未完成的依赖就停下**（不要跳过，也不要"先做后面的"）。
 
@@ -1244,7 +1254,39 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 
 ---
 
-### 6.5 任务依赖图（**由脚本生成，请勿手改**）
+### 6.5 M5 — 向量可选后端（v0.2.0）
+
+**目标**：把「纯中文自然语言检索不可用」（L1 `natural` 桶 `S@5 = 0.000`，失败 100% 归因 `A5` 零词法重叠）这一已知短板，以**可选、默认关闭**的后端补齐；**默认路径与 `0.1.0` 逐条一致**。
+
+**发布范围约束**（`ADR-15` §3；由 `T5-05` 的 `ADR-16` 冻结成可验收条文）：
+
+- **默认关闭 + opt-in**；未配置时**干净退回纯 BM25**，逐条结果与 0.1.0 一致；
+- **不得进入必需依赖**：`pyproject.toml` 的 `dependencies`、bundle 的 tarball、安装脚本的前置条件都不许出现 embedding 相关依赖；
+- 后端不可用或未配置时，工具必须返回**结构化状态**并继续以 BM25 工作（`RL-09`），**不得**变成 `isError` 或空列表（`RL-06`）；
+- 实施前**必须先跑向量天花板探针**（`ADR-15` §3.2，见 `T5-14`）：用数据决定是否值得全量实施；
+- 是否发布向量路径服从 `ADR-14` §10.4 的 **V1–V4**（`V4`：C 组不能显著优于 B 组就不发布）。
+
+**下表 `T5-01`–`T5-13` 是「实现前的文档前置」**；`T5-14` 起见 6.5.1。
+
+| ID | 任务 | 产出文件 | 验收命令 | 期望结果 | 依赖 | 估时 |
+|---|---|---|---|---|---|---|
+| T5-01 | 修 `EVAL.md` 的既有过期项：L2 工具列与第 3 章标题仍写"现成 `dsh-eval-harness`"、`T3-00` 仍写作"新增前置任务"、引用不存在的 `tests/test_retrieval_quality.py` 与 `indexed_workspace` fixture、`eval validate` 缺 `--tasks`/`--root`、`limit` 默认值写成 12（实为 5）、"3~4 小时"与同文件 4–5h 冲突。逐条清单见 `docs/backlog.md`「文档过期项审计」 | `EVAL.md` | `grep -c -e tests/test_retrieval_quality.py -e indexed_workspace -e "limit 默认是" EVAL.md` 以及 `grep -n dsh-eval-harness EVAL.md`，再跑 `python3 scripts/verify-plan.py .` | 前三条 **0 命中**；`dsh-eval-harness` 只出现在 `T3-00` 的**不兼容结论**里、不再作为 L2 的工具选择；门禁全绿 | T4-10 | 1.5h |
+| T5-02 | 修 `TESTING.md` 的既有过期项：目录树里的 `test_retrieval_quality.py`（不存在）与 `tests/e2e/`（不存在）、属性测试落点（`test_too_many_files.py` 里没有 hypothesis）、中文用例落点漏了 `test_cjk_recall.py`、不存在的 `indexed_eval_corpus` fixture、`§8` 的"不做多平台矩阵"与 `§5.1` 的"跑多平台矩阵"冲突、`FTS5_UNAVAILABLE` 仍写"必须同步加进去"（已加） | `TESTING.md` | `grep -c -e test_retrieval_quality -e "tests/e2e/" -e indexed_eval_corpus TESTING.md`，再跑 `python3 scripts/verify-plan.py .` | 0 命中；`§5.1` 与 `§8` 对多平台矩阵的口径一致且只有一处结论；门禁全绿 | T4-10 | 1.5h |
+| T5-03 | 给 `ADR-14` 的三处决策时快照补**日期化后续状态**（`§7.1` 的"`S3` 未测量"、`§9` 的"未决前置：L2 runner 必须先自建"、`§9` 把已完成的 `T3-12` 仍列在"后续任务"）。**不改写历史结论**，加"后续更新"块说明现状（`D-06` 的边界：ADR 是快照，不是现状描述） | `docs/adr/ADR-14-semantic-retrieval.md` | `grep -c "后续更新" docs/adr/ADR-14-semantic-retrieval.md` | `≥3`（三处各一条），且每处写明日期与当时的实际结果 | T4-10 | 1h |
+| T5-04 | 给里程碑快照文档补**日期化后续状态**：`docs/m4-bundle.md` 的"干净 profile 端到端 ⏳ 属 `T4-08`"（`T4-08` 已完成）、`docs/m1-findings.md` 的"`path`/`max_tokens` 尚未生效（T2 范围）"与"召回模式属 T2-19"、`docs/m2-findings.md` 的"缺少精度/召回双模式"（均已在 T2-19/T3-13 落地） | `docs/m4-bundle.md`, `docs/m1-findings.md`, `docs/m2-findings.md` | `grep -c "后续状态" docs/m4-bundle.md docs/m1-findings.md docs/m2-findings.md` | 每份 `≥1`；同一份里同一主题只加一条汇总标注，不逐行改写 | T4-10 | 1h |
+| T5-05 | **立 `ADR-16`「向量作为可选后端」**并冻结可验收条文：形态（opt-in / 默认关闭 / 干净回退）、后端与依赖（本地 vs 云端、extra 名）、配置项与环境变量命名、向量索引落点（必须在工作区内，`S-03`）、失败模式与结构化状态、发布范围（0.2.0）、以及引用 `ADR-14` §10.4 的 V1–V4 与 `α = 0.025`。**必须与 `§3.7` ADR 表行、`§6.8` 覆盖矩阵行同一次提交**（`verify-plan` 的 `B1` 强制） | `docs/adr/ADR-16-optional-vector-backend.md`, `PROJECT.md` | `test -f docs/adr/ADR-16-optional-vector-backend.md`，`grep -c "^## " docs/adr/ADR-16-optional-vector-backend.md`，再跑 `python3 scripts/verify-plan.py .` | 文件存在；`≥6` 个二级小节；门禁全绿且 `ADR` 计数 `16`、`§6.8` 矩阵含 `ADR-16` 行 | T4-10 | 2h |
+| T5-06 | 按 `ADR-16` 对齐 `AGENTS.md` 的**红线与规范**：`RL-10` 从"决策门前禁止 embedding"改写为"**向量不得进入默认路径或必需依赖；未配置必须干净回退 BM25**"（旧红线的历史使命已由 `T3-07` 完成，见 `ADR-15` §4）；`§3.2` 的"不引入向量数据库（M3 决策前）"改为"不引入向量**数据库**，用 numpy 暴力余弦"；`S-01` 补"本地后端也不得默认启用"；同步 `§6.8` 的 `RL-10` 行 | `AGENTS.md`, `PROJECT.md` | `grep -n -e "禁止在 M3 决策门" -e "向量数据库（M3 决策前）" AGENTS.md`，再跑 `python3 scripts/verify-plan.py .` | 旧表述 0 命中；新表述含"默认路径/必需依赖"与"干净回退"；门禁全绿 | T5-05 | 1.5h |
+| T5-07 | 在 `PROJECT.md` §1.4 增加**向量模式的成功标准**（`S5`：可选后端开启时 `natural` 桶的 `S@5` 阈值；`S6`：默认路径零回归——未配置时逐条与 0.1.0 一致）。`S1`–`S4` **不得改名**（§1.4 已声明它们是稳定标识）；同步 `§6.8` 矩阵新增行 | `PROJECT.md` | `python3 scripts/verify-plan.py .` | 输出含 `成功标准 S*: 6 条全部在矩阵里`；门禁全绿 | T5-05 | 1h |
+| T5-08 | 对齐 `PROJECT.md` 的**分发形态与选型结论**：`§1.5`/`§1.6` 写清 0.2.0 的"默认安装不变 + 可选 extra"两段式安装；`§2.3`（"为什么第一版不做向量"）补 v0.2 的范围说明并指向 `ADR-16` | `PROJECT.md` | `grep -c "v0.2" PROJECT.md` 再跑 `python3 scripts/verify-plan.py .` | `≥3`；门禁全绿 | T5-05 | 1.5h |
+| T5-09 | 对齐 `PROJECT.md` 的**数据模型、依赖与检索路径**：`§3.6` 的"预留的向量表（M3 决策通过后才创建）"改为 v0.2 可选后端的口径；`§4.2` 的"可选（M3 决策通过后才加）"改为 0.2.0 的 extra 名与安装方式；`§5.3` 的向量/RRF 段落标注为"**可选后端路径**"而非默认路径 | `PROJECT.md` | `grep -c "可选后端" PROJECT.md` 再跑 `python3 scripts/verify-plan.py .` | `≥3`；三处均明确"默认关闭"；门禁全绿 | T5-05 | 1.5h |
+| T5-10 | 在 `EVAL.md` 把 **C 组（混合）与天花板探针写成可执行方法**：C 组的 profile/env 开关、配对方式、`α = 0.025` 的第二轮口径、`scripts/ab_eval.py run --patch <vector patch>` 的命令形态，以及 `ADR-14` §10.4 的 `V1`–`V4` 逐条落到可判定的断言 | `EVAL.md` | `grep -c -e "C 组" -e "天花板探针" -e "0.025" EVAL.md` 再跑 `python3 scripts/verify-plan.py .` | 三项各自 `≥1`；`V1`–`V4` 每条都有对应的判定命令；门禁全绿 | T5-05 | 1.5h |
+| T5-11 | 在 `TESTING.md` 的必测清单新增一条：**「可选后端默认关闭且未配置时回退」**（含"测试必须在无网络、无 Ollama 的条件下通过"的离线约束，`T-02`），并在「对应任务」列引用 `T3-08`–`T3-11` 与 `T5-15` | `TESTING.md` | `grep -c -e "默认关闭" -e "回退" TESTING.md` 再跑 `python3 scripts/verify-plan.py .` | 各 `≥1`；必测清单新增行被 `E2`/`E3`/`E4` 接受；门禁全绿 | T5-05 | 1h |
+| T5-12 | 对齐两份 ADR 的**执行状态**（`D-06`：写现状）：`ADR-14` 的"执行：暂缓"、`ADR-15` 的状态行/§1/§3/§5 标注为"已重启为可选后端（0.2.0）"，并保留各自的决策快照性质（不删原始理由） | `docs/adr/ADR-14-semantic-retrieval.md`, `docs/adr/ADR-15-defer-semantic-retrieval.md` | `grep -c -e "已重启" -e "执行中" docs/adr/ADR-14-semantic-retrieval.md docs/adr/ADR-15-defer-semantic-retrieval.md` 再跑 `python3 scripts/verify-plan.py .` | 两份合计 `≥2`；`ADR-15` 仍保留"暂缓"的历史理由；门禁全绿 | T5-05 | 1h |
+| T5-13 | 写 `README.md` 与 `docs/architecture.md` 的 **v0.2 说明骨架**（**不含版本号**，版本号属 `T5-17`）：README 新增"可选语义后端"小节（装法、开关、默认关闭、限制如何变化）、`## 已知限制` 里"纯中文自然语言不可用"改为"默认安装下不可用"；`docs/architecture.md` 的模块表与"不做什么"补可选后端路径 | `README.md`, `docs/architecture.md` | `grep -c "可选后端" README.md docs/architecture.md` 再跑 `python3 scripts/verify-plan.py .` | 两份合计 `≥2`；README 的安全声明仍在第一屏（`D-04`）；门禁全绿 | T5-05 | 1.5h |
+
+---
+
+### 6.6 任务依赖图（**由脚本生成，请勿手改**）
 
 > 本图由 `python3 scripts/verify-plan.py . --emit-graph` 从 §6.1–§6.4 各任务表的「依赖」列**自动生成**。
 > **改依赖只改任务表**，然后重跑上面那条命令覆盖本节——`verify-plan.py` 会校验两者逐行一致（检查项 `C5`）。
@@ -1324,9 +1366,22 @@ T4-07  ← T1-01
 T4-08  ← T4-02, T4-03
 T4-09  ← T4-08
 T4-10  ← T4-08
+T5-01  ← T4-10
+T5-02  ← T4-10
+T5-03  ← T4-10
+T5-04  ← T4-10
+T5-05  ← T4-10
+T5-06  ← T5-05
+T5-07  ← T5-05
+T5-08  ← T5-05
+T5-09  ← T5-05
+T5-10  ← T5-05
+T5-11  ← T5-05
+T5-12  ← T5-05
+T5-13  ← T5-05
 ```
 
-### 6.6 进度追踪表
+### 6.7 进度追踪表
 
 > 每个任务开工前把状态改为 `进行中`；通过验收后改为 `已完成`，**填上验收命令的实际输出**，并在「提交」列填上 commit 短 SHA。**缺任何一项都视为未完成**（`AGENTS.md` §5.1 的 DoD 七条）。
 >
@@ -1392,17 +1447,17 @@ T4-10  ← T4-08
 | **T4-01** | 已完成 | `$ node -e "console.log(require('./package.json').dsh.bundle)"`<br>`{ patch: './cordis.patch.yml' }`<br>`$ node -e "const p=require('./package.json'); console.log('main:',p.main,'\| bin:',p.bin,'\| scripts:',p.scripts)"`<br>`main: undefined \| bin: undefined \| scripts: undefined`<br>`$ npm pack --dry-run`<br>`npm notice 1.1kB LICENSE`<br>`npm notice 14.8kB README.md`<br>`npm notice 1.5kB cordis.patch.yml`<br>`npm notice 270B package.json`<br>`npm notice total files: 4`（`package size: 9.5 kB`） | `340cf5f` | 新增仓库根 `package.json`：`name`/`version`/`description`/`license` + `files: ["cordis.patch.yml"]` + `dsh.bundle.patch: "./cordis.patch.yml"`，**无任何 JS 入口**（`main`/`bin`/`scripts` 全为 `undefined`）。DSH 的解析方式已在 `dsh-app-boot` 源码核实：`patchPath = join(packageDir, declared)`（相对包目录解析）。tarball 只含 4 个文件 / 9.5 kB，`cordis.patch.yml` 是唯一的分发内容 → bundle 里没有构建脚本，**C11（pnpm 拒绝 install script）从根上不适用**，正是 §1.6.1 的设计意图。**下一任务 `T4-02` 才真正验证 `dsh plugin add .` 能装载这一层**（本任务只做清单） |
 | **T4-02** | 已完成 | `$ ./scripts/dsh plugin --profile coderag-dev add .`（E-07：经包装脚本；沙箱先拒绝写 `~/.dsh`，按沙箱规则提权一次）<br>`dsh: initialized profile coderag-dev at /Users/vermi/.dsh/profiles/coderag-dev`<br>`Already up to date`<br>`dependencies:`<br>`+ dsh-coderag link:../../../个人项目/python/dsh-coderag`<br>`Done in 1.7s using pnpm v12.4.2`（rc=0，**无 install script 报错**，无 `ERR_PNPM_*`）<br>`$ ./scripts/dsh --profile coderag-dev --dump-config`<br>`# == @deepseek-ai/dsh-base`<br>`…（# == @deepseek-ai/dsh-base 层：84 条 / 332 行）…`<br>`# == dsh-coderag`<br>`- id: mcp-coderag`<br>`  name: '@deepseek-ai/dsh-mcp-client'`<br>`  config:`<br>`    serverName: coderag`<br>`    transport: stdio`<br>`    command: !!js process.env.CODERAG_PYTHON ?? '/opt/anaconda3/envs/forBSH/bin/python'`<br>`    args:`<br>`      - '-c'`<br>`      - import dsh_coderag.server as s; s.run()`<br>`    env:`<br>`      CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()`<br>（rc=0；stdout `10843` 字节 / stderr `0` 字节，即无 patch 应用警告。期望两项逐项对应：本插件的层 = `# == dsh-coderag`（第 333 行，层标签取**包名**）；MCP 行 = `- id: mcp-coderag`（第 334 行）。登记后 profile 清单 `dsh.profile.bundles` 由 `["@deepseek-ai/dsh-base"]` 变为 `["@deepseek-ai/dsh-base", "dsh-coderag"]`） | `269ac19` | 新增 `docs/m4-bundle.md`（分发形态、DSH 源码核实的解析/登记行为、验收实录、8 项自检清单、复现步骤与已知边界）。**`cordis.patch.yml` 无需改动**——T1-14 已把同一文件写成 dev overlay 兼 bundle patch；本任务确认为"已就绪"。tarball 只含 4 文件且无 `scripts`，**C11/E-05 从根上不适用**。**范围外发现**（未顺手改，AGENTS §9）：`README.md` 第 44–48 行仍写"本地 `dsh plugin add .` 属 T4-02、尚未验证"，本任务完成后该句过期，留给 `T4-06`/`T4-08` 一并更新 |
 | **T4-03** | 已完成 | `$ CODERAG_PYTHON=/opt/anaconda3/envs/forBSH/bin/python bash scripts/install.sh`（第 1 次）<br>`conda  ：当前 shell 激活的是 base → /opt/anaconda3`<br>`解释器 ：/opt/anaconda3/envs/forBSH/bin/python（来源：CODERAG_PYTHON）`<br>`版本   ：3.10.21  ✅`<br>`FTS5   ：可用 ✅（预检）`<br>`安装   ：检测到本仓库已 editable 装在此解释器上，保持 editable（改 src/ 立即生效）`<br>`安装   ："...python" -m pip install -e .`<br>`Successfully installed dsh-coderag-0.1.0`<br>`FTS5   ：可用 ✅`<br>`bigram ：幂等 ✅  '用户令牌' -> '用户 户令 令牌'`<br>`往返   ：中文查询命中 ✅  标识符命中 ✅  无关词不命中 ✅`<br>`包版本 ：dsh_coderag 0.1.0`<br>`完成：安装与自检通过 ✅`（rc=0）<br>**第 2 次（幂等）**：同样 rc=0；脚本自身输出与第 1 次逐字相同——两次完整输出的 diff 只差 pip 自己的临时 wheel 缓存目录与 sha256（那是 pip 的输出，不是脚本的）<br>`$ CODERAG_PYTHON=/nonexistent/python bash scripts/install.sh`<br>`错误：解释器不可执行或不存在：/nonexistent/python（来源：CODERAG_PYTHON）`（rc=2）<br>`$ python -m pytest tests/test_install_script.py`<br>`5 passed in 0.58s` | `55702df` | 新增 `scripts/install.sh`（**产出文件只列了它**；`tests/test_install_script.py` 5 例是按 DoD §5.1 第 5 条补的）。流程：① 选解释器 `CODERAG_PYTHON` → 当前激活的 conda 环境 → PATH 上的 python3/python，并单独报告 conda 状态；② 版本门禁 `>=3.10,<3.13`（对应风险 R8），不符时打印实际版本与 `conda create` 指引；③ **FTS5 预检放在 pip 之前**（只用 stdlib：缺 FTS5 就没必要装，早失败）；④ `pip install`，`CODERAG_PIP_ARGS` 支持受限网络镜像，PEP 668 给 conda/venv 指引；⑤ 自检做**真实 FTS5 往返**（`unicode61` + bigram，含"无关词不命中"阴性对照与 `to_bigrams` 幂等），再打印下一步。**关键设计——editable 保护**：本机 forBSH 是 `pip install -e .`，而普通 `pip install .` 会把开发安装冻结成 site-packages 副本、之后改 `src/` 不生效，**后续任务会在不知情下测到旧代码**；故检测到"本仓库已 editable 装在该解释器上"时保持 editable，可用 `CODERAG_EDITABLE=0/1` 强制。退出码 0/1/2（pip 失败 1、环境不可用 2）与 `scripts/eval-gate.sh` 一致。测试用 `CODERAG_SKIP_INSTALL=1` 做到**离线**（`TESTING.md` T-02），并断言两次运行 stdout 逐字相同以锁住"幂等"这一验收项 |
-| **T4-04** | 已完成 | 人工审阅（`README.md`，`D-04` 要求安全声明在第一个屏幕内）<br>`$ sed -n '1,8p' README.md \| grep -n "机器权限"`<br>`5:> **安装本插件等于授予它与本机账号同等的机器权限。**`<br>（第 5 行，位于文档顶部引用块；同块还写明三档权限**不约束插件**（`E-04`）与"只在你信任的仓库与本机安装"） | `d483e64` | 新建 `README.md`；顶部安全声明对应约束 `C12`/`E-04`。**此前未列入 §6.6 是历史遗漏**，本行按用户指示补记，README 内容未改 |
-| **T4-05** | 已完成 | 人工审阅（`README.md` 含能力说明 / 安装 / 配置 / 限制 / 评测数据 / 已知问题，`D-03`）<br>`$ grep -c '^## ' README.md`<br>`13`（装上去能带来什么、当前状态、它是怎么工作的、安装、配置、工具、CLI、实测评测数据、已知限制、安全与隐私、开发、文档、许可）<br>`$ grep -E '^[\|] \*\*S[1-4]\*\*' README.md`<br>`\| **S1** \| 检索本身有效：Success@5 \| ≥ 0.80 \| **0.433**（30 条，95% CI [0.274, 0.608]） \| ❌ \|`<br>`\| **S2** \| 排序质量：MRR \| ≥ 0.60 \| **0.313** \| ❌ \|`<br>`\| **S3** \| 端到端有提升（有检索 vs 无检索） \| ≥ +10pp \| **+59.0pp**（0.308 → 0.897） \| ✅ \|`<br>`\| **S4** \| 成本：单次返回 token 中位数 \| ≤ 4000 \| **2492** \| ✅ \|`<br>（S1–S4 全部为实测数字；另有分层指标表、L2 A/B 表与失败归因） | `d5c6f84`, `ca51c5f` | 补全 README 全部章节；此后 `a33c44e` 对齐了 4 处过期陈述。**此前未列入 §6.6 是历史遗漏**，本行按用户指示补记。**后续 `ca51c5f`**（用户指示）：在**靠前位置**新增「装上去能带来什么（冒烟测试实测）」章节——数据取自已入库的冒烟运行 `eval/runs/a-smoke` / `b-smoke` / `gate-smoke.md`（13 条 × 1 次：A 4/13 = 0.308 → B 10/13 = 0.769，**+46.2pp、0 回归**；`locate` 0/4→3/4、`crossfile` 0/5→3/5、`regression`/`negative` 保持 2/2 不变差），并如实标注"冒烟级小样本、不回答排序准不准"、指向完整 3-trial L2 与 L1；同时改掉 `T4-02` 造成过期的陈述（M4 状态行、`cordis.patch.yml` 的"将来的分发 patch"、安装注意块、"尚未打包"限制）并补全文档表（新增 `ADR-15` 与 `docs/m4-bundle.md`）。**证据命令改为与行号无关**：用 `grep -E '^[|] \*\*S[1-4]\*\*'` 而不是 `sed -n 'A,Bp'`——每次在 README 前面插内容都会让硬编码行号失效并打印出错误的行 |
+| **T4-04** | 已完成 | 人工审阅（`README.md`，`D-04` 要求安全声明在第一个屏幕内）<br>`$ sed -n '1,8p' README.md \| grep -n "机器权限"`<br>`5:> **安装本插件等于授予它与本机账号同等的机器权限。**`<br>（第 5 行，位于文档顶部引用块；同块还写明三档权限**不约束插件**（`E-04`）与"只在你信任的仓库与本机安装"） | `d483e64` | 新建 `README.md`；顶部安全声明对应约束 `C12`/`E-04`。**此前未列入 §6.7 是历史遗漏**，本行按用户指示补记，README 内容未改 |
+| **T4-05** | 已完成 | 人工审阅（`README.md` 含能力说明 / 安装 / 配置 / 限制 / 评测数据 / 已知问题，`D-03`）<br>`$ grep -c '^## ' README.md`<br>`13`（装上去能带来什么、当前状态、它是怎么工作的、安装、配置、工具、CLI、实测评测数据、已知限制、安全与隐私、开发、文档、许可）<br>`$ grep -E '^[\|] \*\*S[1-4]\*\*' README.md`<br>`\| **S1** \| 检索本身有效：Success@5 \| ≥ 0.80 \| **0.433**（30 条，95% CI [0.274, 0.608]） \| ❌ \|`<br>`\| **S2** \| 排序质量：MRR \| ≥ 0.60 \| **0.313** \| ❌ \|`<br>`\| **S3** \| 端到端有提升（有检索 vs 无检索） \| ≥ +10pp \| **+59.0pp**（0.308 → 0.897） \| ✅ \|`<br>`\| **S4** \| 成本：单次返回 token 中位数 \| ≤ 4000 \| **2492** \| ✅ \|`<br>（S1–S4 全部为实测数字；另有分层指标表、L2 A/B 表与失败归因） | `d5c6f84`, `ca51c5f` | 补全 README 全部章节；此后 `a33c44e` 对齐了 4 处过期陈述。**此前未列入 §6.7 是历史遗漏**，本行按用户指示补记。**后续 `ca51c5f`**（用户指示）：在**靠前位置**新增「装上去能带来什么（冒烟测试实测）」章节——数据取自已入库的冒烟运行 `eval/runs/a-smoke` / `b-smoke` / `gate-smoke.md`（13 条 × 1 次：A 4/13 = 0.308 → B 10/13 = 0.769，**+46.2pp、0 回归**；`locate` 0/4→3/4、`crossfile` 0/5→3/5、`regression`/`negative` 保持 2/2 不变差），并如实标注"冒烟级小样本、不回答排序准不准"、指向完整 3-trial L2 与 L1；同时改掉 `T4-02` 造成过期的陈述（M4 状态行、`cordis.patch.yml` 的"将来的分发 patch"、安装注意块、"尚未打包"限制）并补全文档表（新增 `ADR-15` 与 `docs/m4-bundle.md`）。**证据命令改为与行号无关**：用 `grep -E '^[|] \*\*S[1-4]\*\*'` 而不是 `sed -n 'A,Bp'`——每次在 README 前面插内容都会让硬编码行号失效并打印出错误的行 |
 | **T4-06** | 已完成 | 人工审阅（README 新增 `### 安装故障排查`：pnpm 10+ 的 `allowBuilds` 报错原文、登记失败的自查方法、以及 pnpm 缺失 / 解释器路径 / PEP 668 / 缺 FTS5 几类现象与对策）<br>**干净 profile 实测**（全新 `DSH_HOME`，profile `clean-test` 此前不存在）：<br>`$ rm -rf /tmp/dsh-coderag-t4-06 && DSH_HOME=/tmp/dsh-coderag-t4-06 ./scripts/dsh plugin --profile clean-test add .`<br>`dsh: initialized profile clean-test at /tmp/dsh-coderag-t4-06/profiles/clean-test`<br>`Already up to date`<br>`dependencies:`<br>`+ dsh-coderag link:../../../../../Users/vermi/个人项目/python/dsh-coderag`<br>`Done in 5.3s using pnpm v12.4.2`（**rc=0**）<br>`$ … add . 2>&1 \| grep -iE "ERR_PNPM\|allowBuilds\|build script\|prepare"`<br>（**无匹配**，grep 退出码 1——四类关键字一个都没出现）<br>干净 profile 的 `pnpm-workspace.yaml` 只有 `packages:` / `nodeLinker: hoisted` / `autoInstallPeers: false`——**没有 `allowBuilds`**<br>`$ DSH_HOME=/tmp/dsh-coderag-t4-06 ./scripts/dsh --profile clean-test --dump-config \| grep -n -A6 '^# == dsh-coderag'`<br>`333:# == dsh-coderag`<br>`334:- id: mcp-coderag`<br>`335-  name: '@deepseek-ai/dsh-mcp-client'`<br>（rc=0，stderr 0 字节） | `59e77e7` | 新增 `docs/m4-install-verification.md`（方法、实际输出、坑本身、尚未验证部分；T4-08 会往同一文件追加端到端）。README 的新小节用 `###` 而非 `##`，以免改动 `grep -c '^## '` 这个 T4-05 证据。**核心结论**：干净 profile 首次 `add` **完全不需要 `allowBuilds`**——本 bundle 的 `package.json` 连 `scripts` 段都没有（`T4-01`），pnpm 没有可拒绝的东西，**C11/E-05 从根上不适用**；坑的文本仍写进 README，因为**别的**带 `prepare` 的 git 插件会踩它，而 `dsh plugin add` 在 pnpm 非零退出时**静默跳过 bundle 登记**，用户会误以为装了却没加载，所以文档给了 `--dump-config` 这条自查。**范围修正**：README 里"安装脚本（`T4-03`）还没做"与"无 `scripts/install.sh`"两处在 T4-03 落地后已过期，本任务一并改掉并指向 `bash scripts/install.sh` |
 | **T4-07** | 已完成 | `$ test -f LICENSE && test -f CHANGELOG.md && echo "两份文件都在"`<br>`两份文件都在`<br>`$ head -3 LICENSE`<br>`MIT License`<br>`（空行）`<br>`Copyright (c) 2026 Vermilion Pasvikin`<br>`$ grep -cE "Permission is hereby granted, free of charge\|The above copyright notice and this permission notice\|THE SOFTWARE IS PROVIDED" LICENSE`<br>`3`（MIT 三个必备条款都在）<br>`$ grep -cE "YEAR\|<name>\|placeholder\|TODO" LICENSE`<br>`0`（无占位符） | `101a51a` | `LICENSE` **在初始提交 `9ed8bcd` 时就是 MIT 全文**（年份 2026、版权人 `Vermilion Pasvikin`），本任务核实后**无需改动**——与 `T4-02` 的 `cordis.patch.yml` 同类情况。新增 `CHANGELOG.md`（Keep a Changelog 格式，`[0.1.0] - 2026-09-23`）：按「新增 / 安全」列出 4 个 MCP 工具、FTS5 + bigram 索引、三层安全过滤、声明感知分块、增量索引与自适应并发、顺序保持检索、bundle 与安装脚本、L1 + L2 评测；并写明**尚未发布到 PyPI/npm**、**不含向量**（指向 `ADR-15`）。**范围修正**（README 由本任务造成的过期陈述）：M4 状态行改为"只差 `T4-08`"；「已知限制」里"无 `CHANGELOG.md`"删掉；文档表补 `CHANGELOG.md` 一行 |
 | **T4-08** | 已完成 | **M4 出口判据**。全新 `DSH_HOME=/tmp/dsh-coderag-t4-08` + 全新 profile `clean-test`（此前不存在）：<br>`$ DSH_HOME=/tmp/dsh-coderag-t4-08 ./scripts/dsh plugin --profile clean-test add .`<br>`dsh: initialized profile clean-test at /tmp/dsh-coderag-t4-08/profiles/clean-test`<br>`+ dsh-coderag link:../../../../../Users/vermi/个人项目/python/dsh-coderag`<br>`Done in 31ms using pnpm v12.4.2`（rc=0）<br>零状态工作区：`rsync --exclude .coderag examples/demo-workspace/ /tmp/dsh-coderag-t4-08-ws/`（**无任何索引**）<br>用 `--dump-config` 里那一行**原样**启动子进程（`/opt/anaconda3/envs/forBSH/bin/python -c 'import dsh_coderag.server as s; s.run()'`，工作区走 `config.env` 的 `CODERAG_ROOT`），在 stdin/stdout 上说换行分隔 JSON-RPC：<br>`<<< serverInfo {"name":"coderag","version":"0.1.0"}`<br>`--- tools --- ['code_search', 'code_outline', 'code_index', 'index_status']`<br>`code_index -> {"taskId": "idx-20260923-5fc3", "state": "pending"}`<br>`index_status -> running -> {"state": "ready", "total_files": 3, "total_chunks": 7}`<br>`code_search("用户令牌在哪里校验") ->`<br>`status: ready`<br>`hits: 1 (sorted by source order)`<br>`── src/auth/token.py:1-6  [module]  (chunk 0)`<br>（4 次 `tools/call` 的 `isError` 全为 `false`；子进程退出码 `0`；stderr 仅 2 行 JSON-Lines 日志，stdout 每一行都是合法 JSON-RPC） | `ab94dcf` | 把 `docs/m4-install-verification.md` 第 5 节写成 T4-08 的端到端记录（方法 / 原始报文 / stderr 日志 / **这次不覆盖什么**）。**驱动不经过模型**：用 stdlib 直接说 JSON-RPC，所以它证明的是"装完之后工具真的可用、返回结构化结果"，**不**证明"模型会用得好"（后者是 L2 A/B）。**命中是易例**：`用户令牌在哪里校验` 与 demo 工作区 `token.py` 的 docstring 有 bigram 重叠，属"有词法线索"；**纯中文自然语言在大仓库上仍是 `S@5 = 0.000`**（L1 `natural` 桶），文档明确写了这条限制不因本任务改变。探针脚本事后**不留在仓库**（本任务产出文件只列文档），启动方式与协议报文都记进文档以便复现。**范围修正**（README 由本任务造成的过期陈述）：M4 状态行改为"出口判据已通过，剩 `T4-09`/`T4-10`"；安装注意块与「已知限制」不再说"干净 profile 未验证"，只保留"registry 安装未验证"；文档表描述同步 |
 | **T4-09** | 已完成 | 验收命令是「浏览器确认 / topic 已加」。**用 GitHub API 核实**（topic 发现页会滞后，仓库的 topic 列表才是这个任务的确切目标）：<br>`$ curl -s https://api.github.com/repos/VermilionPasvikin/dsh-coderag/topics`<br>`{"names":["dsh-plugins","mcp","python","rag","vibe-coding","dsh-plugin"]}`<br>`$ curl -s https://api.github.com/repos/VermilionPasvikin/dsh-coderag`<br>`"topics":["dsh-plugin","dsh-plugins","mcp","python","rag","vibe-coding"]`（两个端点一致）<br>DSH 官方 README 第 46 行要求的正是**单数** `dsh-plugin`：<br>`- Add the [dsh-plugin](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.` | —（本任务无仓库改动，仅 GitHub 仓库设置） | **由用户执行**（Agent 无仓库写权限）。**第一次加的是 `dsh-plugins`（复数），不满足官方要求**——我用 API 核实后报告，用户随即补上单数形式，本行证据是**补好之后**重新验的两次 API 返回。`README.md` 除 M4 状态行外无需改动（M4 状态行已由"剩 `T4-09`/`T4-10`"改为**已完成**） |
-| **T4-10** | 已完成 | 验收命令是「人工对照代码审阅 / 无过时描述」，审阅方法：抽出 `AGENTS.md` 里**所有可核对的声明**（章节引用、文件路径、工具可用性、分支、scope 列表），逐条对**已安装的 DSH 包**与**本仓库代码**核对，并用 AST 统计编码规范的实际符合度。<br>实际测量：<br>`C-09 缺 future import 的模块: 无`<br>`C-03 裸 except: 无`<br>`C-04 超过 50 行的函数: 12`（最长 `indexer.index_sync` 99 行）<br>`C-02 的 pydocstyle: No module named pydocstyle`<br>`C-07 Windows 风格路径测试: 无命中`<br>`git branch -a → 只有 main`<br>`AGENTS 的 §引用全部存在（§1.3/§2.3/§2.4/§3.4–3.7/§4.3.1/§5.3.1/§6.6…）`<br>新增 `docs/architecture.md`（222 行）；修正 AGENTS 5 处 | `6c7335b` | 新增 **`docs/architecture.md`**：运行时形态（DSH 如何拉起、为什么用 `-c`）、模块表与**用真实 import 图核对过的**依赖方向、索引/检索数据流、5 张表的数据模型、工具契约、安全模型、异步与上限、可观测性、评测分层、非目标。**AGENTS.md 修正 5 处**：① C-02 的检查方式（`pydocstyle` **未安装**、`ruff` 的 `D` 规则也未开 → 改为"只靠人看"）；② C-04 标注**当前未达标**（12 个函数 > 50 行，规则不放宽）；③ C-07 标注**当前未达标**（6 处 `as_posix()` 合规，但零 Windows 路径测试）；④ §7.1 的 scope 列表补齐（原表漏了 `types`/`parser`/`text`/`sanitize`/`sqlite_caps`/`log`，以及实际在用的 `bundle`/`install`/`adr`/`repo`/`readme`/`project`/`testing`/`cases`）；⑤ §7.3 分支改为实情（**只有 `main`**，M1–M4 都没开里程碑分支）。另新增两条 backlog 欠账（C-04 / C-07），修掉 `PROJECT.md` §3.4 里"`eval` **当前未创建**"与"`render` 被 M3 的 eval 调用"两处过期陈述，并把 eval 的依赖改成实测值（`runner`→searcher；`attribute`→indexer/walker/text）。**核实教训**：核查 DSH 侧引用必须读**已安装的包**——E-04 引的 `tool-cordis/README.md` 第 182 行在安装版里属实，但本机 `~/projects/dsh` 参考副本较旧（只有 76 行），一度被我误判为错误引用；已把这条写进 E-04 的依据格 |
+| **T4-10** | 已完成 | 验收命令是「人工对照代码审阅 / 无过时描述」，审阅方法：抽出 `AGENTS.md` 里**所有可核对的声明**（章节引用、文件路径、工具可用性、分支、scope 列表），逐条对**已安装的 DSH 包**与**本仓库代码**核对，并用 AST 统计编码规范的实际符合度。<br>实际测量：<br>`C-09 缺 future import 的模块: 无`<br>`C-03 裸 except: 无`<br>`C-04 超过 50 行的函数: 12`（最长 `indexer.index_sync` 99 行）<br>`C-02 的 pydocstyle: No module named pydocstyle`<br>`C-07 Windows 风格路径测试: 无命中`<br>`git branch -a → 只有 main`<br>`AGENTS 的 §引用全部存在（§1.3/§2.3/§2.4/§3.4–3.7/§4.3.1/§5.3.1/§6.7…）`<br>新增 `docs/architecture.md`（222 行）；修正 AGENTS 5 处 | `6c7335b` | 新增 **`docs/architecture.md`**：运行时形态（DSH 如何拉起、为什么用 `-c`）、模块表与**用真实 import 图核对过的**依赖方向、索引/检索数据流、5 张表的数据模型、工具契约、安全模型、异步与上限、可观测性、评测分层、非目标。**AGENTS.md 修正 5 处**：① C-02 的检查方式（`pydocstyle` **未安装**、`ruff` 的 `D` 规则也未开 → 改为"只靠人看"）；② C-04 标注**当前未达标**（12 个函数 > 50 行，规则不放宽）；③ C-07 标注**当前未达标**（6 处 `as_posix()` 合规，但零 Windows 路径测试）；④ §7.1 的 scope 列表补齐（原表漏了 `types`/`parser`/`text`/`sanitize`/`sqlite_caps`/`log`，以及实际在用的 `bundle`/`install`/`adr`/`repo`/`readme`/`project`/`testing`/`cases`）；⑤ §7.3 分支改为实情（**只有 `main`**，M1–M4 都没开里程碑分支）。另新增两条 backlog 欠账（C-04 / C-07），修掉 `PROJECT.md` §3.4 里"`eval` **当前未创建**"与"`render` 被 M3 的 eval 调用"两处过期陈述，并把 eval 的依赖改成实测值（`runner`→searcher；`attribute`→indexer/walker/text）。**核实教训**：核查 DSH 侧引用必须读**已安装的包**——E-04 引的 `tool-cordis/README.md` 第 182 行在安装版里属实，但本机 `~/projects/dsh` 参考副本较旧（只有 76 行），一度被我误判为错误引用；已把这条写进 E-04 的依据格 |
 
 ---
 
-### 6.7 覆盖矩阵（**完备性的可验证形式**）
+### 6.8 覆盖矩阵（**完备性的可验证形式**）
 
 > **为什么需要这张表**：覆盖关系**不能自动推断**。例如红线 RL-01（"禁止修改 DSH 文件"）约束的是**所有**任务，不会被任何一个任务"引用"；而 ADR-07（中文分词）则由 `T1-06` 和 `T2-19` 具体落地。
 > 本表把每条定义**显式**映射到"由谁强制"，然后由 `scripts/verify-plan.py` 反向验证**这张表自身完整且引用有效**。
@@ -1475,7 +1530,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：19 
 |---|---|---|
 | **A** | `A1`–`A6` | `EVAL.md` §6 与任务表的漂移：标题匹配、ID 提取、解析失败与空集区分、权威版本声明、孤立 ID、合并声明 |
 | **B** | `B1`–`B8` | 覆盖矩阵：ADR/C/RL/S/D 五类覆盖、数量下限、虚构键、重复键、`—` 说明、强制点格式、全局行 |
-| **C** | `C-DEP` / `C-CYCLE` / `C1` / `C3` / `C4` / `C5` | 依赖存在性、无环、重复 ID、自依赖、依赖格式、§6.5 图与表同步 |
+| **C** | `C-DEP` / `C-CYCLE` / `C1` / `C3` / `C4` / `C5` | 依赖存在性、无环、重复 ID、自依赖、依赖格式、§6.6 图与表同步 |
 | **D** | `D1`–`D3` | 唯一根 = `T1-01`；所有任务可达根；根自身无依赖 |
 | **E** | `E1`–`E4` | `TESTING.md` 必测清单 M1–M10 的任务映射、`AGENTS.md` §5.2 的 T-01–T-08 |
 | **F** | `F4` | 各类数量的下限阈值（防止"解析为 0 也算通过"） |
@@ -1484,7 +1539,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：19 
 
 > **为什么需要变异测试**：一个只会说"通过"的校验器毫无价值。上面的 28 项绿灯，只有在证明它们**在坏数据上会变红**之后才有意义。
 >
-> 更新计划后请**两个都跑**。改动任务表后如果 `C5` 失败，用 `python3 scripts/verify-plan.py . --emit-graph` 重新生成 §6.5。
+> 更新计划后请**两个都跑**。改动任务表后如果 `C5` 失败，用 `python3 scripts/verify-plan.py . --emit-graph` 重新生成 §6.6。
 
 
 
