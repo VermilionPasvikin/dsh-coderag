@@ -74,6 +74,7 @@
 | **M8** | **容量上限显式失败** | RL-08：静默截断会让用户以为索引完整 | L1 | T2-11 |
 | **M9** | **模型可见文本快照** | 工具描述/返回格式是稳定契约 | L2 | T1-09 |
 | **M10** | **异常不冒泡** | RL-09：内部异常必须转成结构化状态 | L2 | T1-13 |
+| **M11** | **可选后端默认关闭且未配置时回退** | `RL-10` / `ADR-16` §2：向量是 opt-in——**未配置时必须与纯 BM25 逐条一致**，后端不可用/非 loopback/模型缺失时必须**干净回退**而不是报错或返回空列表（`RL-06`/`RL-09`）。**这条测试必须在无网络、无 Ollama 的条件下通过**（`T-02`，见 §3.12） | L1+L2 | T3-08, T3-09, T3-10, T3-11, T5-15 |
 
 ---
 
@@ -592,6 +593,58 @@ def test_stopwords_are_searchable(indexed_fixture, word):
 
 ---
 
+### 3.12 可选后端：默认关闭与干净回退（M11）
+
+`RL-10` 把"可选"写成了红线，所以这一条**不是可选的**。关键洞察：**它绝大多数用例本来就不需要后端**——"默认关闭"与"后端不可用"两件事都可以在**无网络、无 Ollama** 的机器上测（`T-02`）。
+
+**第一组：默认关闭**（不需要任何 mock）
+
+```python
+def test_semantic_backend_is_off_by_default(tmp_path, monkeypatch):
+    """M11 / RL-10：未配置 CODERAG_SEMANTIC 时不得触碰网络，也不得 import numpy。
+
+    断言的是"与纯 BM25 逐条一致"（成功标准 S6），而不是某个状态字段。
+    """
+    monkeypatch.delenv("CODERAG_SEMANTIC", raising=False)
+    # 建索引 → 检索 → 与基线逐条比较：条数 / 路径 / 行号 / 顺序
+    # 另断言：sys.modules 里没有 numpy（未装 extra 时也必须成立）
+```
+
+**第二组：开关打开但后端不可用**（把 URL 指向必定连不上的 loopback 端口，于是不需要 Ollama、也不需要网络）
+
+```python
+def test_unreachable_backend_falls_back_to_bm25(tmp_path, monkeypatch):
+    """M11 / ADR-16 §2/§6：后端不可用 → 干净回退，不是 error、也不是空列表。"""
+    monkeypatch.setenv("CODERAG_SEMANTIC", "on")
+    monkeypatch.setenv("CODERAG_SEMANTIC_URL", "http://127.0.0.1:1")
+    # 1) 逐条结果与"关闭时"完全一致（这是"干净回退"的定义，见 ADR-16 §2）
+    # 2) 结构化状态里带 SEMANTIC_BACKEND_UNAVAILABLE
+    # 3) 不 isError、不返回空列表（RL-06/RL-09）
+```
+
+**第三组：非 loopback 必须被拒绝**（安全拒绝，`ADR-16` §6/§8）
+
+```python
+def test_non_loopback_url_is_refused(tmp_path, monkeypatch):
+    """M11 / ADR-16 §8.1：这是"别把用户代码发给远端"的最后一道闸。"""
+    monkeypatch.setenv("CODERAG_SEMANTIC", "on")
+    monkeypatch.setenv("CODERAG_SEMANTIC_URL", "http://10.0.0.5:11434")
+    # → SEMANTIC_BACKEND_NOT_LOCAL，并回退 BM25
+```
+
+**不许这样测**（会同时破坏 `T-02` 与结论的有效性）：
+
+| 反例 | 为什么不行 |
+|---|---|
+| 真起一个 Ollama，或 mock 一个"能返回向量"的 HTTP 服务 | 前两组根本不需要它；一旦需要，"默认关闭"与"不可用回退"这两件事就被掩盖了 |
+| 只断言 `status != "error"` | 太弱。回退的**定义**是"逐条与纯 BM25 一致"，必须比结果，不是比状态字段 |
+| 只断言 `isError is False` | `RL-06` 的另一半是**不能返回空列表**——两个都要断言 |
+| 断言"调用了 embedding 接口" | 那是**启用**路径的测试，属"后端可用"那组；本组反着来 |
+
+> **实现顺序提醒**：`SEMANTIC_*` 这些 code 目前**还没进** `ErrorCode`（`ADR-16` §6 已写明这是契约先行，登记由 `T3-08`–`T3-11` 完成）。所以上面第二、三组用例在 `T3-10` 之前会**因为 code 不存在而红**——这不是测试写错了，而是它正确地指向了尚未实现的契约。
+
+---
+
 ## 4. 测试基础设施
 
 ### 4.1 `conftest.py` 骨架
@@ -858,11 +911,11 @@ jobs:
   → 异步操作用轮询，不用 sleep
   → 不用 LLM，不用网络
 
-必须有的十类测试：
+必须有的十一类测试：
   M1 安全过滤（硬门禁）  M2 中文分词对称性   M3 状态契约
   M4 stdout 洁净        M5 检索质量         M6 分块完整性
   M7 顺序保持           M8 容量上限失败      M9 文本快照
-  M10 异常不冒泡
+  M10 异常不冒泡        M11 可选后端默认关闭/干净回退（离线可测）
 
 CI 三条门禁：
   ruff check  |  mypy --strict src  |  pytest -q
