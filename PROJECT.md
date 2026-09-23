@@ -14,7 +14,7 @@
 | MCP `serverName` | `coderag` | `cordis.patch.yml` 的 `config.serverName`；工具在模型侧的名字是 **`mcp__coderag__code_search`** |
 | 索引数据目录 | `.coderag/` | `<工作区根>/.coderag/index.sqlite3` |
 | 项目忽略文件 | `.coderagignore` | 工作区根 |
-| 环境变量 | `CODERAG_*` | `CODERAG_ROOT` / `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_PYTHON` |
+| 环境变量 | `CODERAG_*` | `CODERAG_ROOT` / `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_PYTHON`；可选向量后端另用 `CODERAG_SEMANTIC`（开关，默认未设=关闭）/ `_BACKEND` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS`（命名与默认值冻结于 `ADR-16` §4），安装侧开关为 `CODERAG_WITH_SEMANTIC` |
 | 开发用 DSH profile | `coderag-dev` | 本地开发，**不要用 `web`** |
 | 评测用 DSH profile | `eval-coderag` / `eval-baseline` | A/B 对照 |
 
@@ -647,6 +647,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
 | **ADR-13** | **标点/短符号查询不做 FTS，显式路由到 `grep`**，并返回结构化提示 | 本机实测：`(`、`::`、`->` 在 `unicode61`/`trigram`/`porter` 三档下**全部无法 MATCH**；换 tokenizer 解决不了。而 DSH 已提供 ripgrep 后端的 `grep` | 换 trigram tokenizer（实测无效）；自建全表 `LIKE` 扫描（比 grep 慢，负收益） |
 | **ADR-14** | **R2 命中：引入向量检索**——词法为底，本地 `bge-m3` embedding + RRF（k=60）**只做补齐、不替换** | 30 条 L1 实测：exact `S@5 = 1.000`（词法对标识符已满分），crossfile `0.091`、natural `0.000`；17 条失败中 **16 条是 `A5`（零词法重叠）**。`S@5 = 0.433 < 0.80` 且 `natural` 的 A5 占比 `1.0 ≥ 50%`，R2 两项条件同时成立；且此前已按 §2.8 的但书修完 A1（T3-13）与 A4（T3-14）。完整证据与限制见 `docs/adr/ADR-14-semantic-retrieval.md` | 全面替换为向量（exact 已满分，替换只会回退）；在修完 A1/A4 前就上向量（`EVAL.md` §2.9 陷阱 8） |
 | **ADR-15** | **暂缓语义检索**：v1 不含向量，`T3-08`–`T3-11` **暂缓**；后续版本以**可选后端**引入（**默认关闭**、未配置时退回纯 BM25） | 端到端 S3 已由纯词法 + 采纳率修复达成（0.308 → 0.897，**+59.0pp**），且**调用了工具的 31 个 attempt 里只失败 1 个**、残余失败无一条归因排序；分块修复实验 S1/S2 **逐条零变化**（失败全在 `A5` 词表）；而向量要求用户装 Ollama + 1.2 GB 模型 + 首次索引几十分钟，与 v1"一条命令安装"冲突。完整依据与**重启条件**见 `docs/adr/ADR-15-defer-semantic-retrieval.md` | 以 S1/S2 未达标为由在 v1 就引入向量（部署门槛与发布目标冲突）；把"暂缓"读成"撤销 R2 结论"（R2 事实判断仍成立） |
+| **ADR-16** | **向量作为可选后端（2.0.0）**：默认关闭 + opt-in、未配置时**输出与 1.0.0 逐字节一致**、RRF(k=60) 只补齐不替换、后端为**本地 Ollama + `bge-m3`**、依赖冻结为 extra **`semantic`（只有 numpy，用 stdlib `urllib` 不引入 httpx、不引入向量库）**、向量索引落在 **`<root>/.coderag/vectors/`**（`S-03`）、失败一律结构化状态并回退 BM25（不 `isError`、不空列表）、发布服从 `ADR-14` §10.4 的 V1–V4（V3 用 **α = 0.025**，V4：C 不显著优于 B 就不发布），且**探针 `T5-14` 先行、由数据给 go/no-go** | `ADR-15` §3 的重启条件逐条兑现；本地后端是为了满足 `S-01`（默认不联网）与 `S-02`（不外发数据）——云端 embedding 需要 key 且会把代码发出机器；`numpy` 只进 extra 是为了 `RL-10`（改写后）的"不得进入必需依赖"；探针先行是因为在没有上限数据前全量实施是过早优化。完整条文见 `docs/adr/ADR-16-optional-vector-backend.md` | 默认开启或默认安装向量依赖（把"可选"做成"必需"）；云端 embedding；引入向量数据库（≤10 万 chunk 用暴力余弦足够）；把向量做成**替换**而非补齐（exact 已满分，替换只会回退）；跳过探针直接全量实施 |
 
 ---
 
@@ -1496,6 +1497,7 @@ T5-17  ← T5-13, T5-16
 | ADR-13 | T2-19 | 标点/短符号查询路由到 `grep`，不做全表 `LIKE` |
 | ADR-14 | T3-07, T3-08, T3-09, T3-10, T3-11 | R2 命中：词法为底 + 向量补齐自然语言查询；执行由已重启的 `T3-08`–`T3-11` 落地，判据是 `ADR-14` §10.4 的 V1–V4 |
 | ADR-15 | T3-08, T3-11, T5-16 | **已重启为可选后端（2.0.0）**：默认关闭、未配置时干净退回纯 BM25、**不得进入必需依赖**；重启条件见 `ADR-15` §3，形态由 `ADR-16`（`T5-05`）冻结 |
+| ADR-16 | T3-08, T3-09, T3-10, T3-11, T5-15 | **可选后端的可验收形态（2.0.0）**：默认关闭 + opt-in、未配置时输出与 1.0.0 逐字节一致、extra 名 `semantic`（只有 numpy）/后端 `ollama`+`bge-m3`/索引落点 `<root>/.coderag/vectors/`/失败码 `SEMANTIC_*` 并回退 BM25；发布服从 `ADR-14` §10.4 的 V1–V4（V3 `α = 0.025`、V4 不显著优于 B 就不发布），探针 `T5-14` 先行 |
 | C1 | T1-12 | MCP 工具 60s 超时 → 索引必须异步 |
 | C2 | T1-14 | stdio 环境清洗 → key 必须走 `config.env` |
 | C3 | *全局* | preset `complete:true` 吞注入 → 本项目不做 prompt 注入（见 `AGENTS.md` E-03） |
