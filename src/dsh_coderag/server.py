@@ -303,7 +303,61 @@ def _code_index(arguments: dict[str, Any], root: Path) -> str:
     )
 
 
+def _no_index_status() -> str:
+    """Return the shared "no index for this workspace" error payload."""
+    return render_status(
+        SearchStatus.ERROR,
+        message="no index for this workspace",
+        code=ErrorCode.INDEX_NOT_FOUND,
+    )
+
+
+def _index_task_status(db_path: Path, task_id: str) -> str:
+    """Render one indexing task's persisted state (the task_id form)."""
+    if not db_path.exists():
+        return _no_index_status()
+    run = TaskManager(db_path).status(task_id)
+    return json.dumps(
+        {
+            "taskId": run.task_id,
+            "state": run.state,
+            "total_files": run.total_files,
+            "done_files": run.done_files,
+            "total_chunks": run.total_chunks,
+            "done_chunks": run.done_chunks,
+            "message": run.message,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _workspace_index_status(root: Path, db_path: Path) -> str:
+    """Render the workspace-wide index state (the no-task_id form)."""
+    if not db_path.exists():
+        return _no_index_status()
+    connection = open_index(db_path)
+    try:
+        row = connection.execute(
+            "SELECT ready, db_schema FROM workspace_index WHERE root = ?",
+            (str(root.resolve()),),
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None:
+        return _no_index_status()
+    skipped = walk_with_report(root).reasons
+    return json.dumps(
+        {
+            "status": "ready" if row[0] else "indexing",
+            "db_schema": row[1],
+            "skipped": {"count": sum(skipped.values()), "reasons": skipped},
+        },
+        ensure_ascii=False,
+    )
+
+
 def _index_status(arguments: dict[str, Any], root: Path) -> str:
+    """Dispatch index_status to the task form or the workspace form."""
     if not sqlite_caps.fts5_available():
         return render_status(
             SearchStatus.ERROR,
@@ -314,54 +368,8 @@ def _index_status(arguments: dict[str, Any], root: Path) -> str:
     db_path = root.resolve() / ".coderag" / "index.sqlite3"
     task_id = arguments.get("task_id")
     if isinstance(task_id, str) and task_id:
-        if not db_path.exists():
-            return render_status(
-                SearchStatus.ERROR,
-                message="no index for this workspace",
-                code=ErrorCode.INDEX_NOT_FOUND,
-            )
-        run = TaskManager(db_path).status(task_id)
-        return json.dumps(
-            {
-                "taskId": run.task_id,
-                "state": run.state,
-                "total_files": run.total_files,
-                "done_files": run.done_files,
-                "total_chunks": run.total_chunks,
-                "done_chunks": run.done_chunks,
-                "message": run.message,
-            },
-            ensure_ascii=False,
-        )
-    if not db_path.exists():
-        return render_status(
-            SearchStatus.ERROR,
-            message="no index for this workspace",
-            code=ErrorCode.INDEX_NOT_FOUND,
-        )
-    connection = open_index(db_path)
-    try:
-        row = connection.execute(
-            "SELECT ready, db_schema FROM workspace_index WHERE root = ?",
-            (str(root.resolve()),),
-        ).fetchone()
-    finally:
-        connection.close()
-    if row is None:
-        return render_status(
-            SearchStatus.ERROR,
-            message="no index for this workspace",
-            code=ErrorCode.INDEX_NOT_FOUND,
-        )
-    skipped = walk_with_report(root).reasons
-    return json.dumps(
-        {
-            "status": "ready" if row[0] else "indexing",
-            "db_schema": row[1],
-            "skipped": {"count": sum(skipped.values()), "reasons": skipped},
-        },
-        ensure_ascii=False,
-    )
+        return _index_task_status(db_path, task_id)
+    return _workspace_index_status(root, db_path)
 
 
 
