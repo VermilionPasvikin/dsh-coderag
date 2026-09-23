@@ -1208,17 +1208,17 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T3-05 | A 组基线：在 `eval-baseline` 组上跑（`EVAL.md` §3.3），产出基线报告 | `eval/runs/a-v1/` | `python scripts/ab_eval.py run --group eval-baseline ...` | 产出基线报告 | T3-00, T3-02a, T3-15, T3-16 | 2h |
 | T3-06 | B 组：在 `eval-coderag` 组上跑，产出对照报告 | `docs/eval-report-m3.md` | `python scripts/ab_eval.py run --group eval-coderag ...` | 报告含**分层指标 + 归因分布 + 逐条 diff** | T3-04d, T3-05, T3-13, T3-14 | 2h |
 | **T3-07** | **决策门 M3-DECIDE**：按 `EVAL.md` §2.8 的**精确 R2 条件**裁决（见下） | `docs/adr/ADR-14-semantic-retrieval.md` | 文档含明确结论 + 支撑数据 + 归因分布 | 三条规则之一被明确命中 | T3-06 | 1h |
-| T3-08 | **⏸ 暂缓（`ADR-15`；R2 条件已触发）** Ollama + `bge-m3`，实现 embedding 生成与缓存 | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 同一文本两次调用返回相同向量（缓存生效） | T3-07 = R2 | 3h |
-| T3-09 | **⏸ 暂缓（`ADR-15`）** 实现向量存储与暴力余弦检索（numpy，≤10 万 chunk 不引入向量库） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "vector_search" -q` | top-k 与暴力计算一致 | T3-08 | 2h |
-| T3-10 | **⏸ 暂缓（`ADR-15`）** 实现 RRF 融合（k=60，见 §5.3） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "rrf" -q` | 用已知输入验证融合分数 | T3-09 | 1.5h |
-| T3-11 | **⏸ 暂缓（`ADR-15`）** 跑 C 组（混合），与 B 组对比。**重启前须先更新验收命令**（现文本引用已废弃的 `dsh-eval-harness` API） | `docs/eval-report-m3c.md` | `eval_run(..., profile="eval-coderag-vector")` | 报告含三组对照表 | T3-10 | 2h |
+| T3-08 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现**可选** embedding 生成与缓存（后端、模型与 extra 名由 `ADR-16` 冻结）。**默认关闭**：未配置后端时本模块不得成为导入或启动的阻塞点 | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 同一文本两次调用返回相同向量（缓存生效）；未配置后端时模块可被安全导入且不联网 | T3-07, T5-14 | 3h |
+| T3-09 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现**可选**向量存储与暴力余弦检索（numpy；≤10 万 chunk 不引入向量库）。向量索引必须落在**工作区内**（`S-03`） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "vector_search" -q` | top-k 与暴力计算一致；索引路径不越出工作区 | T3-08 | 2h |
+| T3-10 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现 RRF 融合（k=60，见 §5.3），并把**未配置/不可用后端时的干净回退**接进 `searcher`（回退后逐条结果与纯 BM25 一致） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "rrf" -q` | 用已知输入验证融合分数；关闭后端时逐条结果与纯 BM25 完全相同 | T3-09 | 1.5h |
+| T3-11 | **🔁 已重启（`ADR-15` §3）** 跑 C 组（混合），与 B 组对比，按 `ADR-14` §10.4 的 **V1–V4** 判定是否发布向量路径（**V3 用 α = 0.025**，V4：C 不能显著优于 B 就不发布）。**验收命令已按 `ADR-15` §3.4 换成自建 runner**（原文本引用的 `dsh-eval-harness` API 已废弃） | `docs/eval-report-m3c.md` | `CODERAG_SEMANTIC=on python scripts/ab_eval.py run --cases cases --group eval-coderag-vector --out eval/runs/c-v1 --profile headless --patch cordis.patch.yml --workspace /tmp/dsh-coderag-t3-03-corpus --trials 3` | 报告含 A/B/C 三组对照表，且 V1–V4 逐条给出判定 | T3-10, T5-15 | 2h |
 | T3-12 | 回归门禁脚本：L1（pytest）+ L2（`eval_gate`）一键重跑 | `scripts/eval-gate.sh` | `bash scripts/eval-gate.sh` | 退出码 0/1；输出四项指标 + 回归条数 | T3-02b, T3-06 | 1h |
 | **T3-13** | **R3 的 A1 修复**：实现 §5.3.1 早已规定的**精度→召回降级**（精度模式 AND 落空时用 OR 重试一次） | `src/dsh_coderag/searcher.py`, `tests/test_cjk_recall.py` | `python -m pytest tests/test_cjk_recall.py -q` | M2 三条中文语义全绿；「标识符 + 中文」混合查询命中；两种模式都空时仍返回 `status: empty` | T3-04b | 1h |
 | **T3-14** | **R3 的 A4 修复**：落实 §3.3 第 3 步**结构化加分**——候选池放宽后按「测试路径降级 + `symbol_name` 完全匹配加权」重选 top-k（输出仍按源码顺序，ADR-05 不变） | `src/dsh_coderag/searcher.py`, `tests/test_ranking_signals.py` | `python -m pytest tests/test_ranking_signals.py -q` | 定义处不再被 `tests/`、`*.spec.*` 挤出 top-5；exact 桶 S@5 ≥ 0.90 | T3-04b | 2h |
 | **T3-15** | **L2 自建薄 runner**（`EVAL.md` §3.6 降级方案，因 T3-00 判定 harness 不兼容）：fork headless DSH、解析会话日志、执行 §3.4 断言、算 `pass@k`/`pass^k`、与基线做回归门禁 | `src/dsh_coderag/eval/ab.py`, `scripts/ab_eval.py`, `tests/test_ab_eval.py` | `python -m pytest tests/test_ab_eval.py -q` | 离线（无 API key、无网络）覆盖：会话日志解析、9 类断言、`pass@k`/`pass^k` 无偏估计、门禁回归条数；用**假 dsh** 跑通端到端 | T3-00 | 3h |
 | **T3-16** | **编写 L2 用例 12–15 条**：locate / crossfile / regression / negative 四桶；每条写出处与理由；答案文件必须在索引内（`credentials*` 被安全过滤，不得作答案） | `cases/*.json`, `tests/test_cases.py` | `python -m pytest tests/test_cases.py -q` | 13 条通过结构校验；设 `CODERAG_L2_CORPUS` 时答案文件全部在索引内 | T3-15 | 2h |
 
-> **⏸ `T3-08`–`T3-11` 已暂缓（`ADR-15`，2026-09-20）。** 它们的条件（`T3-07` = R2）**已经触发**，所以这是**显式推迟执行**，不是"未解锁"。**v1.0 不含向量**；后续版本以**可选后端**引入（**默认关闭**、未配置时退回纯 BM25）。重启前必须先跑"向量天花板探针"，并同时满足 `ADR-15` §3 的四条条件（含 `ADR-14` §10.4 的 V1–V4 判据）。**M3 因此视为"决策已闭合、执行已推迟"**。
+> **🔁 `T3-08`–`T3-11` 已重启（2026-09-23，属 M5）。** 它们曾在 `ADR-15`（2026-09-20）下**显式暂缓**；条件（`T3-07` = R2）当时就已触发，现在按 `ADR-15` §3 的**可选后端**形态恢复执行：**默认关闭 + opt-in，未配置时干净退回纯 BM25，且不得进入必需依赖**。实施前必须先跑**向量天花板探针**（`T5-14`，`ADR-15` §3.2），并由 `ADR-16`（`T5-05`）冻结后端与配置；发布与否服从 `ADR-14` §10.4 的 **V1–V4**（V4：C 组不能显著优于 B 组就不发布向量路径）。**M3 仍然是"决策已闭合"**：本次重启只改执行时机，不改 R2 的事实判断。
 
 **T3-07 的三条判定规则（事先写下，避免事后找理由）**
 
@@ -1266,7 +1266,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 - 实施前**必须先跑向量天花板探针**（`ADR-15` §3.2，见 `T5-14`）：用数据决定是否值得全量实施；
 - 是否发布向量路径服从 `ADR-14` §10.4 的 **V1–V4**（`V4`：C 组不能显著优于 B 组就不发布）。
 
-**下表 `T5-01`–`T5-13` 是「实现前的文档前置」**；`T5-14` 起见 6.5.1。
+**下表按两批排列**：`T5-01`–`T5-13` 是**实现前的文档前置**（全部依赖 `T5-05` 的 `ADR-16`），`T5-14`–`T5-17` 是**探针、安装收尾、冒烟与发布**；核心实现是已重启的 `T3-08`–`T3-11`。
 
 | ID | 任务 | 产出文件 | 验收命令 | 期望结果 | 依赖 | 估时 |
 |---|---|---|---|---|---|---|
@@ -1283,6 +1283,10 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T5-11 | 在 `TESTING.md` 的必测清单新增一条：**「可选后端默认关闭且未配置时回退」**（含"测试必须在无网络、无 Ollama 的条件下通过"的离线约束，`T-02`），并在「对应任务」列引用 `T3-08`–`T3-11` 与 `T5-15` | `TESTING.md` | `grep -c -e "默认关闭" -e "回退" TESTING.md` 再跑 `python3 scripts/verify-plan.py .` | 各 `≥1`；必测清单新增行被 `E2`/`E3`/`E4` 接受；门禁全绿 | T5-05 | 1h |
 | T5-12 | 对齐两份 ADR 的**执行状态**（`D-06`：写现状）：`ADR-14` 的"执行：暂缓"、`ADR-15` 的状态行/§1/§3/§5 标注为"已重启为可选后端（0.2.0）"，并保留各自的决策快照性质（不删原始理由） | `docs/adr/ADR-14-semantic-retrieval.md`, `docs/adr/ADR-15-defer-semantic-retrieval.md` | `grep -c -e "已重启" -e "执行中" docs/adr/ADR-14-semantic-retrieval.md docs/adr/ADR-15-defer-semantic-retrieval.md` 再跑 `python3 scripts/verify-plan.py .` | 两份合计 `≥2`；`ADR-15` 仍保留"暂缓"的历史理由；门禁全绿 | T5-05 | 1h |
 | T5-13 | 写 `README.md` 与 `docs/architecture.md` 的 **v0.2 说明骨架**（**不含版本号**，版本号属 `T5-17`）：README 新增"可选语义后端"小节（装法、开关、默认关闭、限制如何变化）、`## 已知限制` 里"纯中文自然语言不可用"改为"默认安装下不可用"；`docs/architecture.md` 的模块表与"不做什么"补可选后端路径 | `README.md`, `docs/architecture.md` | `grep -c "可选后端" README.md docs/architecture.md` 再跑 `python3 scripts/verify-plan.py .` | 两份合计 `≥2`；README 的安全声明仍在第一屏（`D-04`）；门禁全绿 | T5-05 | 1.5h |
+| T5-14 | 跑**向量天花板探针**（`ADR-15` §3.2）：用一次性脚本对 30 条 query + 全量 chunk 做 embedding，测 `natural` / `crossfile` 的 `S@5` / `MRR` **上限**，给出 go/no-go 结论。**结论决定 `T3-08` 是否继续**；探针脚本不进 `src/`（它不是生产路径） | `docs/m5-vector-probe.md` | `test -f docs/m5-vector-probe.md` 且 `grep -c -e natural -e crossfile -e "S@5" docs/m5-vector-probe.md` | 文件存在；四项指标各自可查；含明确的 go/no-go 结论与所用后端 / 模型 / 耗时 | T5-05 | 2h |
+| T5-15 | **可选安装的打包与配置收尾**：`pyproject.toml` 增加可选 extra（名字由 `ADR-16` 冻结，如 `semantic`）；默认 `dependencies` 保持**不含** numpy / httpx；`scripts/install.sh` 增加"装可选后端"的显式开关且默认不装；`cordis.patch.yml` 的 `config.env` 增加**关闭态**的向量配置；README 写清装法与开关 | `pyproject.toml`, `scripts/install.sh`, `cordis.patch.yml`, `README.md` | `python3 -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(sorted(d['project']['optional-dependencies']))"` 且 `grep -c CODERAG_WITH_SEMANTIC scripts/install.sh` | extra 出现；`dependencies` 不含 numpy / httpx；`install.sh` 默认路径不装任何向量依赖 | T3-10 | 2h |
+| T5-16 | **可选安装的端到端冒烟测试**（用户指定）：在**全新** `DSH_HOME` 与全新 profile 里跑三件事——（a）默认安装 → 确认没装任何向量依赖、检索逐条与 0.1.0 一致；（b）装可选 extra 并开启后端 → 在 `examples/demo-workspace` 的干净副本上跑通**一次真实语义检索**；（c）后端不可用时 → 返回结构化 `status` 且不报 `isError`（`RL-09`） | `docs/m4-install-verification.md` | `bash scripts/install.sh`（默认态）与 `CODERAG_WITH_SEMANTIC=1 bash scripts/install.sh`（可选态），两态各跑一次 `--dump-config` 与一次 MCP `tools/call` | 两次安装退出码都是 `0`；默认态的解释器里没有 numpy / httpx；可选态下 `code_search` 命中 demo 工作区的目标文件；后端不可用时是结构化状态而不是 `isError` | T5-15 | 2h |
+| T5-17 | **发布 v0.2.0**：版本号 `0.1.0` → `0.2.0`（`pyproject.toml`、`package.json`、README 的"当前版本"与示例输出、`docs/architecture.md` 的"实现版本"），`CHANGELOG.md` 增加 `[0.2.0]` 条目；并核对**发布范围**——默认安装没有新增任何必需的 embedding 依赖（`T5-05` 冻结的约束） | `pyproject.toml`, `package.json`, `CHANGELOG.md`, `README.md`, `docs/architecture.md` | `python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"` 且 `node -e "console.log(require('./package.json').version)"` | 两者都打印 `0.2.0`；`CHANGELOG.md` 含 `## [0.2.0]`；README / `docs/architecture.md` 的"当前版本"类字样已是 `0.2.0`（历史证据里的 `0.1.0` 保留不动） | T5-16, T5-13 | 1.5h |
 
 ---
 
@@ -1347,10 +1351,10 @@ T3-04d  ← T3-03
 T3-05  ← T3-00, T3-02a, T3-15, T3-16
 T3-06  ← T3-04d, T3-05, T3-13, T3-14
 T3-07  ← T3-06
-T3-08  ← T3-07
+T3-08  ← T3-07, T5-14
 T3-09  ← T3-08
 T3-10  ← T3-09
-T3-11  ← T3-10
+T3-11  ← T3-10, T5-15
 T3-12  ← T3-02b, T3-06
 T3-13  ← T3-04b
 T3-14  ← T3-04b
@@ -1379,6 +1383,10 @@ T5-10  ← T5-05
 T5-11  ← T5-05
 T5-12  ← T5-05
 T5-13  ← T5-05
+T5-14  ← T5-05
+T5-15  ← T3-10
+T5-16  ← T5-15
+T5-17  ← T5-13, T5-16
 ```
 
 ### 6.7 进度追踪表
@@ -1482,8 +1490,8 @@ T5-13  ← T5-05
 | ADR-11 | T2-10 | 并发度与批大小自适应，不硬编码 |
 | ADR-12 | T3-04 | 指标用 `Success@k`，不用 nDCG |
 | ADR-13 | T2-19 | 标点/短符号查询路由到 `grep`，不做全表 `LIKE` |
-| ADR-14 | T3-07 | R2 命中：词法为底 + 向量补齐自然语言查询 |
-| ADR-15 | T4-01, T4-03 | 暂缓语义检索：v1 不含向量，后续以**可选后端**引入（默认关闭、未配置退回 BM25）；重启条件见 `ADR-15` §3 |
+| ADR-14 | T3-07, T3-08, T3-09, T3-10, T3-11 | R2 命中：词法为底 + 向量补齐自然语言查询；执行由已重启的 `T3-08`–`T3-11` 落地，判据是 `ADR-14` §10.4 的 V1–V4 |
+| ADR-15 | T3-08, T3-11, T5-16 | **已重启为可选后端（0.2.0）**：默认关闭、未配置时干净退回纯 BM25、**不得进入必需依赖**；重启条件见 `ADR-15` §3，形态由 `ADR-16`（`T5-05`）冻结 |
 | C1 | T1-12 | MCP 工具 60s 超时 → 索引必须异步 |
 | C2 | T1-14 | stdio 环境清洗 → key 必须走 `config.env` |
 | C3 | *全局* | preset `complete:true` 吞注入 → 本项目不做 prompt 注入（见 `AGENTS.md` E-03） |
