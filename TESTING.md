@@ -99,11 +99,17 @@ tests/
 ├── test_security.py / test_skip_report.py
 ├── test_status_contract.py / test_server.py / test_render.py / test_outline.py
 ├── test_taskman.py / test_cancel.py / test_adaptive_concurrency.py / test_log.py
-├── test_tokenizer_semantics.py
-└── test_retrieval_quality.py      # M5（M3 规划，跑 eval/tasks.jsonl）
+├── test_tokenizer_semantics.py / test_cjk_recall.py     # 后者的 cjk_corpus 是 M2 精度/召回主落点（T3-13）
+├── test_eval.py / test_metrics.py / test_report_diff.py / test_golden_version.py
+├── test_eval_gate_cli.py / test_cases.py
+└── test_ab_eval.py                # L2 自建薄 runner（EVAL.md §3.6）
 
-（属性测试（M6/M8）位于 test_chunker_decl.py / test_too_many_files.py，未单独建 test_properties.py；
-  `cjk/` fixture 尚未创建，中文用例在 test_searcher.py / test_tokenizer_semantics.py 内用 tmp_path 自建。）
+（本树是**代表性命中，不是完整清单**——完整清单以 `tests/` 目录为准（当前 44 个 `test_*.py`）。
+  属性测试（Hypothesis）只在 test_chunker_decl.py 里，跑 M6 的两条不变式；M8 的 `TooManyFilesError`
+  在 test_too_many_files.py 里是**手写例子**，不是属性测试。**没有 test_properties.py。**
+  **没有 M5 专用的参数化测试文件**（1.0 版设计的那个名字对应一个从未创建的文件）：M5 的检索质量由 test_eval.py 等驱动 `eval/tasks.jsonl`
+  （§3.10），真实语料回放靠 `CODERAG_EVAL_CORPUS` 的 opt-in 用例。
+  也**没有 `tests/fixtures/cjk/`**：中文用例的 `cjk_corpus` fixture 建在 test_cjk_recall.py 里、用 `tmp_path`。）
 ```
 
 **`tests/fixtures/secrets/` 里放什么**（刻意构造，**内容必须是假的**）：
@@ -175,10 +181,17 @@ async def test_no_stdout_pollution_during_tool_call(capsys, client):
     assert captured.out == "", f"stdout 被污染: {captured.out!r}"
 ```
 
-**更严的版本**（子进程级，作为 L3 的一部分）：真实 spawn 一次 server，发 `initialize` + `tools/list`，然后断言 **stdout 的每一行都是合法 JSON-RPC**、且 **stderr 是合法的 JSON Lines 日志**：
+**更严的版本**（子进程级，已在默认套件里）：真实 spawn 一次 server，发 `initialize`，断言回答是合法 JSON-RPC。落点是 `tests/test_cwd_shadowing.py::test_launcher_serves_mcp_with_shadowing_modules_in_cwd`——它用 `cordis.patch.yml` 里那条**原样 argv** 起进程、在带同名标准库模块的工作区里完成一次 MCP 握手，因此同时覆盖了“启动方式正确”。**该用例不带 marker，默认 `pytest` 就会跑**（`pyproject.toml` 注册了 `e2e` marker，但当前没有用例使用它）。
+
+> **实测的覆盖现状**（不要以为子进程级那条已在守）：
+> - 进程内：`tests/test_server.py::test_no_stdout_pollution_during_tool_call` 用 `capsys` 断言工具调用期间 stdout 为空；
+>   `tests/test_log.py::test_index_writes_json_lines_to_stderr` 用 `capsys` 断言 stderr 是合法 JSON Lines。
+> - 子进程级：`test_cwd_shadowing.py` 那条只读**第一条**回答并断言 `result.serverInfo.name == "coderag"`，
+>   **不遍历全部 stdout、也不校验 stderr**。
+> - 所以"子进程里**每一行** stdout 都是合法 JSON-RPC"这条更强的断言**尚未落地**，下面是它的设计稿。
 
 ```python
-# tests/e2e/test_stdio_protocol.py
+# 示意（尚未实现）：把断言从"第一条合法"扩到"每一行都合法"
 def test_stdio_channel_is_clean():
     """L3：真实子进程，stdout 必须只含 JSON-RPC。"""
     proc = subprocess.Popen([sys.executable, "-m", "dsh_coderag.server"],
@@ -382,7 +395,7 @@ def test_latin_identifier_is_not_bigrammed():
 检索系统的**不变式**适合用属性测试——人工构造的例子永远不够全。
 
 ```python
-# tests/test_properties.py
+# 设计稿（完整形状；实际落点见下方「实际状态」）
 from hypothesis import given, strategies as st, settings
 
 @given(st.text(min_size=1, max_size=2000))
@@ -422,6 +435,13 @@ def test_file_limit_fails_loudly_never_truncates(paths, limit):
         walk_with_limit(paths, max_files=limit)
     assert exc.value.actual_count == len(paths)      # 必须带真实数量
 ```
+
+**实际状态**（`T5-02` 核对）：**没有 `test_properties.py`**，属性测试（Hypothesis）当前只落在
+`tests/test_chunker_decl.py`——上面 M6 的两条不变式已实现为 `test_chunker_never_loses_content`
+与 `test_chunker_never_overlaps`（输入字母表刻意避开 `str.splitlines()` 与 tree-sitter 行计数的
+分歧字符）。**M2 的 bigram 属性与 M8 的 `walk_with_limit` 属性尚未写成属性测试**；M8 现在由
+`tests/test_too_many_files.py` 的**手写例子**覆盖（断言 `TooManyFilesError` 带 `max_files` 与
+实际数量，即 RL-08 的"显式失败并报实际数量"）。
 
 **Hypothesis 的注意点**：
 
@@ -480,19 +500,29 @@ def fast_index_config():
 
 ### 3.10 检索质量测试（M5）
 
-见 `EVAL.md` §4.1。要点：
+见 `EVAL.md` §4.1。**实际落点不是一条"跑 golden 集"的参数化用例**，而是两组测试：
+
+| 组 | 落点 | 要不要真实语料 |
+|---|---|---|
+| golden 集的 schema / 判定 / 指标 / diff / 版本校验 | `tests/test_eval.py`、`test_metrics.py`、`test_report_diff.py`、`test_golden_version.py`、`test_eval_gate_cli.py` | 不要——`eval_corpus` fixture 自建小语料 |
+| 真实 30 条在**已索引语料副本**上回放 | `tests/test_eval.py::test_a_batch_runs_against_indexed_corpus`（**opt-in**） | 要——由 `CODERAG_EVAL_CORPUS` 指向 |
 
 ```python
-@pytest.mark.parametrize("task", load_tasks("eval/tasks.jsonl"), ids=lambda t: t["id"])
-def test_recall_at_5(task, indexed_eval_corpus):
-    result = search(indexed_eval_corpus, task["query"], k=5)
-    assert any(h.path in task["expect_paths"] for h in result.hits), (
-        f"{task['id']} ({task['class']}) 未命中。"
-        f"query={task['query']!r} 实际返回={[h.path for h in result.hits]}"
-    )
+# tests/test_eval.py（示意形状；真实实现见该文件）
+@pytest.fixture
+def eval_corpus(tmp_path: Path) -> Path:
+    """小语料 + 自建索引，默认套件保持离线自足（T-02/T-03）。"""
+    root = tmp_path / "corpus"
+    ...
+    index_sync(root)
+    return root
+
+def test_validate_accepts_wellformed_task(eval_corpus: Path, tmp_path: Path) -> None:
+    path = write_tasks(tmp_path / "tasks.jsonl", [task_payload()])
+    assert validate_tasks(load_tasks(path), eval_corpus) == []
 ```
 
-**注意**：`indexed_eval_corpus` 这个 fixture 会索引一个真实仓库，**必须缓存**（用固定路径的 SQLite + mtime 校验），否则每次 pytest 都要重建索引。
+**注意**：默认套件用的是 `eval_corpus` 这个 **`tmp_path` 小语料**，所以既不会因为评测语料变慢、也不依赖仓库外路径。真实语料的索引由**外部副本**承担（`CODERAG_EVAL_CORPUS` 指向一份预先 `index` 过的拷贝），**索引不进仓库**（`S-03`）。⚠️ 那条 opt-in 用例当前有一条已知欠账（仍断言 10 条），见 `docs/backlog.md` 与 `EVAL.md` §4.1。
 
 ### 3.11 分词器语义测试（**三条必测，且预期是"路由"行为**）
 
@@ -645,7 +675,7 @@ def fts5_available() -> bool:
 | 测试里 FTS5 不可用 | `pytest.skip("本环境 SQLite 未编译 FTS5")`，**不是 fail** |
 | `scripts/install.sh` | 启动时探测，不通过就**明确报错**而不是让用户后面撞墙 |
 
-`FTS5_UNAVAILABLE` 是 `PROJECT.md` §5.6 错误码表的新增项，**必须同步加进去**。
+`FTS5_UNAVAILABLE` 是 `PROJECT.md` §5.6 错误码表 10 个码之一（与 `ErrorCode` 枚举逐项一致），**早已同步加进去**，并已在 `sqlite_caps.py` / `searcher.py` / `indexer.py` / `server.py` 实现（见 `PROJECT.md` §6.7 的 `T1-03`、`T2-22` 两行）。
 
 @pytest.fixture
 def fast_index_config():
@@ -838,7 +868,9 @@ CI 三条门禁：
   ruff check  |  mypy --strict src  |  pytest -q
 
 什么不该做：
-  不追 100% 覆盖率 · 不做多平台矩阵 · 不把评测塞进 CI · 不为过测试改断言
+  不追 100% 覆盖率 · 不把评测塞进 CI · 不为过测试改断言
+
+多平台矩阵：按 §5.1 跑（3 OS × 2 Python）——本文件 1.0 版"第一版只跑 macOS"的建议已被推翻
 ```
 
 ---
