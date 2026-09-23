@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dsh-coderag"
-version = "0.1.0"
+version = "1.0.0"
 description = "Codebase retrieval engine for DeepSeek Harness, exposed over MCP"
 requires-python = ">=3.10,<3.13"
 license = "MIT"

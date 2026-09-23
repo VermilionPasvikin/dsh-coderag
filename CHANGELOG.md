@@ -5,9 +5,9 @@
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-23
+## [1.0.0] - 2026-09-23
 
-首个版本。仓库内 `pyproject.toml` 与 `package.json` 均为 `0.1.0`；**尚未发布到 PyPI 与 npm**。
+首个版本。仓库内 `pyproject.toml` 与 `package.json` 均为 `1.0.0`；**尚未发布到 PyPI 与 npm**。
 本版本**不含向量检索**——原因与重启条件见
 [`docs/adr/ADR-15-defer-semantic-retrieval.md`](docs/adr/ADR-15-defer-semantic-retrieval.md)。
 

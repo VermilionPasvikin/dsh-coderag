@@ -142,7 +142,7 @@ dsh-coderag/                      ← 仓库根
 
 | 安装路径 | 命令 | 为什么可行 |
 |---|---|---|
-| 本地开发 / tarball | `dsh plugin --profile <p> add .` 或 `add ./dsh-coderag-0.1.0.tgz` | bundle 清单在仓库根 |
+| 本地开发 / tarball | `dsh plugin --profile <p> add .` 或 `add ./dsh-coderag-1.0.0.tgz` | bundle 清单在仓库根 |
 | 从 GitHub 直装（最终目标） | `dsh plugin --profile <p> add github:<你>/dsh-coderag` | npm 包必须在仓库根，pnpm 才能识别 |
 | Python 引擎 | `pip install .` 或 `pip install dsh-coderag` | `pyproject.toml` 在仓库根 |
 
@@ -1080,7 +1080,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | **M2** | Day 3–4 | **检索质量**：tree-sitter 分块、安全过滤、增量索引、outline | 分块抽检 20 个无"半个函数"；`.env` 未被索引；二次索引耗时 < 首次的 20% |
 | **M3** | Day 5–6 | **评测与决策**：证明价值，决定是否上向量 | S1/S2/S4 达标；S3 有结论；决策门有明确裁决 |
 | **M4** | Day 7 | **可分发**：一条命令安装 | 在干净环境 `dsh plugin add` 成功并可用 |
-| **M5** | v0.2.0 | **向量可选后端**：默认关闭的 opt-in 语义检索，补齐 `natural` 桶 | `T5-17`：0.2.0 已发布；**默认路径与 0.1.0 逐条一致**；可选后端开启时 `natural` 桶达标（判据见 `ADR-16`） |
+| **M5** | v2.0.0 | **向量可选后端**：默认关闭的 opt-in 语义检索，补齐 `natural` 桶 | `T5-17`：2.0.0 已发布；**默认路径与 1.0.0 逐条一致**；可选后端开启时 `natural` 桶达标（判据见 `ADR-16`） |
 
 **任务编号规则**：`T<里程碑>-<序号>`，例如 `T1-03`。每个任务必须独立可验收。**带字母后缀的（如 `T3-02a`）是同一任务的批次拆分**，各自独立提交。
 
@@ -1254,13 +1254,13 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 
 ---
 
-### 6.5 M5 — 向量可选后端（v0.2.0）
+### 6.5 M5 — 向量可选后端（v2.0.0）
 
-**目标**：把「纯中文自然语言检索不可用」（L1 `natural` 桶 `S@5 = 0.000`，失败 100% 归因 `A5` 零词法重叠）这一已知短板，以**可选、默认关闭**的后端补齐；**默认路径与 `0.1.0` 逐条一致**。
+**目标**：把「纯中文自然语言检索不可用」（L1 `natural` 桶 `S@5 = 0.000`，失败 100% 归因 `A5` 零词法重叠）这一已知短板，以**可选、默认关闭**的后端补齐；**默认路径与 `1.0.0` 逐条一致**。
 
 **发布范围约束**（`ADR-15` §3；由 `T5-05` 的 `ADR-16` 冻结成可验收条文）：
 
-- **默认关闭 + opt-in**；未配置时**干净退回纯 BM25**，逐条结果与 0.1.0 一致；
+- **默认关闭 + opt-in**；未配置时**干净退回纯 BM25**，逐条结果与 1.0.0 一致；
 - **不得进入必需依赖**：`pyproject.toml` 的 `dependencies`、bundle 的 tarball、安装脚本的前置条件都不许出现 embedding 相关依赖；
 - 后端不可用或未配置时，工具必须返回**结构化状态**并继续以 BM25 工作（`RL-09`），**不得**变成 `isError` 或空列表（`RL-06`）；
 - 实施前**必须先跑向量天花板探针**（`ADR-15` §3.2，见 `T5-14`）：用数据决定是否值得全量实施；
@@ -1274,19 +1274,19 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T5-02 | 修 `TESTING.md` 的既有过期项：目录树里的 `test_retrieval_quality.py`（不存在）与 `tests/e2e/`（不存在）、属性测试落点（`test_too_many_files.py` 里没有 hypothesis）、中文用例落点漏了 `test_cjk_recall.py`、不存在的 `indexed_eval_corpus` fixture、`§8` 的"不做多平台矩阵"与 `§5.1` 的"跑多平台矩阵"冲突、`FTS5_UNAVAILABLE` 仍写"必须同步加进去"（已加） | `TESTING.md` | `grep -c -e test_retrieval_quality -e "tests/e2e/" -e indexed_eval_corpus TESTING.md`，再跑 `python3 scripts/verify-plan.py .` | 0 命中；`§5.1` 与 `§8` 对多平台矩阵的口径一致且只有一处结论；门禁全绿 | T4-10 | 1.5h |
 | T5-03 | 给 `ADR-14` 的三处决策时快照补**日期化后续状态**（`§7.1` 的"`S3` 未测量"、`§9` 的"未决前置：L2 runner 必须先自建"、`§9` 把已完成的 `T3-12` 仍列在"后续任务"）。**不改写历史结论**，加"后续更新"块说明现状（`D-06` 的边界：ADR 是快照，不是现状描述） | `docs/adr/ADR-14-semantic-retrieval.md` | `grep -c "后续更新" docs/adr/ADR-14-semantic-retrieval.md` | `≥3`（三处各一条），且每处写明日期与当时的实际结果 | T4-10 | 1h |
 | T5-04 | 给里程碑快照文档补**日期化后续状态**：`docs/m4-bundle.md` 的"干净 profile 端到端 ⏳ 属 `T4-08`"（`T4-08` 已完成）、`docs/m1-findings.md` 的"`path`/`max_tokens` 尚未生效（T2 范围）"与"召回模式属 T2-19"、`docs/m2-findings.md` 的"缺少精度/召回双模式"（均已在 T2-19/T3-13 落地） | `docs/m4-bundle.md`, `docs/m1-findings.md`, `docs/m2-findings.md` | `grep -c "后续状态" docs/m4-bundle.md docs/m1-findings.md docs/m2-findings.md` | 每份 `≥1`；同一份里同一主题只加一条汇总标注，不逐行改写 | T4-10 | 1h |
-| T5-05 | **立 `ADR-16`「向量作为可选后端」**并冻结可验收条文：形态（opt-in / 默认关闭 / 干净回退）、后端与依赖（本地 vs 云端、extra 名）、配置项与环境变量命名、向量索引落点（必须在工作区内，`S-03`）、失败模式与结构化状态、发布范围（0.2.0）、以及引用 `ADR-14` §10.4 的 V1–V4 与 `α = 0.025`。**必须与 `§3.7` ADR 表行、`§6.8` 覆盖矩阵行同一次提交**（`verify-plan` 的 `B1` 强制） | `docs/adr/ADR-16-optional-vector-backend.md`, `PROJECT.md` | `test -f docs/adr/ADR-16-optional-vector-backend.md`，`grep -c "^## " docs/adr/ADR-16-optional-vector-backend.md`，再跑 `python3 scripts/verify-plan.py .` | 文件存在；`≥6` 个二级小节；门禁全绿且 `ADR` 计数 `16`、`§6.8` 矩阵含 `ADR-16` 行 | T4-10 | 2h |
+| T5-05 | **立 `ADR-16`「向量作为可选后端」**并冻结可验收条文：形态（opt-in / 默认关闭 / 干净回退）、后端与依赖（本地 vs 云端、extra 名）、配置项与环境变量命名、向量索引落点（必须在工作区内，`S-03`）、失败模式与结构化状态、发布范围（2.0.0）、以及引用 `ADR-14` §10.4 的 V1–V4 与 `α = 0.025`。**必须与 `§3.7` ADR 表行、`§6.8` 覆盖矩阵行同一次提交**（`verify-plan` 的 `B1` 强制） | `docs/adr/ADR-16-optional-vector-backend.md`, `PROJECT.md` | `test -f docs/adr/ADR-16-optional-vector-backend.md`，`grep -c "^## " docs/adr/ADR-16-optional-vector-backend.md`，再跑 `python3 scripts/verify-plan.py .` | 文件存在；`≥6` 个二级小节；门禁全绿且 `ADR` 计数 `16`、`§6.8` 矩阵含 `ADR-16` 行 | T4-10 | 2h |
 | T5-06 | 按 `ADR-16` 对齐 `AGENTS.md` 的**红线与规范**：`RL-10` 从"决策门前禁止 embedding"改写为"**向量不得进入默认路径或必需依赖；未配置必须干净回退 BM25**"（旧红线的历史使命已由 `T3-07` 完成，见 `ADR-15` §4）；`§3.2` 的"不引入向量数据库（M3 决策前）"改为"不引入向量**数据库**，用 numpy 暴力余弦"；`S-01` 补"本地后端也不得默认启用"；同步 `§6.8` 的 `RL-10` 行 | `AGENTS.md`, `PROJECT.md` | `grep -n -e "禁止在 M3 决策门" -e "向量数据库（M3 决策前）" AGENTS.md`，再跑 `python3 scripts/verify-plan.py .` | 旧表述 0 命中；新表述含"默认路径/必需依赖"与"干净回退"；门禁全绿 | T5-05 | 1.5h |
-| T5-07 | 在 `PROJECT.md` §1.4 增加**向量模式的成功标准**（`S5`：可选后端开启时 `natural` 桶的 `S@5` 阈值；`S6`：默认路径零回归——未配置时逐条与 0.1.0 一致）。`S1`–`S4` **不得改名**（§1.4 已声明它们是稳定标识）；同步 `§6.8` 矩阵新增行 | `PROJECT.md` | `python3 scripts/verify-plan.py .` | 输出含 `成功标准 S*: 6 条全部在矩阵里`；门禁全绿 | T5-05 | 1h |
-| T5-08 | 对齐 `PROJECT.md` 的**分发形态与选型结论**：`§1.5`/`§1.6` 写清 0.2.0 的"默认安装不变 + 可选 extra"两段式安装；`§2.3`（"为什么第一版不做向量"）补 v0.2 的范围说明并指向 `ADR-16` | `PROJECT.md` | `grep -c "v0.2" PROJECT.md` 再跑 `python3 scripts/verify-plan.py .` | `≥3`；门禁全绿 | T5-05 | 1.5h |
-| T5-09 | 对齐 `PROJECT.md` 的**数据模型、依赖与检索路径**：`§3.6` 的"预留的向量表（M3 决策通过后才创建）"改为 v0.2 可选后端的口径；`§4.2` 的"可选（M3 决策通过后才加）"改为 0.2.0 的 extra 名与安装方式；`§5.3` 的向量/RRF 段落标注为"**可选后端路径**"而非默认路径 | `PROJECT.md` | `grep -c "可选后端" PROJECT.md` 再跑 `python3 scripts/verify-plan.py .` | `≥3`；三处均明确"默认关闭"；门禁全绿 | T5-05 | 1.5h |
+| T5-07 | 在 `PROJECT.md` §1.4 增加**向量模式的成功标准**（`S5`：可选后端开启时 `natural` 桶的 `S@5` 阈值；`S6`：默认路径零回归——未配置时逐条与 1.0.0 一致）。`S1`–`S4` **不得改名**（§1.4 已声明它们是稳定标识）；同步 `§6.8` 矩阵新增行 | `PROJECT.md` | `python3 scripts/verify-plan.py .` | 输出含 `成功标准 S*: 6 条全部在矩阵里`；门禁全绿 | T5-05 | 1h |
+| T5-08 | 对齐 `PROJECT.md` 的**分发形态与选型结论**：`§1.5`/`§1.6` 写清 2.0.0 的"默认安装不变 + 可选 extra"两段式安装；`§2.3`（"为什么第一版不做向量"）补 v2.0 的范围说明并指向 `ADR-16` | `PROJECT.md` | `grep -c "v2.0" PROJECT.md` 再跑 `python3 scripts/verify-plan.py .` | `≥3`；门禁全绿 | T5-05 | 1.5h |
+| T5-09 | 对齐 `PROJECT.md` 的**数据模型、依赖与检索路径**：`§3.6` 的"预留的向量表（M3 决策通过后才创建）"改为 v2.0 可选后端的口径；`§4.2` 的"可选（M3 决策通过后才加）"改为 2.0.0 的 extra 名与安装方式；`§5.3` 的向量/RRF 段落标注为"**可选后端路径**"而非默认路径 | `PROJECT.md` | `grep -c "可选后端" PROJECT.md` 再跑 `python3 scripts/verify-plan.py .` | `≥3`；三处均明确"默认关闭"；门禁全绿 | T5-05 | 1.5h |
 | T5-10 | 在 `EVAL.md` 把 **C 组（混合）与天花板探针写成可执行方法**：C 组的 profile/env 开关、配对方式、`α = 0.025` 的第二轮口径、`scripts/ab_eval.py run --patch <vector patch>` 的命令形态，以及 `ADR-14` §10.4 的 `V1`–`V4` 逐条落到可判定的断言 | `EVAL.md` | `grep -c -e "C 组" -e "天花板探针" -e "0.025" EVAL.md` 再跑 `python3 scripts/verify-plan.py .` | 三项各自 `≥1`；`V1`–`V4` 每条都有对应的判定命令；门禁全绿 | T5-05 | 1.5h |
 | T5-11 | 在 `TESTING.md` 的必测清单新增一条：**「可选后端默认关闭且未配置时回退」**（含"测试必须在无网络、无 Ollama 的条件下通过"的离线约束，`T-02`），并在「对应任务」列引用 `T3-08`–`T3-11` 与 `T5-15` | `TESTING.md` | `grep -c -e "默认关闭" -e "回退" TESTING.md` 再跑 `python3 scripts/verify-plan.py .` | 各 `≥1`；必测清单新增行被 `E2`/`E3`/`E4` 接受；门禁全绿 | T5-05 | 1h |
-| T5-12 | 对齐两份 ADR 的**执行状态**（`D-06`：写现状）：`ADR-14` 的"执行：暂缓"、`ADR-15` 的状态行/§1/§3/§5 标注为"已重启为可选后端（0.2.0）"，并保留各自的决策快照性质（不删原始理由） | `docs/adr/ADR-14-semantic-retrieval.md`, `docs/adr/ADR-15-defer-semantic-retrieval.md` | `grep -c -e "已重启" -e "执行中" docs/adr/ADR-14-semantic-retrieval.md docs/adr/ADR-15-defer-semantic-retrieval.md` 再跑 `python3 scripts/verify-plan.py .` | 两份合计 `≥2`；`ADR-15` 仍保留"暂缓"的历史理由；门禁全绿 | T5-05 | 1h |
-| T5-13 | 写 `README.md` 与 `docs/architecture.md` 的 **v0.2 说明骨架**（**不含版本号**，版本号属 `T5-17`）：README 新增"可选语义后端"小节（装法、开关、默认关闭、限制如何变化）、`## 已知限制` 里"纯中文自然语言不可用"改为"默认安装下不可用"；`docs/architecture.md` 的模块表与"不做什么"补可选后端路径 | `README.md`, `docs/architecture.md` | `grep -c "可选后端" README.md docs/architecture.md` 再跑 `python3 scripts/verify-plan.py .` | 两份合计 `≥2`；README 的安全声明仍在第一屏（`D-04`）；门禁全绿 | T5-05 | 1.5h |
+| T5-12 | 对齐两份 ADR 的**执行状态**（`D-06`：写现状）：`ADR-14` 的"执行：暂缓"、`ADR-15` 的状态行/§1/§3/§5 标注为"已重启为可选后端（2.0.0）"，并保留各自的决策快照性质（不删原始理由） | `docs/adr/ADR-14-semantic-retrieval.md`, `docs/adr/ADR-15-defer-semantic-retrieval.md` | `grep -c -e "已重启" -e "执行中" docs/adr/ADR-14-semantic-retrieval.md docs/adr/ADR-15-defer-semantic-retrieval.md` 再跑 `python3 scripts/verify-plan.py .` | 两份合计 `≥2`；`ADR-15` 仍保留"暂缓"的历史理由；门禁全绿 | T5-05 | 1h |
+| T5-13 | 写 `README.md` 与 `docs/architecture.md` 的 **v2.0 说明骨架**（**不含版本号**，版本号属 `T5-17`）：README 新增"可选语义后端"小节（装法、开关、默认关闭、限制如何变化）、`## 已知限制` 里"纯中文自然语言不可用"改为"默认安装下不可用"；`docs/architecture.md` 的模块表与"不做什么"补可选后端路径 | `README.md`, `docs/architecture.md` | `grep -c "可选后端" README.md docs/architecture.md` 再跑 `python3 scripts/verify-plan.py .` | 两份合计 `≥2`；README 的安全声明仍在第一屏（`D-04`）；门禁全绿 | T5-05 | 1.5h |
 | T5-14 | 跑**向量天花板探针**（`ADR-15` §3.2）：用一次性脚本对 30 条 query + 全量 chunk 做 embedding，测 `natural` / `crossfile` 的 `S@5` / `MRR` **上限**，给出 go/no-go 结论。**结论决定 `T3-08` 是否继续**；探针脚本不进 `src/`（它不是生产路径） | `docs/m5-vector-probe.md` | `test -f docs/m5-vector-probe.md` 且 `grep -c -e natural -e crossfile -e "S@5" docs/m5-vector-probe.md` | 文件存在；四项指标各自可查；含明确的 go/no-go 结论与所用后端 / 模型 / 耗时 | T5-05 | 2h |
 | T5-15 | **可选安装的打包与配置收尾**：`pyproject.toml` 增加可选 extra（名字由 `ADR-16` 冻结，如 `semantic`）；默认 `dependencies` 保持**不含** numpy / httpx；`scripts/install.sh` 增加"装可选后端"的显式开关且默认不装；`cordis.patch.yml` 的 `config.env` 增加**关闭态**的向量配置；README 写清装法与开关 | `pyproject.toml`, `scripts/install.sh`, `cordis.patch.yml`, `README.md` | `python3 -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(sorted(d['project']['optional-dependencies']))"` 且 `grep -c CODERAG_WITH_SEMANTIC scripts/install.sh` | extra 出现；`dependencies` 不含 numpy / httpx；`install.sh` 默认路径不装任何向量依赖 | T3-10 | 2h |
-| T5-16 | **可选安装的端到端冒烟测试**（用户指定）：在**全新** `DSH_HOME` 与全新 profile 里跑三件事——（a）默认安装 → 确认没装任何向量依赖、检索逐条与 0.1.0 一致；（b）装可选 extra 并开启后端 → 在 `examples/demo-workspace` 的干净副本上跑通**一次真实语义检索**；（c）后端不可用时 → 返回结构化 `status` 且不报 `isError`（`RL-09`） | `docs/m4-install-verification.md` | `bash scripts/install.sh`（默认态）与 `CODERAG_WITH_SEMANTIC=1 bash scripts/install.sh`（可选态），两态各跑一次 `--dump-config` 与一次 MCP `tools/call` | 两次安装退出码都是 `0`；默认态的解释器里没有 numpy / httpx；可选态下 `code_search` 命中 demo 工作区的目标文件；后端不可用时是结构化状态而不是 `isError` | T5-15 | 2h |
-| T5-17 | **发布 v0.2.0**：版本号 `0.1.0` → `0.2.0`（`pyproject.toml`、`package.json`、README 的"当前版本"与示例输出、`docs/architecture.md` 的"实现版本"），`CHANGELOG.md` 增加 `[0.2.0]` 条目；并核对**发布范围**——默认安装没有新增任何必需的 embedding 依赖（`T5-05` 冻结的约束） | `pyproject.toml`, `package.json`, `CHANGELOG.md`, `README.md`, `docs/architecture.md` | `python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"` 且 `node -e "console.log(require('./package.json').version)"` | 两者都打印 `0.2.0`；`CHANGELOG.md` 含 `## [0.2.0]`；README / `docs/architecture.md` 的"当前版本"类字样已是 `0.2.0`（历史证据里的 `0.1.0` 保留不动） | T5-16, T5-13 | 1.5h |
+| T5-16 | **可选安装的端到端冒烟测试**（用户指定）：在**全新** `DSH_HOME` 与全新 profile 里跑三件事——（a）默认安装 → 确认没装任何向量依赖、检索逐条与 1.0.0 一致；（b）装可选 extra 并开启后端 → 在 `examples/demo-workspace` 的干净副本上跑通**一次真实语义检索**；（c）后端不可用时 → 返回结构化 `status` 且不报 `isError`（`RL-09`） | `docs/m4-install-verification.md` | `bash scripts/install.sh`（默认态）与 `CODERAG_WITH_SEMANTIC=1 bash scripts/install.sh`（可选态），两态各跑一次 `--dump-config` 与一次 MCP `tools/call` | 两次安装退出码都是 `0`；默认态的解释器里没有 numpy / httpx；可选态下 `code_search` 命中 demo 工作区的目标文件；后端不可用时是结构化状态而不是 `isError` | T5-15 | 2h |
+| T5-17 | **发布 v2.0.0**：版本号 `1.0.0` → `2.0.0`（`pyproject.toml`、`package.json`、README 的"当前版本"与示例输出、`docs/architecture.md` 的"实现版本"），`CHANGELOG.md` 增加 `[2.0.0]` 条目；并核对**发布范围**——默认安装没有新增任何必需的 embedding 依赖（`T5-05` 冻结的约束） | `pyproject.toml`, `package.json`, `CHANGELOG.md`, `README.md`, `docs/architecture.md` | `python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"` 且 `node -e "console.log(require('./package.json').version)"` | 两者都打印 `2.0.0`；`CHANGELOG.md` 含 `## [2.0.0]`；README / `docs/architecture.md` 的"当前版本"类字样已是 `2.0.0`（历史证据里的 `1.0.0` 保留不动） | T5-16, T5-13 | 1.5h |
 
 ---
 
@@ -1491,7 +1491,7 @@ T5-17  ← T5-13, T5-16
 | ADR-12 | T3-04 | 指标用 `Success@k`，不用 nDCG |
 | ADR-13 | T2-19 | 标点/短符号查询路由到 `grep`，不做全表 `LIKE` |
 | ADR-14 | T3-07, T3-08, T3-09, T3-10, T3-11 | R2 命中：词法为底 + 向量补齐自然语言查询；执行由已重启的 `T3-08`–`T3-11` 落地，判据是 `ADR-14` §10.4 的 V1–V4 |
-| ADR-15 | T3-08, T3-11, T5-16 | **已重启为可选后端（0.2.0）**：默认关闭、未配置时干净退回纯 BM25、**不得进入必需依赖**；重启条件见 `ADR-15` §3，形态由 `ADR-16`（`T5-05`）冻结 |
+| ADR-15 | T3-08, T3-11, T5-16 | **已重启为可选后端（2.0.0）**：默认关闭、未配置时干净退回纯 BM25、**不得进入必需依赖**；重启条件见 `ADR-15` §3，形态由 `ADR-16`（`T5-05`）冻结 |
 | C1 | T1-12 | MCP 工具 60s 超时 → 索引必须异步 |
 | C2 | T1-14 | stdio 环境清洗 → key 必须走 `config.env` |
 | C3 | *全局* | preset `complete:true` 吞注入 → 本项目不做 prompt 注入（见 `AGENTS.md` E-03） |

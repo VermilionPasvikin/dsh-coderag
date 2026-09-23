@@ -41,4 +41,4 @@ from dsh_coderag.types import SearchStatus  # noqa: E402
 
 __all__ = ["SearchStatus", "__version__", "index_sync", "search"]
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

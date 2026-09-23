@@ -10,7 +10,7 @@
 dsh-coderag 是一个以 **MCP 服务器**形态提供的代码库检索引擎：让 DeepSeek Harness（DSH）的 Agent
 能按语义与结构找到代码，而不是靠猜关键词反复 grep。它只做检索，不改你的代码。
 
-**当前版本 `0.1.0`，尚未发布到 PyPI / npm；安装方式见下文「安装（当前方式）」。**
+**当前版本 `1.0.0`，尚未发布到 PyPI / npm；安装方式见下文「安装（当前方式）」。**
 
 ---
 
@@ -98,7 +98,7 @@ cd dsh-coderag
 python -m pip install .          # 开发者用 pip install -e ".[dev]"
 
 # 3. 验证引擎可用（这一步不涉及 DSH）
-dsh-coderag --version            # 期望输出：dsh-coderag 0.1.0
+dsh-coderag --version            # 期望输出：dsh-coderag 1.0.0
 dsh-coderag index /path/to/repo  # 期望：indexed N files, M chunks into .../.coderag/index.sqlite3
 dsh-coderag search "用户令牌在哪里校验" --root /path/to/repo
 
@@ -129,11 +129,11 @@ export CODERAG_PYTHON="$(command -v python)"
 
 1. **干净环境 `pip install .` 成功**（依赖全部从 PyPI 解析：`mcp` / `tree-sitter` /
    `tree-sitter-language-pack` / `pathspec`），无 install script 参与。
-2. `dsh-coderag --version` → `dsh-coderag 0.1.0`；
+2. `dsh-coderag --version` → `dsh-coderag 1.0.0`；
    对一个 2 chunk 的小仓库 `index` → `indexed 1 files, 2 chunks`，
    `search "verify_token"` → `token.py:1-3`。
 3. **MCP 握手**（用的就是 patch 里的那条命令，解释器设为该 venv）：
-   `serverInfo {'name': 'coderag', 'version': '0.1.0'}`、
+   `serverInfo {'name': 'coderag', 'version': '1.0.0'}`、
    `tools ['code_search', 'code_outline', 'code_index', 'index_status']`、
    `code_search` 返回结构化结果且 `isError: False`。
 4. **新 DSH Web 实例**（`:3099`）用 `./scripts/dsh --profile web --patch ./cordis.patch.yml --port 3099`

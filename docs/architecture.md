@@ -5,7 +5,7 @@
 > 安装与打包见 [`docs/m4-bundle.md`](m4-bundle.md) 与 [`docs/m4-install-verification.md`](m4-install-verification.md)。
 > 两者冲突时以**代码**为准，并请提 issue/改文档。
 >
-> 实现版本：`0.1.0`｜Python `>=3.10,<3.13`｜验证环境 macOS + DSH `0.1.5-rc.1`。
+> 实现版本：`1.0.0`｜Python `>=3.10,<3.13`｜验证环境 macOS + DSH `0.1.5-rc.1`。
 
 ---
 
@@ -213,7 +213,7 @@ MCP 的 `isError`**（RL-09）。
 
 ## 11. 不做什么（非目标）
 
-- **v0.1.0 不含向量检索**：没有任何 embedding / 向量库依赖。R2 的事实判断仍成立
+- **v1.0.0 不含向量检索**：没有任何 embedding / 向量库依赖。R2 的事实判断仍成立
   （纯词法够不到"零词法重叠"的中文自然语言），但执行按
   [`ADR-15`](adr/ADR-15-defer-semantic-retrieval.md) 推迟到后续版本，以**可选后端**引入（默认关闭）。
 - **不做 prompt 注入**：走 MCP 工具路线；`complete: true` 的 preset 会静默丢弃 system-prompt

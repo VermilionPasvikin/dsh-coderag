@@ -19,6 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dsh_coderag import __version__
+
 SHADOWING_MODULES = ("token.py", "types.py", "parser.py", "logging.py", "config.py")
 """Stdlib names a workspace can plausibly contain at its root."""
 
@@ -54,7 +56,9 @@ def test_import_survives_workspace_modules_shadowing_stdlib(tmp_path: Path) -> N
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.strip() == "0.1.0"
+    # Compare against the installed version, not a literal: this test is about
+    # the import surviving, and a hardcoded string breaks on every version bump.
+    assert completed.stdout.strip() == __version__
 
 
 def test_launcher_serves_mcp_with_shadowing_modules_in_cwd(tmp_path: Path) -> None:
