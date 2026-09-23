@@ -194,6 +194,77 @@ def classify(evidence: FailureEvidence) -> tuple[AttributionCode, str]:
     return (AttributionCode.A3, "query 的词都存在于目标文件，但没有任何单个 chunk 同时包含它们")
 
 
+@dataclass(frozen=True)
+class _IndexFacts:
+    """What the index knows about a task's resolvable targets and query tokens."""
+
+    file_count: int = 0
+    indexed: tuple[str, ...] = ()
+    unindexed: tuple[str, ...] = ()
+    tokens_present: tuple[str, ...] = ()
+    tokens_missing: tuple[str, ...] = ()
+    corpus_tokens_missing: tuple[str, ...] = ()
+
+
+def _path_states(paths: Sequence[str], base: Path) -> tuple[list[str], list[str], list[str]]:
+    """Split expected paths into missing, non-code and resolvable ones."""
+    missing = [rel for rel in paths if not (base / rel).is_file()]
+    non_code = [
+        rel
+        for rel in paths
+        if rel not in missing and Path(rel).suffix not in CODE_EXTENSIONS
+    ]
+    resolvable = [rel for rel in paths if rel not in missing and rel not in non_code]
+    return missing, non_code, resolvable
+
+
+def _index_facts(db_path: Path, resolvable: Sequence[str], query: str) -> _IndexFacts:
+    """Read what the index holds for the resolvable targets and query tokens."""
+    if not db_path.is_file():
+        return _IndexFacts()
+    connection = connect(db_path)
+    try:
+        file_count = int(connection.execute("SELECT count(*) FROM files").fetchone()[0])
+        indexed = [rel for rel in resolvable if _path_indexed(connection, rel)]
+        unindexed = [rel for rel in resolvable if rel not in indexed]
+        present: list[str] = []
+        missing: list[str] = []
+        corpus_missing: list[str] = []
+        for token in query_tokens(query):
+            if any(_token_in_path(connection, token, rel) for rel in indexed):
+                present.append(token)
+            else:
+                missing.append(token)
+            if not _token_in_corpus(connection, token):
+                corpus_missing.append(token)
+    finally:
+        connection.close()
+    return _IndexFacts(
+        file_count=file_count,
+        indexed=tuple(indexed),
+        unindexed=tuple(unindexed),
+        tokens_present=tuple(present),
+        tokens_missing=tuple(missing),
+        corpus_tokens_missing=tuple(corpus_missing),
+    )
+
+
+def _probe_rank(
+    corpus_root: Path, task: EvalTask, resolvable: Sequence[str], probe_k: int
+) -> int | None:
+    """Run the wider probe search and report where an expected path landed."""
+    if not resolvable:
+        return None
+    probe = searcher.search(
+        corpus_root, task.query, k=probe_k, max_tokens=PROBE_MAX_TOKENS
+    )
+    expected = set(task.expect_paths)
+    for position, hit in enumerate(probe.hits, start=1):
+        if hit.path in expected:
+            return position
+    return None
+
+
 def collect_evidence(
     task: EvalTask,
     result: EvalResult,
@@ -208,54 +279,8 @@ def collect_evidence(
     writes anything.
     """
     base = corpus_root.resolve()
-    missing: list[str] = []
-    non_code: list[str] = []
-    for rel in task.expect_paths:
-        if not (base / rel).is_file():
-            missing.append(rel)
-        elif Path(rel).suffix not in CODE_EXTENSIONS:
-            non_code.append(rel)
-    resolvable = [rel for rel in task.expect_paths if rel not in missing and rel not in non_code]
-
-    db_path = base / ".coderag" / "index.sqlite3"
-    index_file_count = 0
-    indexed: list[str] = []
-    unindexed: list[str] = []
-    target_present: list[str] = []
-    target_missing: list[str] = []
-    corpus_missing: list[str] = []
-    if db_path.is_file():
-        connection = connect(db_path)
-        try:
-            index_file_count = int(
-                connection.execute("SELECT count(*) FROM files").fetchone()[0]
-            )
-            for rel in resolvable:
-                if _path_indexed(connection, rel):
-                    indexed.append(rel)
-                else:
-                    unindexed.append(rel)
-            for token in query_tokens(task.query):
-                if any(_token_in_path(connection, token, rel) for rel in indexed):
-                    target_present.append(token)
-                else:
-                    target_missing.append(token)
-                if not _token_in_corpus(connection, token):
-                    corpus_missing.append(token)
-        finally:
-            connection.close()
-
-    probe_rank: int | None = None
-    if resolvable:
-        probe = searcher.search(
-            corpus_root, task.query, k=probe_k, max_tokens=PROBE_MAX_TOKENS
-        )
-        expected = set(task.expect_paths)
-        for position, hit in enumerate(probe.hits, start=1):
-            if hit.path in expected:
-                probe_rank = position
-                break
-
+    missing, non_code, resolvable = _path_states(task.expect_paths, base)
+    facts = _index_facts(base / ".coderag" / "index.sqlite3", resolvable, task.query)
     return FailureEvidence(
         task_id=task.id,
         task_class=task.task_class,
@@ -265,13 +290,13 @@ def collect_evidence(
         expect_paths=task.expect_paths,
         missing_paths=tuple(missing),
         non_code_paths=tuple(non_code),
-        unindexed_paths=tuple(unindexed),
-        indexed_paths=tuple(indexed),
-        index_file_count=index_file_count,
-        probe_rank=probe_rank,
-        target_tokens_present=tuple(target_present),
-        target_tokens_missing=tuple(target_missing),
-        corpus_tokens_missing=tuple(corpus_missing),
+        unindexed_paths=facts.unindexed,
+        indexed_paths=facts.indexed,
+        index_file_count=facts.file_count,
+        probe_rank=_probe_rank(corpus_root, task, resolvable, probe_k),
+        target_tokens_present=facts.tokens_present,
+        target_tokens_missing=facts.tokens_missing,
+        corpus_tokens_missing=facts.corpus_tokens_missing,
         symbol_missing=result.symbol_hit is False,
         must_not_hits=result.must_not_hit,
     )

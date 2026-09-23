@@ -191,6 +191,30 @@ def diff_runs(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict[s
     }
 
 
+def _diff_regression_ids(per_query: list[Any]) -> list[str]:
+    """Return the ids that regressed (hit -> miss) in a diff report."""
+    return [
+        str(entry["id"])
+        for entry in per_query
+        if isinstance(entry, Mapping) and entry.get("change") == CHANGE_REGRESSION
+    ]
+
+
+def _gate_reasons(
+    version_match: Any, active_count: int, max_regressions: int
+) -> list[str]:
+    """Explain why the gate fails, if it does."""
+    reasons: list[str] = []
+    if version_match is False:
+        reasons.append(
+            "golden_version 不一致：两份报告跑的不是同一份题集，逐条对比无效"
+            "（EVAL.md 2.7：改题集必须同步升版本号）"
+        )
+    if active_count > max_regressions:
+        reasons.append(f"未豁免回归 {active_count} 条 > 容忍 {max_regressions}")
+    return reasons
+
+
 def gate_diff(
     diff: Mapping[str, Any],
     *,
@@ -214,24 +238,13 @@ def gate_diff(
     per_query = diff.get("per_query")
     if diff.get("schema") != DIFF_SCHEMA or not isinstance(per_query, list):
         raise ReportDiffError(f"不是一份 diff 报告：schema={diff.get('schema')!r}")
-    regressed = [
-        str(entry["id"])
-        for entry in per_query
-        if isinstance(entry, Mapping) and entry.get("change") == CHANGE_REGRESSION
-    ]
+    regressed = _diff_regression_ids(per_query)
     waiver_set = set(waivers)
     waived = [task_id for task_id in regressed if task_id in waiver_set]
     active = [task_id for task_id in regressed if task_id not in waiver_set]
     version = diff.get("golden_version")
     version_match = version.get("match") if isinstance(version, Mapping) else None
-    reasons: list[str] = []
-    if version_match is False:
-        reasons.append(
-            "golden_version 不一致：两份报告跑的不是同一份题集，逐条对比无效"
-            "（EVAL.md 2.7：改题集必须同步升版本号）"
-        )
-    if len(active) > max_regressions:
-        reasons.append(f"未豁免回归 {len(active)} 条 > 容忍 {max_regressions}")
+    reasons = _gate_reasons(version_match, len(active), max_regressions)
     return {
         "schema": DIFF_SCHEMA,
         "regression_count": len(regressed),
@@ -245,24 +258,29 @@ def gate_diff(
     }
 
 
-def render_diff_markdown(diff: Mapping[str, Any], verdict: Mapping[str, Any]) -> str:
-    """Render a query diff and its gate verdict as Markdown."""
-    rates = diff.get("rates")
-    rates = rates if isinstance(rates, Mapping) else {}
-    counts = diff.get("change_counts")
-    counts = counts if isinstance(counts, Mapping) else {}
-    version = diff.get("golden_version")
-    version = version if isinstance(version, Mapping) else {}
-    version_note = ""
+def _version_note(version: Mapping[str, Any]) -> str:
+    """Explain the golden_version comparison as one short suffix."""
     if version.get("match") is False:
-        version_note = " ｜ ⚠️ 不一致：两份报告的题集不同，逐条对比无效"
-    elif version.get("match") is None:
-        version_note = " ｜ （至少一份报告缺版本号，未能核验）"
+        return " ｜ ⚠️ 不一致：两份报告的题集不同，逐条对比无效"
+    if version.get("match") is None:
+        return " ｜ （至少一份报告缺版本号，未能核验）"
+    return ""
+
+
+def _diff_summary(
+    diff: Mapping[str, Any],
+    verdict: Mapping[str, Any],
+    rates: Mapping[str, Any],
+    counts: Mapping[str, Any],
+    version: Mapping[str, Any],
+) -> list[str]:
+    """Build the header bullets: counts, versions, rates and the verdict."""
     lines = [
         "# L1 逐 query diff",
         "",
         f"- 对比条数：{diff.get('compared')}（k={diff.get('k')}）",
-        f"- golden_version：{version.get('baseline')} → {version.get('current')}{version_note}",
+        f"- golden_version：{version.get('baseline')} → {version.get('current')}"
+        f"{_version_note(version)}",
         f"- 命中率：{_rate(rates.get('baseline_hit_rate'))} → "
         f"{_rate(rates.get('current_hit_rate'))}（{_pp(rates.get('delta'))}）",
         f"- 回归：{diff.get('regression_count')} ｜ 改善：{diff.get('improvement_count')} ｜ "
@@ -278,24 +296,39 @@ def render_diff_markdown(diff: Mapping[str, Any], verdict: Mapping[str, Any]) ->
             f"- 仅单侧存在：baseline {diff.get('only_in_baseline')} ｜ "
             f"current {diff.get('only_in_current')}"
         )
-    regressions = [
-        entry for entry in diff.get("per_query", []) if entry["change"] == CHANGE_REGRESSION
-    ]
-    if regressions:
-        lines += ["", "## 回归（命中 → 未命中）", ""]
-        lines += [_describe(entry) for entry in regressions]
-    improvements = [
-        entry for entry in diff.get("per_query", []) if entry["change"] == CHANGE_IMPROVEMENT
-    ]
-    if improvements:
-        lines += ["", "## 改善（未命中 → 命中）", ""]
-        lines += [_describe(entry) for entry in improvements]
+    return lines
+
+
+def _change_sections(diff: Mapping[str, Any]) -> list[str]:
+    """Build the regression and improvement sections from the per-query rows."""
+    lines: list[str] = []
+    for change, title in (
+        (CHANGE_REGRESSION, "## 回归（命中 → 未命中）"),
+        (CHANGE_IMPROVEMENT, "## 改善（未命中 → 命中）"),
+    ):
+        entries = [
+            entry for entry in diff.get("per_query", []) if entry["change"] == change
+        ]
+        if entries:
+            lines += ["", title, ""]
+            lines += [_describe(entry) for entry in entries]
+    return lines
+
+
+def _verdict_sections(verdict: Mapping[str, Any]) -> list[str]:
+    """Build the waived-regression section and the unused-waiver note."""
+    lines: list[str] = []
     if verdict.get("waived_regressions"):
         lines += ["", "## 已豁免的回归（需人工说明）", ""]
         lines += [f"- {task_id}" for task_id in verdict["waived_regressions"]]
     if verdict.get("unused_waivers"):
         lines += ["", f"- ⚠️ 未匹配到任何回归的 waiver：{verdict['unused_waivers']}"]
-    lines += [
+    return lines
+
+
+def _comparison_table(diff: Mapping[str, Any]) -> list[str]:
+    """Build the per-query comparison table."""
+    lines = [
         "",
         "## 逐条对比",
         "",
@@ -308,6 +341,21 @@ def render_diff_markdown(diff: Mapping[str, Any], verdict: Mapping[str, Any]) ->
             f"| {_side(entry, 'current')} | {entry['change']} |"
         )
     lines.append("")
+    return lines
+
+
+def render_diff_markdown(diff: Mapping[str, Any], verdict: Mapping[str, Any]) -> str:
+    """Render a query diff and its gate verdict as Markdown."""
+    rates = diff.get("rates")
+    rates = rates if isinstance(rates, Mapping) else {}
+    counts = diff.get("change_counts")
+    counts = counts if isinstance(counts, Mapping) else {}
+    version = diff.get("golden_version")
+    version = version if isinstance(version, Mapping) else {}
+    lines = _diff_summary(diff, verdict, rates, counts, version)
+    lines += _change_sections(diff)
+    lines += _verdict_sections(verdict)
+    lines += _comparison_table(diff)
     return "\n".join(lines)
 
 

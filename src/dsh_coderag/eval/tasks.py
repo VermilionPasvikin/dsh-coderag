@@ -84,6 +84,70 @@ def load_tasks(path: Path) -> list[EvalTask]:
     return tasks
 
 
+def _where(index: int, task: EvalTask) -> str:
+    """Return the human-readable locator prefixed to every problem message."""
+    return f"第 {index} 条（{task.id or '<无 id>'}）"
+
+
+def _check_identity(
+    task: EvalTask, index: int, where: str, seen: dict[str, int]
+) -> list[str]:
+    """Check id shape and uniqueness, class enum, query, and the added date."""
+    errors: list[str] = []
+    if not _ID_RE.match(task.id):
+        errors.append(f"{where}: id 不符合 L-NNN 格式")
+    elif task.id in seen:
+        errors.append(f"{where}: id 与第 {seen[task.id]} 条重复")
+    else:
+        seen[task.id] = index
+    if task.task_class not in TASK_CLASSES:
+        errors.append(f"{where}: class {task.task_class!r} 不在 {TASK_CLASSES}")
+    if not task.query.strip():
+        errors.append(f"{where}: query 为空")
+    if not task.expect_paths:
+        errors.append(f"{where}: expect_paths 为空")
+    if not _is_iso_date(task.added):
+        errors.append(f"{where}: added {task.added!r} 不是 YYYY-MM-DD 日期")
+    return errors
+
+
+def _check_paths(task: EvalTask, where: str, base: Path) -> list[str]:
+    """Check path lists for duplicates, bad format, absence and overlap."""
+    errors: list[str] = []
+    for field, values in (
+        ("expect_paths", task.expect_paths),
+        ("must_not_paths", task.must_not_paths),
+    ):
+        if len(set(values)) != len(values):
+            errors.append(f"{where}: {field} 含重复项")
+        for rel in values:
+            reason = path_format_error(rel)
+            if reason is not None:
+                errors.append(f"{where}: {field} 项 {rel!r} 不合规：{reason}")
+            elif base.is_dir() and not (base / rel).is_file():
+                errors.append(f"{where}: {field} 项 {rel!r} 在 {base} 下不存在")
+    overlap = set(task.expect_paths) & set(task.must_not_paths)
+    if overlap:
+        errors.append(
+            f"{where}: 同一条路径同时在 expect_paths 与 must_not_paths：{sorted(overlap)}"
+        )
+    return errors
+
+
+def _check_leaks(task: EvalTask, where: str) -> list[str]:
+    """Check that the query does not name its own target path or symbol."""
+    errors: list[str] = []
+    for rel in task.expect_paths:
+        for candidate in leak_candidates(rel):
+            if len(candidate) >= 4 and mentions(task.query, candidate):
+                errors.append(f"{where}: query 泄漏目标路径片段 {candidate!r}（来自 {rel}）")
+    if task.task_class != "exact":
+        for symbol in task.expect_symbols:
+            if mentions(task.query, symbol):
+                errors.append(f"{where}: 非 exact 类 query 泄漏 expect_symbols 符号 {symbol!r}")
+    return errors
+
+
 def validate_tasks(tasks: list[EvalTask], corpus_root: Path) -> list[str]:
     """Check tasks against a corpus root and return every problem found.
 
@@ -99,46 +163,10 @@ def validate_tasks(tasks: list[EvalTask], corpus_root: Path) -> list[str]:
         errors.append(f"被评测仓库不存在或不是目录：{base}")
     seen: dict[str, int] = {}
     for index, task in enumerate(tasks, start=1):
-        where = f"第 {index} 条（{task.id or '<无 id>'}）"
-        if not _ID_RE.match(task.id):
-            errors.append(f"{where}: id 不符合 L-NNN 格式")
-        elif task.id in seen:
-            errors.append(f"{where}: id 与第 {seen[task.id]} 条重复")
-        else:
-            seen[task.id] = index
-        if task.task_class not in TASK_CLASSES:
-            errors.append(f"{where}: class {task.task_class!r} 不在 {TASK_CLASSES}")
-        if not task.query.strip():
-            errors.append(f"{where}: query 为空")
-        if not task.expect_paths:
-            errors.append(f"{where}: expect_paths 为空")
-        if not _is_iso_date(task.added):
-            errors.append(f"{where}: added {task.added!r} 不是 YYYY-MM-DD 日期")
-        for field, values in (
-            ("expect_paths", task.expect_paths),
-            ("must_not_paths", task.must_not_paths),
-        ):
-            if len(set(values)) != len(values):
-                errors.append(f"{where}: {field} 含重复项")
-            for rel in values:
-                reason = path_format_error(rel)
-                if reason is not None:
-                    errors.append(f"{where}: {field} 项 {rel!r} 不合规：{reason}")
-                elif base.is_dir() and not (base / rel).is_file():
-                    errors.append(f"{where}: {field} 项 {rel!r} 在 {base} 下不存在")
-        overlap = set(task.expect_paths) & set(task.must_not_paths)
-        if overlap:
-            errors.append(
-                f"{where}: 同一条路径同时在 expect_paths 与 must_not_paths：{sorted(overlap)}"
-            )
-        for rel in task.expect_paths:
-            for candidate in leak_candidates(rel):
-                if len(candidate) >= 4 and mentions(task.query, candidate):
-                    errors.append(f"{where}: query 泄漏目标路径片段 {candidate!r}（来自 {rel}）")
-        if task.task_class != "exact":
-            for symbol in task.expect_symbols:
-                if mentions(task.query, symbol):
-                    errors.append(f"{where}: 非 exact 类 query 泄漏 expect_symbols 符号 {symbol!r}")
+        where = _where(index, task)
+        errors.extend(_check_identity(task, index, where, seen))
+        errors.extend(_check_paths(task, where, base))
+        errors.extend(_check_leaks(task, where))
     return errors
 
 

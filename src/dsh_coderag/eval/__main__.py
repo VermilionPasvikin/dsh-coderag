@@ -174,26 +174,65 @@ def _cmd_run(args: argparse.Namespace, tasks: list[EvalTask]) -> int:
     return EXIT_PASS
 
 
+def _resolve_golden_version(
+    args: argparse.Namespace, baseline: Mapping[str, Any] | None
+) -> tuple[int, str]:
+    """Validate the golden version before anything expensive runs.
+
+    Returns `(EXIT_PASS, version)` when the run may proceed; otherwise the
+    exit code to return and an empty version. A methodology break is a verdict
+    about the run (`EXIT_FAIL`), not unusable input.
+    """
+    try:
+        meta = load_golden_meta(Path(args.tasks).with_name(GOLDEN_META_FILENAME))
+    except GoldenVersionError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return EXIT_INPUT, ""
+    try:
+        check_golden_version(
+            _pinned_version(args, baseline), meta.golden_version, rebaseline=args.rebaseline
+        )
+    except GoldenVersionError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return EXIT_FAIL, ""
+    return EXIT_PASS, meta.golden_version
+
+
+def _write_gate_output(
+    args: argparse.Namespace,
+    diff: Mapping[str, Any],
+    verdict: Mapping[str, Any],
+    metrics: Mapping[str, MetricSet],
+    golden_version: str,
+) -> None:
+    """Write the optional Markdown diff and the optional gate JSON."""
+    if args.markdown:
+        _write_text(Path(args.markdown), render_diff_markdown(diff, verdict))
+    if not args.gate_out:
+        return
+    write_report(
+        {
+            "schema": GATE_SCHEMA,
+            "golden_version": golden_version,
+            "baseline": str(args.baseline),
+            "metrics": _metrics_to_json(metrics),
+            "regression_count": diff["regression_count"],
+            "improvement_count": diff["improvement_count"],
+            "verdict": verdict,
+        },
+        Path(args.gate_out),
+    )
+
+
 def _cmd_gate(args: argparse.Namespace, tasks: list[EvalTask]) -> int:
     try:
         baseline = _load_report(Path(args.baseline))
     except ValueError as exc:
         sys.stderr.write(f"{exc}\n")
         return EXIT_INPUT
-    try:
-        meta = load_golden_meta(Path(args.tasks).with_name(GOLDEN_META_FILENAME))
-    except GoldenVersionError as exc:
-        sys.stderr.write(f"{exc}\n")
-        return EXIT_INPUT
-    try:
-        check_golden_version(
-            _pinned_version(args, baseline), meta.golden_version, rebaseline=args.rebaseline
-        )
-    except GoldenVersionError as exc:
-        # A methodology break is a verdict about the run, not unusable input.
-        sys.stderr.write(f"{exc}\n")
-        return EXIT_FAIL
-    golden_version = meta.golden_version
+    version_code, golden_version = _resolve_golden_version(args, baseline)
+    if version_code != EXIT_PASS:
+        return version_code
     errors = validate_tasks(tasks, Path(args.root))
     if errors:
         return _report_validation_errors(errors, len(tasks))
@@ -224,21 +263,7 @@ def _cmd_gate(args: argparse.Namespace, tasks: list[EvalTask]) -> int:
     )
     for reason in verdict["reasons"]:
         sys.stderr.write(f"  - {reason}\n")
-    if args.markdown:
-        _write_text(Path(args.markdown), render_diff_markdown(diff, verdict))
-    if args.gate_out:
-        write_report(
-            {
-                "schema": GATE_SCHEMA,
-                "golden_version": golden_version,
-                "baseline": str(args.baseline),
-                "metrics": _metrics_to_json(metrics),
-                "regression_count": diff["regression_count"],
-                "improvement_count": diff["improvement_count"],
-                "verdict": verdict,
-            },
-            Path(args.gate_out),
-        )
+    _write_gate_output(args, diff, verdict, metrics, golden_version)
     return EXIT_PASS if verdict["passed"] else EXIT_FAIL
 
 
