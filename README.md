@@ -79,9 +79,10 @@ coderag 给 DSH 补上的是「先做一次结构化检索、再按行号读文�
 > **注意**：bundle 清单（`package.json`，`T4-01`）与**层的装载**（`T4-02`）**已就绪并实测**——
 > `dsh.bundle.patch` 指向 `./cordis.patch.yml`、`files` 只放行该文件、**不含任何 JS 入口**；
 > `dsh plugin --profile <名字> add .` 之后 `--dump-config` 会出现 `# == dsh-coderag` 层与
-> `mcp-coderag` 行（复现步骤见 [`docs/m4-bundle.md`](docs/m4-bundle.md)）。但**尚未发布到
-> PyPI / npm**，安装脚本（`T4-03`）与**干净 profile 的端到端验证**（`T4-08`）也还没做。
-> 因此当前可靠的方式仍是「克隆 + `pip install` + `--patch`」。
+> `mcp-coderag` 行（复现步骤见 [`docs/m4-bundle.md`](docs/m4-bundle.md)）。Python 侧可以一键装并自检：
+> `bash scripts/install.sh`（`T4-03`，可重复运行；它会检查解释器、Python 版本与 FTS5，并验证中文
+> bigram 往返）。但**尚未发布到 PyPI / npm**，**干净 profile 的端到端验证**（`T4-08`）也还没做，
+> 因此当前可靠的方式仍是「克隆 + 装 Python 包 + `--patch`」。
 > 下面每一条都在本机实测过（见文末「安装验证」）。
 
 **前置**：Python **3.10–3.12**（`requires-python = ">=3.10,<3.13"`）、
@@ -139,6 +140,27 @@ export CODERAG_PYTHON="$(command -v python)"
 5. **端到端功能**：让一个 headless DSH 进程带着同一份 patch 与 `CODERAG_PYTHON` 提问，
    其会话日志显示 `mcp__coderag__code_search` 被调用 5 次、`code_outline` / `index_status` 各 1 次，
    检索返回 `status: ready` / `scanned: 3967 files / 63046 chunks`，并给出了正确答案。
+
+### 安装故障排查
+
+**第一件事：确认插件真的被登记了。** `dsh plugin add` 在 pnpm 非零退出时会**跳过 bundle 登记**——
+插件看起来装上了，却永远不会加载（`AGENTS.md` E-05）。装完务必看一眼配置里有没有属于自己的那一层：
+
+```sh
+./scripts/dsh --profile <名字> --dump-config | grep -A2 '== dsh-coderag'
+# 期望看到：# == dsh-coderag  然后 - id: mcp-coderag
+```
+
+| 现象 | 原因 | 怎么办 |
+|---|---|---|
+| `Error: ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，提示 `needs to execute build scripts but is not in the "allowBuilds" allowlist` | pnpm 10+ **默认拒绝执行依赖的 install/build script**，装带 `prepare` 的 git 插件会踩到。**本项目不含任何 install script，首次 `add` 不会触发它**（干净 profile 实测见 [`docs/m4-install-verification.md`](docs/m4-install-verification.md)） | 把 pnpm 打印的**精确 key** 原样写进 profile 的 `pnpm-workspace.yaml`，然后重跑同一条 `add`：`allowBuilds:` 下一行 `<打印的 key>: true`。文件在 `~/.dsh/profiles/<名字>/pnpm-workspace.yaml` |
+| `dsh: pnpm not found on PATH` | 没装 pnpm | 装 pnpm（本项目实测 `12.4.2`），或换一台有 pnpm 的机器 |
+| `add` 退出码 `0`，但工具不出现 | bundle 没进层列表（登记被跳过） | 跑上面的 `--dump-config`；看不到 `# == dsh-coderag` 就是没登记，回头看 `add` 的 pnpm 报错 |
+| 会话里没有 `mcp__coderag__code_search` | MCP 子进程起不来，最常见的是解释器路径 | `export CODERAG_PYTHON=/path/to/python` 指向**真正装了** `dsh_coderag` 的解释器（patch 默认值是作者机器的路径），再用 `"$CODERAG_PYTHON" -m dsh_coderag --version` 确认 |
+| `pip install` 报 `externally-managed-environment` | PEP 668：系统 Python 不允许直接装 | 用 conda 或 venv；**不要**用 `--break-system-packages`（`scripts/install.sh` 也这么提示） |
+| 缺 FTS5、或中文检索总是空 | 该解释器自带的 SQLite 没编译 FTS5 | `bash scripts/install.sh` 会预检并给指引；换 conda 或 python.org 的构建 |
+
+> 受限网络下装 Python 依赖：`CODERAG_PIP_ARGS="--index-url <镜像地址>" bash scripts/install.sh`。
 
 ## 配置
 
@@ -262,7 +284,7 @@ dsh-coderag --version
 - **每次检索会为填 `skipped` 重新遍历仓库**（约 180 ms），尚未随索引持久化。
 - **单字中文查询**未实现 `§5.3.1` 规定的 `LIKE + low_confidence` 退化路径。
 - **固定 4 个工具**，不动态增删（`AGENTS.md` RL-05）。
-- **尚未发布**：无 PyPI 包、无 npm registry 包、无 `scripts/install.sh`、无 `CHANGELOG.md`；
+- **尚未发布**：无 PyPI 包、无 npm registry 包、无 `CHANGELOG.md`；
   bundle 目前只能从**本仓库路径**安装（`dsh plugin add .` 已验证层可装载，`T4-02`），
   **干净 profile 的端到端（`T4-08`）与 registry 安装均未验证**。
 - 未做 Windows 实测；开发与评测均在 macOS 上完成。
@@ -301,6 +323,7 @@ L2 A/B 评测（**需要模型 API key**）见 `EVAL.md` §3.6 与 `docs/eval-re
 | `docs/adr/ADR-14-semantic-retrieval.md` | 决策门 `T3-07` 的裁决与证据 |
 | `docs/adr/ADR-15-defer-semantic-retrieval.md` | 执行推迟：v1 不含向量，后续以可选后端引入（默认关闭） |
 | `docs/m4-bundle.md` | 可分发的 DSH bundle：装载实测、自检清单与复现步骤 |
+| `docs/m4-install-verification.md` | 干净 profile 的安装验证（pnpm `allowBuilds` 坑的实测；`T4-08` 会追加端到端） |
 | `docs/backlog.md` | 已知但未修的缺陷 |
 | `cordis.patch.yml` | DSH 接入配置 |
 
