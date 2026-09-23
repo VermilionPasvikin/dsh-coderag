@@ -55,7 +55,7 @@ coderag 给 DSH 补上的是「先做一次结构化检索、再按行号读文�
 | **M1** 走通闭环 | ✅ 已完成（DSH → MCP → Python → SQLite → 结果） |
 | **M2** 检索质量 | ✅ 已完成（tree-sitter 声明感知分块、三层安全过滤、增量索引、任务取消、顺序保持） |
 | **M3** 评测与决策 | ✅ **决策与应用层已闭合**：L1/L2 评测、逐 query diff（`T3-04c`）、`golden_version` 校验（`T3-04d`）、一键门禁（`T3-12`）全部完成，决策门 `T3-07` 已裁定。**向量检索（`T3-08`–`T3-11`）按 [`ADR-15`](docs/adr/ADR-15-defer-semantic-retrieval.md) 暂缓**——v1.0 不含，后续版本以**可选后端**引入（默认关闭、未配置退回纯 BM25） |
-| **M4** 打包分发 | 🟡 进行中：bundle 清单（`T4-01`）、bundle 层装载（`T4-02`）、安装脚本（`T4-03`）、安装故障排查（`T4-06`）、`CHANGELOG`（`T4-07`）已落地；**只差干净环境端到端验证（`T4-08`）** |
+| **M4** 打包分发 | 🟡 **出口判据已通过**（`T4-08`：全新 `DSH_HOME` + 全新 profile 从零安装，跑通索引与检索）；bundle 清单（`T4-01`）、bundle 层装载（`T4-02`）、安装脚本（`T4-03`）、安装故障排查（`T4-06`）、`CHANGELOG`（`T4-07`）已落地；剩仓库 topic（`T4-09`）与 `docs/architecture.md`（`T4-10`） |
 
 **评测结论**：端到端**有用**（S3 成立，+59.0pp），但**检索本身还没达标**（S1/S2 未达标）——
 详见下文「实测评测数据」。这不是一个"检索很准"的项目，而是一个"接进去能提升任务成功率、
@@ -81,7 +81,8 @@ coderag 给 DSH 补上的是「先做一次结构化检索、再按行号读文�
 > `dsh plugin --profile <名字> add .` 之后 `--dump-config` 会出现 `# == dsh-coderag` 层与
 > `mcp-coderag` 行（复现步骤见 [`docs/m4-bundle.md`](docs/m4-bundle.md)）。Python 侧可以一键装并自检：
 > `bash scripts/install.sh`（`T4-03`，可重复运行；它会检查解释器、Python 版本与 FTS5，并验证中文
-> bigram 往返）。但**尚未发布到 PyPI / npm**，**干净 profile 的端到端验证**（`T4-08`）也还没做，
+> bigram 往返）。但**尚未发布到 PyPI / npm**：**干净环境的端到端**（`T4-08`）已在全新
+> `DSH_HOME` 与全新 profile 中跑通，但**从 registry 安装**还没验证过。
 > 因此当前可靠的方式仍是「克隆 + 装 Python 包 + `--patch`」。
 > 下面每一条都在本机实测过（见文末「安装验证」）。
 
@@ -284,9 +285,8 @@ dsh-coderag --version
 - **每次检索会为填 `skipped` 重新遍历仓库**（约 180 ms），尚未随索引持久化。
 - **单字中文查询**未实现 `§5.3.1` 规定的 `LIKE + low_confidence` 退化路径。
 - **固定 4 个工具**，不动态增删（`AGENTS.md` RL-05）。
-- **尚未发布**：无 PyPI 包、无 npm registry 包；
-  bundle 目前只能从**本仓库路径**安装（`dsh plugin add .` 已验证层可装载，`T4-02`），
-  **干净 profile 的端到端（`T4-08`）与 registry 安装均未验证**。
+- **尚未发布**：无 PyPI 包、无 npm registry 包；`T4-08` 已在全新 `DSH_HOME` 与全新 profile 中
+  从零安装并跑通一次检索，但 **registry 安装路径仍未验证**。
 - 未做 Windows 实测；开发与评测均在 macOS 上完成。
 
 ## 安全与隐私
@@ -323,7 +323,7 @@ L2 A/B 评测（**需要模型 API key**）见 `EVAL.md` §3.6 与 `docs/eval-re
 | `docs/adr/ADR-14-semantic-retrieval.md` | 决策门 `T3-07` 的裁决与证据 |
 | `docs/adr/ADR-15-defer-semantic-retrieval.md` | 执行推迟：v1 不含向量，后续以可选后端引入（默认关闭） |
 | `docs/m4-bundle.md` | 可分发的 DSH bundle：装载实测、自检清单与复现步骤 |
-| `docs/m4-install-verification.md` | 干净 profile 的安装验证（pnpm `allowBuilds` 坑的实测；`T4-08` 会追加端到端） |
+| `docs/m4-install-verification.md` | 安装验证：干净 profile 的装载（`T4-06`）与从零安装后跑通检索（`T4-08`） |
 | `CHANGELOG.md` | 版本变更记录（Keep a Changelog 格式） |
 | `docs/backlog.md` | 已知但未修的缺陷 |
 | `cordis.patch.yml` | DSH 接入配置 |
