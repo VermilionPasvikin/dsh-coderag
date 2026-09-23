@@ -87,6 +87,104 @@ class OutlineSymbol:
     children: tuple[OutlineSymbol, ...] = ()
 
 
+def _fts5_unavailable(query: str) -> SearchResult:
+    """Return the structured error for an SQLite build without FTS5."""
+    return SearchResult(
+        status=SearchStatus.ERROR,
+        query=query,
+        message="SQLite FTS5 is not available in this Python build.",
+        code=ErrorCode.FTS5_UNAVAILABLE,
+        hint=sqlite_caps.FTS5_HINT,
+    )
+
+
+def _index_not_built(query: str) -> SearchResult:
+    """Return the structured "not indexed yet" status (never an empty list)."""
+    return SearchResult(
+        status=SearchStatus.INDEXING,
+        query=query,
+        message="The code index for this workspace has not been built.",
+        hint="Call code_index for this workspace, or use grep for exact identifiers.",
+        code=ErrorCode.INDEX_NOT_FOUND,
+    )
+
+
+def _first_non_empty_rung(
+    connection: sqlite3.Connection,
+    query: str,
+    k: int,
+    path_prefix: str | None,
+    symbols: frozenset[str],
+) -> tuple[list[Hit], bool]:
+    """Walk the three match rungs and return the first non-empty hit list.
+
+    Returns the hits plus whether the query was punctuation-only, which the
+    caller needs in order to pick the hint when nothing matched at all.
+    """
+    if _is_punctuation_only(query):
+        return [], True
+    # Three rungs, first non-empty wins (PROJECT.md 5.3.1): precision AND,
+    # then an identifier-only OR, then the full OR including CJK bigrams.
+    matches = [
+        _build_match(query),
+        _build_identifier_recall_match(query),
+        _build_recall_match(query),
+    ]
+    seen: set[str] = set()
+    for match in matches:
+        if match is None or match in seen:
+            continue
+        seen.add(match)
+        candidates = _search(connection, match, k, path_prefix, symbols)
+        if candidates:
+            return candidates, False
+    return [], False
+
+
+def _empty_result(
+    query: str,
+    files: int,
+    chunks: int,
+    skipped: SkipReport,
+    punctuation_only: bool,
+) -> SearchResult:
+    """Return the structured empty status with a hint matched to the query."""
+    hint = (
+        PUNCTUATION_QUERY_HINT
+        if punctuation_only
+        else "No matches. Try different keywords, or use grep for exact identifiers."
+    )
+    return SearchResult(
+        status=SearchStatus.EMPTY,
+        query=query,
+        scanned_files=files,
+        scanned_chunks=chunks,
+        hint=hint,
+        skipped=skipped,
+    )
+
+
+def _ready_result(
+    query: str,
+    candidates: list[Hit],
+    files: int,
+    chunks: int,
+    skipped: SkipReport,
+    max_tokens: int,
+) -> SearchResult:
+    """Trim candidates to the token budget and build the READY result."""
+    hits, omitted = _trim_to_budget(candidates, max_tokens)
+    return SearchResult(
+        status=SearchStatus.READY,
+        query=query,
+        hits=hits,
+        scanned_files=files,
+        scanned_chunks=chunks,
+        skipped=skipped,
+        omitted=omitted,
+    )
+
+
 def search(
     root: Path,
     query: str,
@@ -105,13 +203,7 @@ def search(
     subdirectory (or file); None searches the whole workspace.
     """
     if not sqlite_caps.fts5_available():
-        return SearchResult(
-            status=SearchStatus.ERROR,
-            query=query,
-            message="SQLite FTS5 is not available in this Python build.",
-            code=ErrorCode.FTS5_UNAVAILABLE,
-            hint=sqlite_caps.FTS5_HINT,
-        )
+        return _fts5_unavailable(query)
     base = root.resolve()
     try:
         path_prefix = _path_prefix(base, path)
@@ -124,62 +216,19 @@ def search(
         )
     db_path = base / ".coderag" / "index.sqlite3"
     if not db_path.exists():
-        return SearchResult(
-            status=SearchStatus.INDEXING,
-            query=query,
-            message="The code index for this workspace has not been built.",
-            hint="Call code_index for this workspace, or use grep for exact identifiers.",
-            code=ErrorCode.INDEX_NOT_FOUND,
-        )
+        return _index_not_built(query)
     connection = connect(db_path)
     try:
         files, chunks = _index_counts(connection)
-        punctuation_only = _is_punctuation_only(query)
-        symbols = query_symbols(query)
-        # Three rungs, first non-empty wins (PROJECT.md 5.3.1): precision AND,
-        # then an identifier-only OR, then the full OR including CJK bigrams.
-        matches = (
-            []
-            if punctuation_only
-            else [_build_match(query), _build_identifier_recall_match(query),
-                  _build_recall_match(query)]
+        candidates, punctuation_only = _first_non_empty_rung(
+            connection, query, k, path_prefix, query_symbols(query)
         )
-        candidates: list[Hit] = []
-        seen: set[str] = set()
-        for match in matches:
-            if match is None or match in seen:
-                continue
-            seen.add(match)
-            candidates = _search(connection, match, k, path_prefix, symbols)
-            if candidates:
-                break
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
     if not candidates:
-        hint = (
-            PUNCTUATION_QUERY_HINT
-            if punctuation_only
-            else "No matches. Try different keywords, or use grep for exact identifiers."
-        )
-        return SearchResult(
-            status=SearchStatus.EMPTY,
-            query=query,
-            scanned_files=files,
-            scanned_chunks=chunks,
-            hint=hint,
-            skipped=skipped,
-        )
-    hits, omitted = _trim_to_budget(candidates, max_tokens)
-    return SearchResult(
-        status=SearchStatus.READY,
-        query=query,
-        hits=hits,
-        scanned_files=files,
-        scanned_chunks=chunks,
-        skipped=skipped,
-        omitted=omitted,
-    )
+        return _empty_result(query, files, chunks, skipped, punctuation_only)
+    return _ready_result(query, candidates, files, chunks, skipped, max_tokens)
 
 
 def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
@@ -198,19 +247,18 @@ def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
     return kept, len(hits) - len(kept)
 
 
-def _search(
-    connection: sqlite3.Connection,
+def _search_sql(
     match: str,
     k: int,
-    path_prefix: str | None = None,
-    symbols: frozenset[str] = frozenset(),
-    symbol_boost: float = SYMBOL_MATCH_BOOST,
-) -> list[Hit]:
-    """Select the k best chunks, then return them in source order (ADR-05).
+    path_prefix: str | None,
+    symbols: frozenset[str],
+    symbol_boost: float,
+) -> tuple[str, list[object]]:
+    """Build the SELECT and its parameters for one match expression.
 
-    Ordering is expressed in SQL so the `LIMIT` sees the final ranking:
-    non-test chunks first, then the bm25 score adjusted by an exact
-    `symbol_name` match, then `c.id` as the deterministic tiebreak.
+    Ordering lives in SQL so the `LIMIT` sees the final ranking: non-test
+    chunks first, then bm25 adjusted by an exact `symbol_name` match, then
+    `c.id` as the deterministic tiebreak.
     """
     sql = """
         SELECT f.path, c.seq, c.start_line, c.end_line, c.symbol_kind,
@@ -239,6 +287,24 @@ def _search(
     order.append("c.id")
     sql += f" ORDER BY {', '.join(order)} LIMIT ?"
     params.append(k)
+    return sql, params
+
+
+def _search(
+    connection: sqlite3.Connection,
+    match: str,
+    k: int,
+    path_prefix: str | None = None,
+    symbols: frozenset[str] = frozenset(),
+    symbol_boost: float = SYMBOL_MATCH_BOOST,
+) -> list[Hit]:
+    """Select the k best chunks, then return them in source order (ADR-05).
+
+    Ordering is expressed in SQL so the `LIMIT` sees the final ranking:
+    non-test chunks first, then the bm25 score adjusted by an exact
+    `symbol_name` match, then `c.id` as the deterministic tiebreak.
+    """
+    sql, params = _search_sql(match, k, path_prefix, symbols, symbol_boost)
     rows = connection.execute(sql, params).fetchall()
     hits = [
         Hit(
