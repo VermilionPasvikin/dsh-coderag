@@ -425,7 +425,7 @@ code_search(query, path, limit, mode)
 
 | 模块 | 文件 | 职责 | 不负责 |
 |---|---|---|---|
-| `config` | `src/dsh_coderag/config.py` | 配置读取与校验（环境变量）、自适应并发/批大小推导 | 不做默认值猜测（缺失必填项要报错） |
+| `config` | `src/dsh_coderag/config.py` | **运行时参数的唯一读取入口**：`load_config(environ)` 从环境变量读取全部参数并校验（见下方「配置来源」）、自适应并发/批大小推导 | 不做默认值猜测（缺失必填项要报错）；**不读任何配置文件** |
 | `types` | `src/dsh_coderag/types.py` | 跨模块数据类与错误码枚举 | 不含行为 |
 | `parser` | `src/dsh_coderag/parser.py` | 按扩展名探测语言、提供 tree-sitter grammar/parser | 不解析语法树、不遍历工作区 |
 | `text` | `src/dsh_coderag/text.py` | 中文 bigram 预转换（索引与查询两侧共用） | 不做分词决策 |
@@ -440,6 +440,28 @@ code_search(query, path, limit, mode)
 | `log` | `src/dsh_coderag/log.py` | JSON-Lines 日志（stderr）与 `last-index.json` 审计 | 不写 stdout、不索引/检索 |
 | `server` | `src/dsh_coderag/server.py` | MCP 协议实现、4 个工具注册、outline 文本渲染 | 不含业务逻辑（薄层） |
 | `eval` | `src/dsh_coderag/eval/` | 评测集加载与校验、L1 运行/指标/归因/报告、L2 A/B runner、门禁 CLI（`tasks.py` / `runner.py` / `metrics.py` / `attribute.py` / `report.py` / `ab.py`） | 不参与生产检索路径；除 `ab.py` 拉起 headless DSH 外不调模型 |
+
+#### 配置来源：**只有环境变量，没有用户配置文件**
+
+**运行时参数 100% 从环境变量读，唯一入口是 `src/dsh_coderag/config.py` 的 `load_config(environ)`。**本项目**没有** `.coderagrc` / `config.toml` / 之类用户配置文件——这是刻意的：引擎由 DSH 以**工作区为 cwd** 拉起，放配置文件会被当成被索引内容，而用户目录又被 `S-03` 排除。
+
+| 组 | 变量 | 默认 | 冻结于 |
+|---|---|---|---|
+| 基础 | `CODERAG_ROOT` | **无默认，缺失即 `ConfigError`** | — |
+| 基础 | `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_MAX_FILE_BYTES` | `20000` / `4000` / `1048576` | — |
+| 基础 | `CODERAG_BATCH_SIZE` / `CODERAG_MAX_WORKERS` | 不设则按机器自适应（`RL-07` 禁止硬编码） | — |
+| 本地后端 | `CODERAG_SEMANTIC`（只有 `on` 启用）/ `_BACKEND=ollama` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS` | 关闭 / `ollama` / `http://127.0.0.1:11434` / `bge-m3` / `30` / `16` / `100000` | `ADR-16` §4 |
+| 云端后端 | `_BACKEND=openai` / `_URL`（必须显式给出）/ `_MODEL`（必须显式给出）/ `_API_KEY` / `_ALLOW_REMOTE` | 关闭 / 无 / 无 / 无（缺失 → `SEMANTIC_AUTH_MISSING`，**不发起请求**）/ 未设 = 不允许 | `ADR-17` §4 |
+| 安装侧 | `CODERAG_WITH_SEMANTIC`（只有 `1` 才装 extra） | 未设 = 不装 | `ADR-16` §3.2 |
+| DSH 侧 | `CODERAG_PYTHON` | 作者机器路径（**请覆盖**） | `E-06`；由 `cordis.patch.yml` 的 `command:` 在宿主侧求值，不由 `config.py` 读 |
+
+**取值规则（三条，全部已冻结）**：
+
+1. **必填缺失要报错**，不得猜默认值（`AGENTS.md` §3.2 的既有约定）；
+2. **空字符串（含纯空白）= 未设**，默认值继续生效（`ADR-17` §4 冻结；沿用 `config.py` 既有的 `raw is None or not raw.strip()` 语义）；
+3. **不得硬编码**并发度/批大小/上限，必须可被上述变量覆盖（`RL-07`）。
+
+**投递通道**：这些变量由 `cordis.patch.yml` 的 `config.env` **显式列出**后才可靠到达 MCP 子进程——DSH 会清洗**继承来**的环境（名字匹配 `/KEY|PASSWORD|SECRET|TOKEN/i` 与所有 `DSH_*` 的会被丢掉），**显式配置的项在清洗之后合并、能存活**（`E-02`）。因此 `CODERAG_MAX_TOKENS`（名字含 `TOKEN`）与 `CODERAG_SEMANTIC_API_KEY` **export 不生效，只能在 patch 的 `env` 里给出**。配置入口与安全警告见仓库根的 `cordis.patch.yml`，用户可读的说明见 `README.md` 的「配置」一节。
 | `cli` | `src/dsh_coderag/__main__.py` | 命令行入口（`index` / `search`） | 供人调试用，非模型接口 |
 
 **模块依赖方向（禁止反向依赖）**：
@@ -1262,9 +1284,9 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T3-05 | A 组基线：在 `eval-baseline` 组上跑（`EVAL.md` §3.3），产出基线报告 | `eval/runs/a-v1/` | `python scripts/ab_eval.py run --group eval-baseline ...` | 产出基线报告 | T3-00, T3-02a, T3-15, T3-16 | 2h |
 | T3-06 | B 组：在 `eval-coderag` 组上跑，产出对照报告 | `docs/eval-report-m3.md` | `python scripts/ab_eval.py run --group eval-coderag ...` | 报告含**分层指标 + 归因分布 + 逐条 diff** | T3-04d, T3-05, T3-13, T3-14 | 2h |
 | **T3-07** | **决策门 M3-DECIDE**：按 `EVAL.md` §2.8 的**精确 R2 条件**裁决（见下） | `docs/adr/ADR-14-semantic-retrieval.md` | 文档含明确结论 + 支撑数据 + 归因分布 | 三条规则之一被明确命中 | T3-06 | 1h |
-| T3-08 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现**可选** embedding 生成与缓存（后端、模型与 extra 名由 `ADR-16` 冻结）。**默认关闭**：未配置后端时本模块不得成为导入或启动的阻塞点 | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 同一文本两次调用返回相同向量（缓存生效）；未配置后端时模块可被安全导入且不联网 | T3-07, T5-14 | 3h |
-| T3-09 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现**可选**向量存储与暴力余弦检索（numpy；≤10 万 chunk 不引入向量库）。向量索引必须落在**工作区内**（`S-03`） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "vector_search" -q` | top-k 与暴力计算一致；索引路径不越出工作区 | T3-08 | 2h |
-| T3-10 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现 RRF 融合（k=60，见 §5.3），并把**未配置/不可用后端时的干净回退**接进 `searcher`（回退后逐条结果与纯 BM25 一致） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "rrf" -q` | 用已知输入验证融合分数；关闭后端时逐条结果与纯 BM25 完全相同 | T3-09 | 1.5h |
+| T3-08 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现**可选** embedding 生成与缓存。**参数全部从环境变量读**：`CODERAG_SEMANTIC`（只有 `on` 启用）/ `_BACKEND` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS`，以及云端后端的 `_API_KEY` / `_ALLOW_REMOTE`（命名、默认值与「空串=未设」冻结于 `ADR-16` §4 / `ADR-17` §4；唯一读取入口是 `config.py`）。**默认关闭**：未配置后端时本模块不得成为导入或启动的阻塞点 | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 同一文本两次调用返回相同向量（缓存生效）；未配置后端时模块可被安全导入且不联网 | T3-07, T5-14 | 3h |
+| T3-09 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现**可选**向量存储与暴力余弦检索（numpy；≤10 万 chunk 不引入向量库）。上限来自 `CODERAG_SEMANTIC_MAX_CHUNKS`（超限显式失败并报实际数量）；落点仍由 `CODERAG_ROOT` 决定。向量索引必须落在**工作区内**（`S-03`） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "vector_search" -q` | top-k 与暴力计算一致；索引路径不越出工作区 | T3-08 | 2h |
+| T3-10 | **🔁 已重启（`ADR-15` §3；属 M5）** 实现 RRF 融合（k=60，见 §5.3），并把**未配置/不可用后端时的干净回退**接进 `searcher`——**是否启用只看 `CODERAG_SEMANTIC`**（空串/未设=关闭），后端可用性只影响状态不影响回退（回退后逐条结果与纯 BM25 一致） | `src/dsh_coderag/searcher.py` | `python -m pytest -k "rrf" -q` | 用已知输入验证融合分数；关闭后端时逐条结果与纯 BM25 完全相同 | T3-09 | 1.5h |
 | T3-11 | **🔁 已重启（`ADR-15` §3）** 跑 C 组（混合），与 B 组对比，按 `ADR-14` §10.4 的 **V1–V4** 判定是否发布向量路径（**V3 用 α = 0.025**，V4：C 不能显著优于 B 就不发布）。**验收命令已按 `ADR-15` §3.4 换成自建 runner**（原文本引用的 `dsh-eval-harness` API 已废弃） | `docs/eval-report-m3c.md` | `CODERAG_SEMANTIC=on python scripts/ab_eval.py run --cases cases --group eval-coderag-vector --out eval/runs/c-v1 --profile headless --patch cordis.patch.yml --workspace /tmp/dsh-coderag-t3-03-corpus --trials 3` | 报告含 A/B/C 三组对照表，且 V1–V4 逐条给出判定 | T3-10, T5-15 | 2h |
 | T3-12 | 回归门禁脚本：L1（pytest）+ L2（`eval_gate`）一键重跑 | `scripts/eval-gate.sh` | `bash scripts/eval-gate.sh` | 退出码 0/1；输出四项指标 + 回归条数 | T3-02b, T3-06 | 1h |
 | **T3-13** | **R3 的 A1 修复**：实现 §5.3.1 早已规定的**精度→召回降级**（精度模式 AND 落空时用 OR 重试一次） | `src/dsh_coderag/searcher.py`, `tests/test_cjk_recall.py` | `python -m pytest tests/test_cjk_recall.py -q` | M2 三条中文语义全绿；「标识符 + 中文」混合查询命中；两种模式都空时仍返回 `status: empty` | T3-04b | 1h |
