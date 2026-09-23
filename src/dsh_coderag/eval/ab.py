@@ -289,8 +289,8 @@ class Trace:
     interrupted: bool
 
 
-def parse_session(text: str) -> Trace:
-    """Parse one uncompressed session log (header line + event lines).
+def _read_session_log(text: str) -> tuple[Mapping[str, Any], list[Any]]:
+    """Split a session log into its header record and the remaining records.
 
     Raises:
         AbError: If the log is empty, a line is not JSON, or the header carries
@@ -308,62 +308,96 @@ def parse_session(text: str) -> Trace:
     header = records[0]
     if not isinstance(header, dict) or "version" not in header:
         raise AbError("会话日志首行不是带 version 的 header")
+    return header, records[1:]
 
-    session_id = header.get("id") if isinstance(header.get("id"), str) else None
-    tool_calls: list[ToolCall] = []
-    tool_results: list[ToolResult] = []
-    assistant_texts: list[str] = []
-    steps = 0
+
+def _turn_end_kind(data: Mapping[str, Any]) -> str | None:
+    """Return the turn-end kind from either its string or object form."""
+    reason = data.get("reason")
+    if isinstance(reason, dict) and isinstance(reason.get("kind"), str):
+        return str(reason["kind"])
+    if isinstance(reason, str):
+        return reason
+    return None
+
+
+@dataclass
+class _TraceAcc:
+    """Mutable accumulator for the events of one session log."""
+
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_results: list[ToolResult] = field(default_factory=list)
+    assistant_texts: list[str] = field(default_factory=list)
+    steps: int = 0
     turn_end: str | None = None
-    input_tokens = output_tokens = total_tokens = 0
-    interrupted = False
-    for record in records[1:]:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    interrupted: bool = False
+
+    def absorb(self, record: Any) -> None:
+        """Fold one session event in; unknown kinds are ignored."""
         if not isinstance(record, dict):
-            continue
+            return
         kind = record.get("type")
         data = record.get("data")
         if not isinstance(data, dict):
-            continue
+            return
         if kind == "tool/call":
-            tool_calls.append(
+            self.tool_calls.append(
                 ToolCall(
                     name=str(data.get("name", "")),
                     arguments=str(data.get("arguments", "")),
                 )
             )
         elif kind == "tool/result":
-            tool_results.append(_parse_tool_result(data))
+            self.tool_results.append(_parse_tool_result(data))
         elif kind == "assistant/message":
-            text = _assistant_text(data)
-            if text:
-                assistant_texts.append(text)
-            usage = data.get("usage")
-            if isinstance(usage, dict):
-                input_tokens += _int(usage.get("inputTokens"))
-                output_tokens += _int(usage.get("outputTokens"))
-                total_tokens += _int(usage.get("totalTokens"))
-            if data.get("interrupted") is True:
-                interrupted = True
+            self._absorb_assistant(data)
         elif kind == "step/start":
-            steps += 1
+            self.steps += 1
         elif kind == "turn/end":
-            reason = data.get("reason")
-            if isinstance(reason, dict) and isinstance(reason.get("kind"), str):
-                turn_end = reason["kind"]
-            elif isinstance(reason, str):
-                turn_end = reason
+            turn_end = _turn_end_kind(data)
+            if turn_end is not None:
+                self.turn_end = turn_end
+
+    def _absorb_assistant(self, data: Mapping[str, Any]) -> None:
+        """Fold one assistant message in: text, usage totals and interruption."""
+        text = _assistant_text(data)
+        if text:
+            self.assistant_texts.append(text)
+        usage = data.get("usage")
+        if isinstance(usage, dict):
+            self.input_tokens += _int(usage.get("inputTokens"))
+            self.output_tokens += _int(usage.get("outputTokens"))
+            self.total_tokens += _int(usage.get("totalTokens"))
+        if data.get("interrupted") is True:
+            self.interrupted = True
+
+
+def parse_session(text: str) -> Trace:
+    """Parse one uncompressed session log (header line + event lines).
+
+    Raises:
+        AbError: If the log is empty, a line is not JSON, or the header carries
+            no version.
+    """
+    header, records = _read_session_log(text)
+    acc = _TraceAcc()
+    for record in records:
+        acc.absorb(record)
     return Trace(
-        session_id=session_id,
-        tool_calls=tuple(tool_calls),
-        tool_results=tuple(tool_results),
-        final_text=assistant_texts[-1] if assistant_texts else "",
-        all_text="\n".join(assistant_texts),
-        steps=steps,
-        turn_end=turn_end,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=total_tokens,
-        interrupted=interrupted,
+        session_id=header.get("id") if isinstance(header.get("id"), str) else None,
+        tool_calls=tuple(acc.tool_calls),
+        tool_results=tuple(acc.tool_results),
+        final_text=acc.assistant_texts[-1] if acc.assistant_texts else "",
+        all_text="\n".join(acc.assistant_texts),
+        steps=acc.steps,
+        turn_end=acc.turn_end,
+        input_tokens=acc.input_tokens,
+        output_tokens=acc.output_tokens,
+        total_tokens=acc.total_tokens,
+        interrupted=acc.interrupted,
     )
 
 
@@ -575,6 +609,122 @@ def _resolve_dsh(dsh: Sequence[str]) -> list[str]:
     return list(dsh)
 
 
+@dataclass(frozen=True)
+class _GroupPlan:
+    """Validated, fully resolved inputs for one A/B run."""
+
+    out_dir: Path
+    workspace: Path
+    dsh: list[str]
+    patches: list[Path]
+    dsh_home: Path | None
+
+
+def _plan_group(
+    *,
+    trials: int,
+    out_dir: Path,
+    workspace: Path,
+    dsh: Sequence[str],
+    patches: Sequence[Path],
+    dsh_home: Path | None,
+) -> _GroupPlan:
+    """Validate and resolve every path before any child process starts.
+
+    Raises:
+        AbError: If `trials` is below 1, the workspace or a patch is missing, or
+            a path-like dsh launcher does not exist.
+    """
+    if trials < 1:
+        raise AbError(f"trials 必须 ≥ 1，实际 {trials}")
+    resolved_workspace = workspace.resolve()
+    if not resolved_workspace.is_dir():
+        raise AbError(f"workspace 不存在或不是目录：{resolved_workspace}")
+    resolved_dsh = _resolve_dsh(dsh)
+    if resolved_dsh and os.sep in resolved_dsh[0] and not Path(resolved_dsh[0]).is_file():
+        raise AbError(
+            f"找不到 dsh 启动器 {resolved_dsh[0]!r}：相对路径按调用目录解析，"
+            "请用绝对路径或 PATH 上的命令"
+        )
+    resolved_patches = [patch.resolve() for patch in patches]
+    for patch in resolved_patches:
+        if not patch.is_file():
+            raise AbError(f"找不到 patch 文件：{patch}")
+    resolved_out = out_dir.resolve()
+    resolved_out.mkdir(parents=True, exist_ok=True)
+    return _GroupPlan(
+        out_dir=resolved_out,
+        workspace=resolved_workspace,
+        dsh=resolved_dsh,
+        patches=resolved_patches,
+        dsh_home=dsh_home.resolve() if dsh_home is not None else None,
+    )
+
+
+def _run_case_attempts(
+    case: Case,
+    index: int,
+    trials: int,
+    plan: _GroupPlan,
+    *,
+    profile: str,
+    timeout_s: float,
+    env: Mapping[str, str] | None,
+) -> list[dict[str, Any]]:
+    """Run one case `trials` times, each with its own session-log directory."""
+    attempts: list[dict[str, Any]] = []
+    for attempt in range(1, trials + 1):
+        attempt_dir = (
+            plan.out_dir
+            / ".sessions"
+            / f"{index:03d}-{_slug(case.name)}"
+            / f"attempt-{attempt}"
+        )
+        sessions_root = attempt_dir / "sessions"
+        sessions_root.mkdir(parents=True, exist_ok=True)
+        overlay = attempt_dir / "compression.patch.yml"
+        overlay.write_text(compression_overlay(sessions_root), encoding="utf-8")
+        attempts.append(
+            _run_attempt(
+                case,
+                attempt_dir=attempt_dir,
+                sessions_root=sessions_root,
+                dsh=plan.dsh,
+                profile=profile,
+                patches=[overlay, *plan.patches],
+                workspace=plan.workspace,
+                timeout_s=timeout_s,
+                env=env,
+                dsh_home=plan.dsh_home,
+            )
+        )
+    return attempts
+
+
+def _group_report(
+    group: str,
+    profile: str,
+    trials: int,
+    plan: _GroupPlan,
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Assemble the run report from the per-case results."""
+    successes_total = sum(case["successes"] for case in results)
+    attempts_total = sum(case["trials"] for case in results)
+    return {
+        "schema": RUN_SCHEMA,
+        "group": group,
+        "profile": profile,
+        "trials": trials,
+        "workspace": str(plan.workspace),
+        "dsh": list(plan.dsh),
+        "cases": results,
+        "successes": successes_total,
+        "attempts": attempts_total,
+        "task_success_rate": successes_total / attempts_total if attempts_total else None,
+    }
+
+
 def run_group(
     cases: Sequence[Case],
     *,
@@ -599,65 +749,96 @@ def run_group(
     relative `--dsh` / `--patch` / `--out` would otherwise be re-based onto the
     workspace and silently fail to spawn or to find the session log.
     """
-    if trials < 1:
-        raise AbError(f"trials 必须 ≥ 1，实际 {trials}")
-    out_dir = out_dir.resolve()
-    workspace = workspace.resolve()
-    dsh = _resolve_dsh(dsh)
-    patches = [patch.resolve() for patch in patches]
-    if dsh_home is not None:
-        dsh_home = dsh_home.resolve()
-    if not workspace.is_dir():
-        raise AbError(f"workspace 不存在或不是目录：{workspace}")
-    if dsh and os.sep in dsh[0] and not Path(dsh[0]).is_file():
-        raise AbError(
-            f"找不到 dsh 启动器 {dsh[0]!r}：相对路径按调用目录解析，"
-            "请用绝对路径或 PATH 上的命令"
+    plan = _plan_group(
+        trials=trials,
+        out_dir=out_dir,
+        workspace=workspace,
+        dsh=dsh,
+        patches=patches,
+        dsh_home=dsh_home,
+    )
+    results = [
+        _case_result(
+            case,
+            _run_case_attempts(
+                case,
+                index,
+                trials,
+                plan,
+                profile=profile,
+                timeout_s=timeout_s,
+                env=env,
+            ),
+            trials,
         )
-    for patch in patches:
-        if not patch.is_file():
-            raise AbError(f"找不到 patch 文件：{patch}")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    results: list[dict[str, Any]] = []
-    for index, case in enumerate(cases):
-        attempts: list[dict[str, Any]] = []
-        for attempt in range(1, trials + 1):
-            attempt_dir = (
-                out_dir / ".sessions" / f"{index:03d}-{_slug(case.name)}" / f"attempt-{attempt}"
-            )
-            sessions_root = attempt_dir / "sessions"
-            sessions_root.mkdir(parents=True, exist_ok=True)
-            overlay = attempt_dir / "compression.patch.yml"
-            overlay.write_text(compression_overlay(sessions_root), encoding="utf-8")
-            attempts.append(
-                _run_attempt(
-                    case,
-                    attempt_dir=attempt_dir,
-                    sessions_root=sessions_root,
-                    dsh=dsh,
-                    profile=profile,
-                    patches=[overlay, *patches],
-                    workspace=workspace,
-                    timeout_s=timeout_s,
-                    env=env,
-                    dsh_home=dsh_home,
-                )
-            )
-        results.append(_case_result(case, attempts, trials))
-    successes_total = sum(case["successes"] for case in results)
-    attempts_total = len(cases) * trials
+        for index, case in enumerate(cases)
+    ]
+    return _group_report(group, profile, trials, plan, results)
+
+
+def _spawn_dsh(
+    command: Sequence[str],
+    workspace: Path,
+    child_env: Mapping[str, str],
+    timeout_s: float,
+) -> tuple[str, str, int | None, str | None]:
+    """Run one DSH child; return stdout, stderr, exit code and any spawn error."""
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=workspace,
+            env=child_env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "", "", None, f"超时 {timeout_s}s"
+    except OSError as exc:
+        return "", "", None, f"无法启动 dsh：{exc}"
+    return completed.stdout, completed.stderr, completed.returncode, None
+
+
+def _blank_attempt(
+    error: str | None, exit_code: int | None, duration_s: float, stderr: str
+) -> dict[str, Any]:
+    """Build the attempt record before the session log has been read."""
     return {
-        "schema": RUN_SCHEMA,
-        "group": group,
-        "profile": profile,
-        "trials": trials,
-        "workspace": str(workspace),
-        "dsh": list(dsh),
-        "cases": results,
-        "successes": successes_total,
-        "attempts": attempts_total,
-        "task_success_rate": successes_total / attempts_total if attempts_total else None,
+        "passed": False,
+        "failures": [],
+        "error": error,
+        "exit_code": exit_code,
+        "duration_s": round(duration_s, 3),
+        "session_log": None,
+        "steps": 0,
+        "total_tokens": 0,
+        "tool_calls": [],
+        "turn_end": None,
+        "final_text": "",
+        "stderr_tail": stderr[-2000:],
     }
+
+
+def _absorb_trace(
+    attempt: dict[str, Any],
+    case: Case,
+    trace: Trace,
+    log_path: Path,
+    exit_code: int | None,
+) -> None:
+    """Fill an attempt record from its trace and evaluate the case."""
+    attempt["session_log"] = str(log_path)
+    attempt["steps"] = trace.steps
+    attempt["total_tokens"] = trace.total_tokens
+    attempt["tool_calls"] = [call.name for call in trace.tool_calls]
+    attempt["turn_end"] = trace.turn_end
+    attempt["final_text"] = trace.final_text
+    failures = evaluate(case, trace)
+    attempt["failures"] = failures
+    attempt["passed"] = not failures and exit_code == 0
+    if exit_code != 0:
+        attempt["failures"] = [*failures, f"dsh 退出码 {exit_code}"]
 
 
 def _run_attempt(
@@ -678,58 +859,18 @@ def _run_attempt(
     if dsh_home is not None:
         child_env["DSH_HOME"] = str(dsh_home)
     started = time.monotonic()
-    stdout = stderr = ""
-    exit_code: int | None = None
-    error: str | None = None
+    stdout, stderr, exit_code, error = _spawn_dsh(command, workspace, child_env, timeout_s)
+    attempt = _blank_attempt(error, exit_code, time.monotonic() - started, stderr)
+    if error is not None:
+        return attempt
     try:
-        completed = subprocess.run(
-            command,
-            cwd=workspace,
-            env=child_env,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            check=False,
-        )
-        stdout, stderr, exit_code = completed.stdout, completed.stderr, completed.returncode
-    except subprocess.TimeoutExpired:
-        error = f"超时 {timeout_s}s"
-    except OSError as exc:
-        error = f"无法启动 dsh：{exc}"
-    duration_s = time.monotonic() - started
-    attempt: dict[str, Any] = {
-        "passed": False,
-        "failures": [],
-        "error": error,
-        "exit_code": exit_code,
-        "duration_s": round(duration_s, 3),
-        "session_log": None,
-        "steps": 0,
-        "total_tokens": 0,
-        "tool_calls": [],
-        "turn_end": None,
-        "final_text": "",
-        "stderr_tail": stderr[-2000:],
-    }
-    if error is None:
-        try:
-            log_path = find_session_log(sessions_root)
-        except AbError as exc:
-            attempt["error"] = str(exc)
-            attempt["stdout_tail"] = stdout[-2000:]
-            return attempt
-        trace = parse_session(log_path.read_text(encoding="utf-8"))
-        attempt["session_log"] = str(log_path)
-        attempt["steps"] = trace.steps
-        attempt["total_tokens"] = trace.total_tokens
-        attempt["tool_calls"] = [call.name for call in trace.tool_calls]
-        attempt["turn_end"] = trace.turn_end
-        attempt["final_text"] = trace.final_text
-        failures = evaluate(case, trace)
-        attempt["failures"] = failures
-        attempt["passed"] = not failures and exit_code == 0
-        if exit_code != 0:
-            attempt["failures"] = [*failures, f"dsh 退出码 {exit_code}"]
+        log_path = find_session_log(sessions_root)
+    except AbError as exc:
+        attempt["error"] = str(exc)
+        attempt["stdout_tail"] = stdout[-2000:]
+        return attempt
+    trace = parse_session(log_path.read_text(encoding="utf-8"))
+    _absorb_trace(attempt, case, trace, log_path, exit_code)
     return attempt
 
 
