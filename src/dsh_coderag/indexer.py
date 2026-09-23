@@ -33,7 +33,7 @@ from dsh_coderag.log import build_audit_record, log_event, write_audit_dump
 from dsh_coderag.sanitize import scan_secret
 from dsh_coderag.text import to_bigrams
 from dsh_coderag.types import Chunk
-from dsh_coderag.walker import walk_with_report
+from dsh_coderag.walker import WalkReport, walk_with_report
 
 SCHEMA_VERSION = 1
 
@@ -137,6 +137,109 @@ def open_index(db_path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _walk_targets(
+    base: Path, config: IndexConfig | None
+) -> tuple[WalkReport, set[str]]:
+    """Walk the workspace and return its report plus the relative paths seen."""
+    max_files = config.max_files if config is not None else DEFAULT_MAX_FILES
+    max_file_bytes = (
+        config.max_file_bytes if config is not None else DEFAULT_MAX_FILE_BYTES
+    )
+    report = walk_with_report(base, max_files=max_files, max_file_bytes=max_file_bytes)
+    current_paths = {
+        absolute.relative_to(base).as_posix() for absolute, _, _ in report.files
+    }
+    return report, current_paths
+
+
+def _known_hashes(connection: sqlite3.Connection) -> dict[str, str]:
+    """Read the path -> content hash map that drives incremental skipping."""
+    return {
+        str(row[0]): str(row[1])
+        for row in connection.execute("SELECT path, content_hash FROM files").fetchall()
+    }
+
+
+def _write_batches(
+    connection: sqlite3.Connection,
+    prepared: list[_PreparedFile],
+    batch_size: int,
+    check: Callable[[], bool],
+) -> tuple[int, float]:
+    """Write prepared files in adaptive batches.
+
+    Returns the chunk count written and the milliseconds spent writing, so the
+    caller can report the write phase without owning the loop.
+    """
+    total_chunks = 0
+    written_ms = 0.0
+    position = 0
+    while position < len(prepared) and not check():
+        end = min(position + batch_size, len(prepared))
+        started = time.monotonic()
+        with connection:
+            for item in prepared[position:end]:
+                if check():
+                    break
+                total_chunks += _write_prepared(connection, item)
+        batch_ms = _ms(started)
+        written_ms += batch_ms
+        batch_size = next_batch_size(batch_size, batch_ms / 1000.0)
+        position = end
+    return total_chunks, written_ms
+
+
+def _log_index_error(run_started: float, exc: Exception) -> None:
+    """Log the structured failure event for an aborted indexing run."""
+    log_event(
+        "index_error",
+        level="error",
+        duration_ms=_ms(run_started),
+        error=type(exc).__name__,
+    )
+
+
+def _report_index_done(
+    base: Path,
+    report: WalkReport,
+    total_chunks: int,
+    redacted: int,
+    phase_ms: dict[str, float],
+    run_started: float,
+) -> IndexSummary:
+    """Write the audit dump, log completion and build the run summary."""
+    total_ms = _ms(run_started)
+    record = build_audit_record(
+        root=str(base),
+        task_id=None,
+        files=len(report.files),
+        chunks=total_chunks,
+        skipped=dict(report.reasons),
+        redacted=redacted,
+        duration_ms={**phase_ms, "total": total_ms},
+    )
+    write_audit_dump(base, record)
+    log_event(
+        "index_done",
+        duration_ms=total_ms,
+        files=len(report.files),
+        chunks=total_chunks,
+        skipped=sum(report.reasons.values()),
+        redacted=redacted,
+    )
+    return IndexSummary(root=base, files=len(report.files), chunks=total_chunks)
+
+
+def _run_options(
+    config: IndexConfig | None, should_cancel: Callable[[], bool] | None
+) -> tuple[int, int, Callable[[], bool]]:
+    """Resolve workers, starting batch size and the cancellation check."""
+    workers = config.workers if config is not None else adaptive_workers()
+    batch_size = config.start_batch_size if config is not None else DEFAULT_BATCH_SIZE
+    check = should_cancel if should_cancel is not None else _never_cancelled
+    return workers, batch_size, check
+
+
 def index_sync(
     root: Path,
     config: IndexConfig | None = None,
@@ -157,82 +260,32 @@ def index_sync(
     db_path = base / ".coderag" / "index.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = open_index(db_path)
-    workers = config.workers if config is not None else adaptive_workers()
-    batch_size = config.start_batch_size if config is not None else DEFAULT_BATCH_SIZE
-    check = should_cancel if should_cancel is not None else _never_cancelled
+    workers, batch_size, check = _run_options(config, should_cancel)
     phase_ms = {"walk": 0.0, "prepare": 0.0, "write": 0.0, "cleanup": 0.0}
     run_started = time.monotonic()
     log_event("index_start", root=str(base))
     try:
         started = time.monotonic()
-        max_files = config.max_files if config is not None else DEFAULT_MAX_FILES
-        max_file_bytes = (
-            config.max_file_bytes if config is not None else DEFAULT_MAX_FILE_BYTES
-        )
-        report = walk_with_report(
-            base, max_files=max_files, max_file_bytes=max_file_bytes
-        )
-        entries = report.files
+        report, current_paths = _walk_targets(base, config)
         phase_ms["walk"] = _ms(started)
-        current_paths = {
-            absolute.relative_to(base).as_posix() for absolute, _, _ in entries
-        }
-        known = {
-            str(row[0]): str(row[1])
-            for row in connection.execute(
-                "SELECT path, content_hash FROM files"
-            ).fetchall()
-        }
         started = time.monotonic()
-        prepared = _prepare_files(entries, base, known, workers, check)
+        prepared = _prepare_files(
+            report.files, base, _known_hashes(connection), workers, check
+        )
         phase_ms["prepare"] = _ms(started)
         redacted = sum(item.redacted for item in prepared)
-        total_chunks = 0
-        position = 0
-        while position < len(prepared) and not check():
-            end = min(position + batch_size, len(prepared))
-            started = time.monotonic()
-            with connection:
-                for item in prepared[position:end]:
-                    if check():
-                        break
-                    total_chunks += _write_prepared(connection, item)
-            batch_ms = _ms(started)
-            phase_ms["write"] += batch_ms
-            batch_size = next_batch_size(batch_size, batch_ms / 1000.0)
-            position = end
+        total_chunks, written_ms = _write_batches(connection, prepared, batch_size, check)
+        phase_ms["write"] += written_ms
         started = time.monotonic()
         if not check():
             _remove_missing_files(connection, current_paths)
             _mark_ready(connection, base)
         phase_ms["cleanup"] = _ms(started)
-        total_ms = _ms(run_started)
-        record = build_audit_record(
-            root=str(base),
-            task_id=None,
-            files=len(entries),
-            chunks=total_chunks,
-            skipped=dict(report.reasons),
-            redacted=redacted,
-            duration_ms={**phase_ms, "total": total_ms},
+        return _report_index_done(
+            base, report, total_chunks, redacted, phase_ms, run_started
         )
-        write_audit_dump(base, record)
-        log_event(
-            "index_done",
-            duration_ms=total_ms,
-            files=len(entries),
-            chunks=total_chunks,
-            skipped=sum(report.reasons.values()),
-            redacted=redacted,
-        )
-        return IndexSummary(root=base, files=len(entries), chunks=total_chunks)
     except Exception as exc:
-        log_event(
-            "index_error",
-            level="error",
-            duration_ms=_ms(run_started),
-            error=type(exc).__name__,
-        )
+        _log_index_error(run_started, exc)
         raise
     finally:
         connection.close()
