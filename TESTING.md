@@ -74,7 +74,7 @@
 | **M8** | **容量上限显式失败** | RL-08：静默截断会让用户以为索引完整 | L1 | T2-11 |
 | **M9** | **模型可见文本快照** | 工具描述/返回格式是稳定契约 | L2 | T1-09 |
 | **M10** | **异常不冒泡** | RL-09：内部异常必须转成结构化状态 | L2 | T1-13 |
-| **M11** | **可选后端默认关闭且未配置时回退** | `RL-10` / `ADR-16` §2：向量是 opt-in——**未配置时必须与纯 BM25 逐条一致**，后端不可用/非 loopback/模型缺失时必须**干净回退**而不是报错或返回空列表（`RL-06`/`RL-09`）。**这条测试必须在无网络、无 Ollama 的条件下通过**（`T-02`，见 §3.12） | L1+L2 | T3-08, T3-09, T3-10, T3-11, T5-15 |
+| **M11** | **可选后端默认关闭且未配置时回退（本地 + 云端）** | `RL-10` / `ADR-16` §2 / `ADR-17` §3：向量是 opt-in——**未配置时必须与纯 BM25 逐条一致**，后端不可用/非 loopback/模型缺失时必须**干净回退**而不是报错或返回空列表（`RL-06`/`RL-09`）。云端（`_BACKEND=openai`）另加：**判据按后端独立成立**（`ADR-17` §1.6）、非 loopback 需 `CODERAG_SEMANTIC_ALLOW_REMOTE=1` 第二把钥匙、**无 key / 401 / 429 / 超时四种失败**都是结构化回退、且 **key 绝不出现在日志/状态/异常**（`S-05`）。**这条测试必须在无网络、无 Ollama、无真 key 的条件下通过**（`T-02`，见 §3.12） | L1+L2 | T3-08, T3-09, T3-10, T3-11, T5-15, T5-20, T5-22 |
 
 ---
 
@@ -632,6 +632,42 @@ def test_non_loopback_url_is_refused(tmp_path, monkeypatch):
     # → SEMANTIC_BACKEND_NOT_LOCAL，并回退 BM25
 ```
 
+**第四组：云端后端（`openai` 兼容）的四种失败**（`ADR-17` §6/§7；**全部离线注入——用 loopback 桩与假 key，不联网、不需要真 key**，`T-02`）
+
+云端后端不能只测"开关打开"。四种失败各自断言**结构化回退**，且**判据按后端独立判定**——本地后端的结论不给云端背书（`ADR-17` §1.6）：
+
+```python
+@pytest.mark.parametrize(
+    ("stub_status", "sentinel_key", "expected_code"),
+    [
+        (None, None, "SEMANTIC_AUTH_MISSING"),   # 无 key：桩上必须 0 连接
+        (401, "sk-sentinel-not-a-real-key", "SEMANTIC_AUTH_REJECTED"),
+        (429, "sk-sentinel-not-a-real-key", "SEMANTIC_RATE_LIMITED"),
+        (None, "sk-sentinel-not-a-real-key", "SEMANTIC_EMBED_FAILED"),  # 桩不回包 + TIMEOUT=1
+    ],
+)
+def test_cloud_failures_fall_back_to_bm25(tmp_path, monkeypatch, stub_status, sentinel_key, expected_code):
+    """M11 / ADR-17 §6：云端四种失败都是结构化回退，且 key 绝不出现在日志/状态/异常里。
+
+    桩只监听 127.0.0.1（loopback），因此不需要 ALLOW_REMOTE，也不触网。
+    """
+    monkeypatch.setenv("CODERAG_SEMANTIC", "on")
+    monkeypatch.setenv("CODERAG_SEMANTIC_BACKEND", "openai")
+    monkeypatch.setenv("CODERAG_SEMANTIC_URL", "http://127.0.0.1:<桩端口>/v1")
+    monkeypatch.setenv("CODERAG_SEMANTIC_MODEL", "test-model")
+    # 1) 逐条结果与"关闭时"完全一致（干净回退的定义，见 ADR-16 §2）
+    # 2) 状态里是 expected_code，不 isError、不返回空列表（RL-06/RL-09）
+    # 3) 假 key 作为哨兵串，断言 stdout / stderr / 返回 JSON / 异常文本里零命中（S-05）
+    # 4) 无 key 那一档断言桩上收到 0 次连接；未启用时同样 0 次
+```
+
+**第四组的两条额外要求**：
+
+| 要求 | 说明 |
+|---|---|
+| **空串 = 未设** | patch 下发的 `_MODEL`/`_URL` 为空串时必须回落到"未配置"语义（`ADR-17` §4），**不得**用空串覆盖默认——反例 `os.environ.get(name, default)` |
+| **双重开关的拒绝路径** | URL 指向非 loopback 且未设 `CODERAG_SEMANTIC_ALLOW_REMOTE=1` → 拒绝启用并回退 BM25；本地后端则报 `SEMANTIC_BACKEND_NOT_LOCAL` |
+
 **不许这样测**（会同时破坏 `T-02` 与结论的有效性）：
 
 | 反例 | 为什么不行 |
@@ -641,7 +677,7 @@ def test_non_loopback_url_is_refused(tmp_path, monkeypatch):
 | 只断言 `isError is False` | `RL-06` 的另一半是**不能返回空列表**——两个都要断言 |
 | 断言"调用了 embedding 接口" | 那是**启用**路径的测试，属"后端可用"那组；本组反着来 |
 
-> **实现顺序提醒**：`SEMANTIC_*` 这些 code 目前**还没进** `ErrorCode`（`ADR-16` §6 已写明这是契约先行，登记由 `T3-08`–`T3-11` 完成）。所以上面第二、三组用例在 `T3-10` 之前会**因为 code 不存在而红**——这不是测试写错了，而是它正确地指向了尚未实现的契约。
+> **实现顺序提醒**：`SEMANTIC_*` 这些 code 目前**还没进** `ErrorCode`（`ADR-16` §6 / `ADR-17` §6 已写明这是契约先行，登记由 `T3-08`–`T3-11` 与 `T5-20` 完成）。所以上面第二～四组用例在实现落地之前会**因为 code 不存在而红**——这不是测试写错了，而是它正确地指向了尚未实现的契约。
 
 ---
 
@@ -915,7 +951,7 @@ jobs:
   M1 安全过滤（硬门禁）  M2 中文分词对称性   M3 状态契约
   M4 stdout 洁净        M5 检索质量         M6 分块完整性
   M7 顺序保持           M8 容量上限失败      M9 文本快照
-  M10 异常不冒泡        M11 可选后端默认关闭/干净回退（离线可测）
+  M10 异常不冒泡        M11 可选后端默认关闭/干净回退（本地+云端，离线可测）
 
 CI 三条门禁：
   ruff check  |  mypy --strict src  |  pytest -q

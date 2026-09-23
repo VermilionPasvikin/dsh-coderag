@@ -644,6 +644,62 @@ PY
 
 > **V4 的原文是"若 C 组不能显著优于 B 组，则不发布向量路径"**（`ADR-14` §10.4）。它的精神是：**不得为一个已达成的目标增加常驻复杂度**——端到端目标已由纯词法达成（`ADR-15` §2.1），所以向量必须**额外**证明自己在 L1 上值这个价，否则就留在仓库里不发布。
 
+#### 3.7.4 判据**按后端独立判定**（`ADR-17` §1.6 / §7）
+
+可选后端有**两条**——本地 `ollama`（`ADR-16`）与云端 `openai` 兼容（`ADR-17`）。**判据不共享**：
+
+| 项 | 规定 |
+|---|---|
+| 判据按后端独立判定 | `S5` 与 `V1`–`V4` 由**实际启用的那个后端**独立满足。**本地后端的探针或 L1 结果不得给云端背书，反之亦然**（`ADR-17` §1.6） |
+| 探针 | 每个后端各自重跑一次 §3.7.1 的天花板探针，结论分节写在各自的报告里 |
+| 本地后端 | `_BACKEND=ollama`（默认），URL 必须是 loopback（`http://127.0.0.1:11434`）；`ALLOW_REMOTE` 对它不生效 |
+| 云端后端 | `_BACKEND=openai`，URL 与 MODEL **必须显式给出**；URL 非 loopback 时**额外需要 `CODERAG_SEMANTIC_ALLOW_REMOTE=1`**（双重开关，`ADR-17` §1.3）；key 只从运行时环境读（`RL-02`） |
+| 没有 key | 云端路径**不跑**，如实标注「已实现未验证」；**不得**用估算或转述的数字代替实测（`ADR-17` §7） |
+
+§3.7.2 的 C 组命令**按后端加环境变量**即可；配对要求（同一批用例 / 同一工作区 / 同一 trials / 同一 profile）逐项不变：
+
+```sh
+# C 组 · 本地后端
+CODERAG_SEMANTIC=on CODERAG_SEMANTIC_BACKEND=ollama \
+CODERAG_SEMANTIC_URL=http://127.0.0.1:11434 CODERAG_SEMANTIC_MODEL=bge-m3 \
+  python scripts/ab_eval.py run --cases cases \
+    --group eval-coderag-vector-ollama --out eval/runs/c-ollama \
+    --profile headless --patch cordis.patch.yml \
+    --workspace <已索引的语料副本> --trials 3
+
+# C 组 · 云端后端（双重开关；key 只从运行时环境读，仓库里只留变量名）
+CODERAG_SEMANTIC=on CODERAG_SEMANTIC_BACKEND=openai \
+CODERAG_SEMANTIC_URL=https://<provider>/v1 CODERAG_SEMANTIC_MODEL=<model> \
+CODERAG_SEMANTIC_ALLOW_REMOTE=1 \
+CODERAG_SEMANTIC_API_KEY="$CODERAG_SEMANTIC_API_KEY" \
+  python scripts/ab_eval.py run --cases cases \
+    --group eval-coderag-vector-cloud --out eval/runs/c-cloud \
+    --profile headless --patch cordis.patch.yml \
+    --workspace <已索引的语料副本> --trials 3
+```
+
+> **报告必须标明后端**：`c-ollama` 与 `c-cloud` 是**两份独立报告**，不能拼成一份"向量组"。把「哪个后端 / 哪个模型 / 哪个维度」写进报告头，否则 `V4` 的发布决定无法归因。
+
+#### 3.7.5 云端后端的**失败注入**（离线优先，`ADR-17` §6 / §7）
+
+云端后端的四种失败**都能离线注入**——用 **loopback 桩**（返回指定 HTTP 状态码）与**空/假 key**，不需要联网、不需要真 key（`T-02`）：
+
+| 注入 | 怎么做（离线） | 期望的可观测结果 |
+|---|---|---|
+| **无 key** | `env -u CODERAG_SEMANTIC_API_KEY`（或设成空串——**空串 = 未设**，`ADR-17` §4） | `SEMANTIC_AUTH_MISSING`；**零请求**（桩上收到 0 次连接）；回退 BM25 |
+| **401 / 403** | URL 指向 loopback 桩，桩返回 `401`（403 同理）；key 用假值 | `SEMANTIC_AUTH_REJECTED`；**不重试**（重试不会变好）；回退 BM25 |
+| **429** | 桩返回 `429` | `SEMANTIC_RATE_LIMITED`；**重试上限仍为 2**；回退 BM25 |
+| **超时** | 桩接受连接但不回包，且 `CODERAG_SEMANTIC_TIMEOUT=1` | `SEMANTIC_EMBED_FAILED`；不拖过 60 s 的工具预算（`E-01`）；回退 BM25 |
+
+**四种失败共同的断言**（缺一不可）：
+
+1. **干净回退**：逐条结果与「未启用」时完全一致（`S6`；`ADR-16` §2 的冻结含义）；
+2. **结构化状态**：返回体带 `status` 与上述 code，**不 `isError`、不返回空列表**（`RL-06`/`RL-09`）；
+3. **key 不入日志/状态/异常**：把假 key 设成一个可 grep 的哨兵串，跑完断言它在 **stdout / stderr / 返回 JSON / 异常文本**里**零命中**（`S-05`、`RL-02`）；
+4. **未启用时零网络调用**：`CODERAG_SEMANTIC` 未设时，桩上收到 **0 次连接**（`S-01`）。
+
+**双重开关的拒绝路径**也要有：URL 指向非 loopback 且**未**设 `CODERAG_SEMANTIC_ALLOW_REMOTE=1` → **拒绝启用**（本地后端报 `SEMANTIC_BACKEND_NOT_LOCAL`；云端后端按 `ADR-17` §1.3 一律拒绝），且回退 BM25。
+
 ---
 
 ## 4. L3：回归门禁
