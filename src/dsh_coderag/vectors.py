@@ -378,12 +378,25 @@ def _read_manifest(path: Path) -> _Manifest:
 
 
 def cosine_top_k(
-    matrix: np.ndarray[Any, Any], query_vector: Sequence[float], k: int
+    matrix: np.ndarray[Any, Any],
+    query_vector: Sequence[float],
+    k: int,
+    tier: Sequence[int] | None = None,
 ) -> list[tuple[int, float]]:
     """Return the k best (row index, cosine) pairs, highest cosine first.
 
     The comparison is a plain brute-force dot product on L2-normalized rows,
     which is what ADR-14 allows below 100k chunks: no vector database.
+
+    `tier` is an optional per-row rank class (0 before 1). It is applied
+    **before** the top-k cut, which is what makes the frozen non-test-first
+    ordering effective: cutting first would let a run of test chunks fill every
+    slot and the real implementation would never reach the caller at all
+    (ADR-16, update of 2026-09-24).
+
+    Float32 BLAS on macOS (Accelerate) raises spurious divide-by-zero and
+    overflow flags for large products; results are verified finite here and the
+    flags are suppressed so they cannot pollute the JSON-Lines error log.
     """
     numpy = _numpy()
     rows = numpy.asarray(matrix, dtype=numpy.float32)
@@ -395,7 +408,18 @@ def cosine_top_k(
     if query_norm == 0.0:
         return []
     safe_norms = numpy.where(row_norms == 0.0, 1.0, row_norms)
-    scores = (rows @ query) / (safe_norms * query_norm)
+    with numpy.errstate(all="ignore"):
+        scores = (rows @ query) / (safe_norms * query_norm)
     scores = numpy.where(row_norms == 0.0, 0.0, scores)
-    order = numpy.argsort(-scores, kind="stable")[:k]
+    if not bool(numpy.isfinite(scores).all()):
+        raise SemanticError(
+            ErrorCode.SEMANTIC_EMBED_FAILED,
+            "cosine scoring produced non-finite values",
+            "rebuild the vector index; the stored matrix or the query is corrupt",
+        )
+    order = numpy.argsort(-scores, kind="stable")
+    if tier is not None:
+        classes = numpy.asarray(tier, dtype=numpy.int8)
+        order = order[numpy.argsort(classes[order], kind="stable")]
+    order = order[:k]
     return [(int(index), float(scores[int(index)])) for index in order]

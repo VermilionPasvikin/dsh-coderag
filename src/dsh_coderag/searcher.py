@@ -502,10 +502,14 @@ def vector_candidates(
 ) -> list[Hit]:
     """Return the k chunks whose vectors are closest to query_vector.
 
-    This is the optional backend's recall step only. Candidates come back in
-    descending cosine order; ADR-05's source ordering and the frozen
-    non-test-first tier are applied by the caller that fuses them with BM25
-    (T3-10), so this function deliberately does not reorder them.
+    The optional backend's recall step. Candidates come back in descending
+    cosine order; ADR-05's source ordering is applied by the caller that fuses
+    them with BM25.
+
+    The frozen non-test-first tier (ADR-16, update of 2026-09-24) is applied
+    **here, before the top-k cut**, not only at fusion time: this corpus is
+    mostly test chunks, so cutting first would fill every slot with test files
+    and the real implementation would never become a candidate at all.
 
     Args:
         root: Workspace root holding `.coderag/index.sqlite3`.
@@ -514,21 +518,40 @@ def vector_candidates(
         k: Maximum number of candidates.
 
     Returns:
-        At most k hits, closest first.
+        At most k hits, non-test paths first, then closest first.
 
     Raises:
         SemanticError: SEMANTIC_INDEX_MISSING when a scored chunk is no longer
             in the BM25 index. That is index drift, not a partial answer, so it
             is reported instead of silently returning fewer candidates (RL-08).
     """
-    scored = vectors.cosine_top_k(index.matrix, query_vector, k)
-    if not scored:
-        return []
     connection = connect(root.resolve() / ".coderag" / "index.sqlite3")
     try:
+        tiers = _row_tiers(connection, index.chunk_ids)
+        scored = vectors.cosine_top_k(index.matrix, query_vector, k, tier=tiers)
+        if not scored:
+            return []
         return _load_scored_hits(connection, index, scored)
     finally:
         connection.close()
+
+
+def _row_tiers(
+    connection: sqlite3.Connection, chunk_ids: Sequence[int]
+) -> list[int]:
+    """Return 1 for rows whose path is a test path, 0 otherwise.
+
+    Uses `TEST_PATH_TIER_SQL` itself, so the Python-side vector tier and the
+    SQL-side BM25 tier can never drift apart.
+    """
+    test_ids = {
+        int(row[0])
+        for row in connection.execute(
+            "SELECT c.id FROM chunks c JOIN files f ON f.id = c.file_id"
+            f" WHERE {TEST_PATH_TIER_SQL}"
+        )
+    }
+    return [1 if chunk_id in test_ids else 0 for chunk_id in chunk_ids]
 
 
 def _load_scored_hits(

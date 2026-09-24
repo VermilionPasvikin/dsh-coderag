@@ -163,3 +163,47 @@ def test_vector_search_reloads_the_persisted_index(workspace: Path) -> None:
     reloaded = load_index(workspace, _config())
     hits = vector_candidates(workspace, reloaded, [1.0, 0.0], 3)
     assert hits and hits[0].path == "pkg/alpha.py"
+
+
+def test_vector_search_applies_the_tier_before_the_top_k_cut(tmp_path: Path) -> None:
+    """A test chunk with a higher cosine must not take the only slot.
+
+    Cutting to top-k before applying the tier is exactly what made the C group
+    score natural@5 = 0.000 while the probe ceiling was 0.429.
+    """
+    root = tmp_path / "ws"
+    (root / "pkg").mkdir(parents=True)
+    (root / "tests").mkdir()
+    (root / "pkg" / "alpha.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    (root / "tests" / "alpha.spec.py").write_text(
+        "def test_alpha():\n    alpha = beta + alpha + beta + alpha\n", encoding="utf-8"
+    )
+    index_sync(root)
+    index = build_index(root, _config(), _chunks(root), transport=_transport)
+    query = [1.0, 1.0]
+    scored = cosine_top_k(index.matrix, query, len(index.chunk_ids))
+    best_row, best_score = scored[0]
+    best_path = _path_of(root, index.chunk_ids[best_row])
+    assert best_path.startswith("tests/"), "fixture must make the test chunk win on cosine"
+    hits = vector_candidates(root, index, query, 1)
+    assert [hit.path for hit in hits] == ["pkg/alpha.py"]
+    assert best_score > 0.85, "the test chunk really is the closer one"
+
+
+def _path_of(root: Path, chunk_id: int) -> str:
+    connection = connect(root / ".coderag" / "index.sqlite3")
+    try:
+        row = connection.execute(
+            "SELECT f.path FROM chunks c JOIN files f ON f.id = c.file_id WHERE c.id = ?",
+            (chunk_id,),
+        ).fetchone()
+        return str(row[0])
+    finally:
+        connection.close()
+
+
+def test_vector_search_rejects_a_non_finite_query() -> None:
+    matrix = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    with pytest.raises(SemanticError) as caught:
+        cosine_top_k(matrix, [float("nan"), 0.0], 2)
+    assert caught.value.code is ErrorCode.SEMANTIC_EMBED_FAILED
