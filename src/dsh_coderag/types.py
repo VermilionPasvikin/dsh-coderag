@@ -22,7 +22,12 @@ class SearchStatus(str, Enum):
 
 
 class ErrorCode(str, Enum):
-    """Stable error codes carried by structured error payloads."""
+    """Stable error codes carried by structured error payloads.
+
+    The SEMANTIC_* block is the optional-backend contract frozen by ADR-16 6
+    (seven codes) and ADR-17 6 (three more); it is registered here by T3-08 so
+    every backend task shares one authority.
+    """
 
     INDEX_NOT_FOUND = "INDEX_NOT_FOUND"
     FTS5_UNAVAILABLE = "FTS5_UNAVAILABLE"
@@ -34,6 +39,16 @@ class ErrorCode(str, Enum):
     SEARCH_FAILED = "SEARCH_FAILED"
     TASK_NOT_FOUND = "TASK_NOT_FOUND"
     CANCELLED = "CANCELLED"
+    SEMANTIC_BACKEND_UNAVAILABLE = "SEMANTIC_BACKEND_UNAVAILABLE"
+    SEMANTIC_BACKEND_NOT_LOCAL = "SEMANTIC_BACKEND_NOT_LOCAL"
+    SEMANTIC_BACKEND_UNSUPPORTED = "SEMANTIC_BACKEND_UNSUPPORTED"
+    SEMANTIC_EMBED_FAILED = "SEMANTIC_EMBED_FAILED"
+    SEMANTIC_INDEX_TOO_LARGE = "SEMANTIC_INDEX_TOO_LARGE"
+    SEMANTIC_INDEX_MISSING = "SEMANTIC_INDEX_MISSING"
+    SEMANTIC_MODEL_MISMATCH = "SEMANTIC_MODEL_MISMATCH"
+    SEMANTIC_AUTH_MISSING = "SEMANTIC_AUTH_MISSING"
+    SEMANTIC_AUTH_REJECTED = "SEMANTIC_AUTH_REJECTED"
+    SEMANTIC_RATE_LIMITED = "SEMANTIC_RATE_LIMITED"
 
 
 @dataclass(frozen=True)

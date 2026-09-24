@@ -17,7 +17,33 @@ def test_error_code_matches_the_documented_contract() -> None:
         "SEARCH_FAILED",
         "TASK_NOT_FOUND",
         "CANCELLED",
+        "SEMANTIC_BACKEND_UNAVAILABLE",
+        "SEMANTIC_BACKEND_NOT_LOCAL",
+        "SEMANTIC_BACKEND_UNSUPPORTED",
+        "SEMANTIC_EMBED_FAILED",
+        "SEMANTIC_INDEX_TOO_LARGE",
+        "SEMANTIC_INDEX_MISSING",
+        "SEMANTIC_MODEL_MISMATCH",
+        "SEMANTIC_AUTH_MISSING",
+        "SEMANTIC_AUTH_REJECTED",
+        "SEMANTIC_RATE_LIMITED",
     ]
+
+
+def test_semantic_codes_are_the_frozen_adr_contract() -> None:
+    frozen = {code.value for code in ErrorCode if code.name.startswith("SEMANTIC_")}
+    assert frozen == {
+        "SEMANTIC_BACKEND_UNAVAILABLE",
+        "SEMANTIC_BACKEND_NOT_LOCAL",
+        "SEMANTIC_BACKEND_UNSUPPORTED",
+        "SEMANTIC_EMBED_FAILED",
+        "SEMANTIC_INDEX_TOO_LARGE",
+        "SEMANTIC_INDEX_MISSING",
+        "SEMANTIC_MODEL_MISMATCH",
+        "SEMANTIC_AUTH_MISSING",
+        "SEMANTIC_AUTH_REJECTED",
+        "SEMANTIC_RATE_LIMITED",
+    }
 
 
 def test_search_status_matches_the_documented_contract() -> None:

@@ -32,9 +32,79 @@ SLOW_BATCH_SECONDS = 2.0
 MAX_WORKERS = 8
 WORKER_MEMORY_BYTES = 64 * 1024 * 1024
 
+# Optional embedding backend (ADR-16 4, ADR-17 4). Every name below is frozen:
+# the bundle patch ships them as empty strings, so "unset" and "blank" must be
+# the same thing and the documented default must survive.
+ENV_SEMANTIC = "CODERAG_SEMANTIC"
+ENV_SEMANTIC_BACKEND = "CODERAG_SEMANTIC_BACKEND"
+ENV_SEMANTIC_URL = "CODERAG_SEMANTIC_URL"
+ENV_SEMANTIC_MODEL = "CODERAG_SEMANTIC_MODEL"
+ENV_SEMANTIC_TIMEOUT = "CODERAG_SEMANTIC_TIMEOUT"
+ENV_SEMANTIC_BATCH = "CODERAG_SEMANTIC_BATCH"
+ENV_SEMANTIC_MAX_CHUNKS = "CODERAG_SEMANTIC_MAX_CHUNKS"
+ENV_SEMANTIC_API_KEY = "CODERAG_SEMANTIC_API_KEY"
+ENV_SEMANTIC_ALLOW_REMOTE = "CODERAG_SEMANTIC_ALLOW_REMOTE"
+
+SEMANTIC_ENABLED_VALUE = "on"
+SEMANTIC_ALLOW_REMOTE_VALUE = "1"
+SEMANTIC_BACKEND_OLLAMA = "ollama"
+SEMANTIC_BACKEND_OPENAI = "openai"
+
+DEFAULT_SEMANTIC_BACKEND = SEMANTIC_BACKEND_OLLAMA
+DEFAULT_SEMANTIC_URL = "http://127.0.0.1:11434"
+DEFAULT_SEMANTIC_MODEL = "bge-m3"
+DEFAULT_SEMANTIC_TIMEOUT = 30
+DEFAULT_SEMANTIC_BATCH = 16
+DEFAULT_SEMANTIC_MAX_CHUNKS = 100000
+
 
 class ConfigError(Exception):
     """Raised when a required setting is missing or a value is malformed."""
+
+
+@dataclass(frozen=True)
+class SemanticConfig:
+    """Settings for the optional embedding backend (ADR-16 4 / ADR-17 4).
+
+    Off by default: `enabled` is True only when CODERAG_SEMANTIC is exactly
+    `on`. Any other value keeps the backend off and is preserved in
+    `switch_value` so the structured status can name the invalid value instead
+    of guessing (ADR-16 4). Required settings that are missing raise
+    ConfigError rather than falling back to a guessed value.
+
+    SECURITY WARNING - enabling the cloud (`openai`) backend sends part of
+    your source text off this machine:
+
+    * What leaves: the text of already-indexed chunks, **including each chunk's
+      context prefix line** (`// file: <workspace-relative path> | symbol: ...`),
+      so file paths and symbol names are sent as well.
+    * What does not: files stopped by the three-layer filter (`.env`, `*.pem`,
+      `id_rsa*`, ...) never become chunks, so they can never be sent.
+    * Cost: cloud embedding is billed per token, and the first index embeds
+      every chunk, so the first run is the full spend.
+    * Compliance: the code may be company property or third-party licensed.
+      Confirm you are allowed to send it to that provider.
+    * API key: read from the environment only. Never write it into the
+      repository, a config literal, logs, structured status or error text.
+    * Transport: a non-loopback URL additionally requires
+      `CODERAG_SEMANTIC_ALLOW_REMOTE=1`; use `https://`.
+    """
+
+    enabled: bool
+    backend: str = DEFAULT_SEMANTIC_BACKEND
+    url: str = DEFAULT_SEMANTIC_URL
+    model: str = DEFAULT_SEMANTIC_MODEL
+    timeout_s: int = DEFAULT_SEMANTIC_TIMEOUT
+    batch: int = DEFAULT_SEMANTIC_BATCH
+    max_chunks: int = DEFAULT_SEMANTIC_MAX_CHUNKS
+    api_key: str | None = None
+    allow_remote: bool = False
+    switch_value: str | None = None
+
+    @property
+    def switch_invalid(self) -> bool:
+        """Whether CODERAG_SEMANTIC was set to something other than `on`."""
+        return self.switch_value is not None and not self.enabled
 
 
 @dataclass(frozen=True)
@@ -136,3 +206,63 @@ def _read_positive_int(environ: Mapping[str, str], name: str, default: int) -> i
     if value <= 0:
         raise ConfigError(f"{name} must be a positive integer, got {value}")
     return value
+
+
+def load_semantic_config(environ: Mapping[str, str] | None = None) -> SemanticConfig:
+    """Build a SemanticConfig from environment variables (ADR-16/17 4).
+
+    Empty and whitespace-only values count as unset so the documented default
+    keeps working. Never use `os.environ.get(name, default)` here: that would
+    let the patch's `MODEL=""` erase the `bge-m3` default.
+
+    Args:
+        environ: Mapping to read. Defaults to os.environ; tests pass a
+            controlled mapping instead of mutating the process environment.
+
+    Raises:
+        ConfigError: If a numeric setting is malformed, or if the cloud backend
+            is explicitly enabled without its required URL or model. Nothing is
+            validated while the backend is off, so a default install can never
+            be blocked by this function.
+    """
+    env = os.environ if environ is None else environ
+    switch_value = _read_optional_str(env, ENV_SEMANTIC)
+    enabled = switch_value == SEMANTIC_ENABLED_VALUE
+    backend = _read_optional_str(env, ENV_SEMANTIC_BACKEND) or DEFAULT_SEMANTIC_BACKEND
+    url = _read_optional_str(env, ENV_SEMANTIC_URL)
+    model = _read_optional_str(env, ENV_SEMANTIC_MODEL)
+    if enabled and backend == SEMANTIC_BACKEND_OPENAI:
+        _require_explicit(url, ENV_SEMANTIC_URL, backend)
+        _require_explicit(model, ENV_SEMANTIC_MODEL, backend)
+    return SemanticConfig(
+        enabled=enabled,
+        backend=backend,
+        url=url if url is not None else DEFAULT_SEMANTIC_URL,
+        model=model if model is not None else DEFAULT_SEMANTIC_MODEL,
+        timeout_s=_read_positive_int(env, ENV_SEMANTIC_TIMEOUT, DEFAULT_SEMANTIC_TIMEOUT),
+        batch=_read_positive_int(env, ENV_SEMANTIC_BATCH, DEFAULT_SEMANTIC_BATCH),
+        max_chunks=_read_positive_int(
+            env, ENV_SEMANTIC_MAX_CHUNKS, DEFAULT_SEMANTIC_MAX_CHUNKS
+        ),
+        api_key=_read_optional_str(env, ENV_SEMANTIC_API_KEY),
+        allow_remote=_read_optional_str(env, ENV_SEMANTIC_ALLOW_REMOTE)
+        == SEMANTIC_ALLOW_REMOTE_VALUE,
+        switch_value=switch_value,
+    )
+
+
+def _require_explicit(value: str | None, name: str, backend: str) -> None:
+    """Raise ConfigError when the enabled cloud backend lacks a required value."""
+    if value is None:
+        raise ConfigError(
+            f"{name} is required when {ENV_SEMANTIC_BACKEND}={backend!r}: the cloud backend "
+            "has no default endpoint or model, so it can never be reached by accident"
+        )
+
+
+def _read_optional_str(environ: Mapping[str, str], name: str) -> str | None:
+    """Return the stripped value at environ[name], or None when unset or blank."""
+    raw = environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    return raw.strip()
