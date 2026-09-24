@@ -10,7 +10,7 @@ from inline_snapshot import snapshot
 from dsh_coderag.indexer import index_sync
 from dsh_coderag.render import render_search_result, render_status
 from dsh_coderag.searcher import search
-from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus
+from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus, SemanticNotice
 
 
 def _hit(path: str, seq: int, start: int, end: int, text: str) -> Hit:
@@ -140,3 +140,47 @@ def test_render_status_collapses_newlines_in_dynamic_values() -> None:
         "code: SEARCH_FAILED\n"
         "message: first line status: ready second\n"
     )
+
+
+@pytest.mark.snapshot
+def test_render_search_result_shows_the_semantic_fallback_notice() -> None:
+    """The enabled-but-unusable backend must be visible to the model (ADR-16 6)."""
+    out = render_search_result(
+        SearchResult(
+            status=SearchStatus.READY,
+            query="alpha",
+            hits=[_hit("pkg/a.py", 0, 1, 2, "def a():\n    ...")],
+            scanned_files=1,
+            scanned_chunks=2,
+            semantic=SemanticNotice(
+                code=ErrorCode.SEMANTIC_EMBED_FAILED,
+                message="embedding request failed",
+                hint="start Ollama",
+            ),
+        )
+    )
+    assert out == snapshot("""\
+status: ready
+query: "alpha"
+scanned: 1 files / 2 chunks
+hits: 1 (sorted by source order)
+skipped: 0
+
+semantic: BM25 only (SEMANTIC_EMBED_FAILED) — embedding request failed — start Ollama
+
+── pkg/a.py:1-2  (chunk 0)
+def a():
+    ...
+""")
+
+
+def test_render_search_result_has_no_semantic_line_when_disabled() -> None:
+    """The default path carries no semantic field at all (ADR-16 2, S6)."""
+    out = render_search_result(
+        SearchResult(
+            status=SearchStatus.READY,
+            query="alpha",
+            hits=[_hit("pkg/a.py", 0, 1, 2, "def a():\n    ...")],
+        )
+    )
+    assert "semantic" not in out

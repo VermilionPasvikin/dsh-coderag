@@ -102,8 +102,27 @@ class SkipReport:
 
 
 @dataclass(frozen=True)
+class SemanticNotice:
+    """Why the optional backend contributed nothing, while it was enabled.
+
+    This is the one place the optional backend may speak: the field is None
+    whenever CODERAG_SEMANTIC is off, so the default path stays byte-identical
+    to 1.0.0 (ADR-16 2). The message and hint never carry a credential (S-05).
+    """
+
+    code: ErrorCode
+    message: str
+    hint: str | None = None
+
+
+@dataclass(frozen=True)
 class SearchResult:
-    """A search outcome: a status plus, when ready, the hits."""
+    """A search outcome: a status plus, when ready, the hits.
+
+    `semantic` is set only on the optional path, so the default response is
+    unchanged and the model learns about a degraded backend instead of
+    silently receiving BM25-only results (ADR-16 6).
+    """
 
     status: SearchStatus
     query: str
@@ -115,6 +134,7 @@ class SearchResult:
     code: ErrorCode | None = None
     skipped: SkipReport = field(default_factory=SkipReport)
     omitted: int = 0
+    semantic: SemanticNotice | None = None
 
 
 @dataclass

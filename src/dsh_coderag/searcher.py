@@ -20,12 +20,25 @@ from tree_sitter import Node
 
 from dsh_coderag import sqlite_caps, vectors
 from dsh_coderag.chunker import DECLARATION_KINDS, WRAPPER_NODE_TYPES
-from dsh_coderag.config import DEFAULT_MAX_TOKENS
-from dsh_coderag.embed import SemanticError
+from dsh_coderag.config import (
+    DEFAULT_MAX_TOKENS,
+    ConfigError,
+    SemanticConfig,
+    load_semantic_config,
+)
+from dsh_coderag.embed import SemanticError, embed_texts
 from dsh_coderag.indexer import connect
+from dsh_coderag.log import log_event
 from dsh_coderag.parser import detect_language, get_parser
 from dsh_coderag.text import to_bigrams
-from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus, SkipReport
+from dsh_coderag.types import (
+    ErrorCode,
+    Hit,
+    SearchResult,
+    SearchStatus,
+    SemanticNotice,
+    SkipReport,
+)
 from dsh_coderag.vectors import VectorIndex
 from dsh_coderag.walker import walk_with_report
 
@@ -60,6 +73,84 @@ enough to see past a run of test chunks. The LIKE patterns mirror the previous
 Python regex; `tests_helper.py`, `latest.py`, `contest.py` and `spec.py` are
 deliberately not matches.
 """
+
+RRF_K = 60
+"""Reciprocal-rank-fusion constant (PROJECT.md 5.3, ADR-16 2).
+
+The Elasticsearch/Azure/Weaviate default. Deliberately not 2: that is Qdrant's
+default and a known trap when moving between libraries.
+"""
+
+_TEST_PATH_RE = re.compile(r"(^|/)tests/|(^|/)__tests__/|\.spec\.|\.test\.")
+"""Python twin of `TEST_PATH_TIER_SQL`, used when ordering fused candidates.
+
+The vector path must inherit the same tier (ADR-16, update of 2026-09-24), and
+fusion happens in Python, so the predicate has to exist on both sides. A test
+asserts the two agree.
+"""
+
+
+def is_test_path(path: str) -> bool:
+    """Whether `path` is a test path under the frozen tier predicate."""
+    return _TEST_PATH_RE.search(path) is not None
+
+
+def fusion_key(hit: Hit) -> tuple[str, int]:
+    """Identify one chunk in both rankings: its path plus its sequence."""
+    return (hit.path, hit.seq)
+
+
+def reciprocal_rank_fusion(
+    rankings: Sequence[Sequence[tuple[str, int]]], k: int = RRF_K
+) -> dict[tuple[str, int], float]:
+    """Score every document as `sum(1 / (k + rank))` over the given rankings.
+
+    Only ranks matter, so the incomparable BM25 and cosine score scales never
+    meet (PROJECT.md 5.3).
+    """
+    scores: dict[tuple[str, int], float] = {}
+    for ranking in rankings:
+        for rank, key in enumerate(ranking, start=1):
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
+    return scores
+
+
+def fuse_candidates(
+    lexical: Sequence[Hit],
+    vector: Sequence[Hit],
+    *,
+    limit: int,
+    k: int = RRF_K,
+) -> list[Hit]:
+    """Fuse the BM25 and vector rankings and return at most `limit` hits.
+
+    Ordering follows the frozen contract: the non-test-first tier comes first
+    (ADR-16, update of 2026-09-24), then the descending RRF score, then a
+    deterministic tie-break. The selected hits are returned in source order, so
+    ADR-05 still holds for what the model sees.
+    """
+    by_key: dict[tuple[str, int], Hit] = {}
+    for hit in (*lexical, *vector):
+        by_key.setdefault(fusion_key(hit), hit)
+    if not by_key:
+        return []
+    scores = reciprocal_rank_fusion(
+        [
+            [fusion_key(hit) for hit in lexical],
+            [fusion_key(hit) for hit in vector],
+        ],
+        k,
+    )
+    ordered = sorted(
+        by_key.values(),
+        key=lambda hit: (
+            is_test_path(hit.path),
+            -scores[fusion_key(hit)],
+            hit.path,
+            hit.start_line,
+        ),
+    )[:limit]
+    return sorted(ordered, key=lambda hit: (hit.path, hit.start_line))
 
 
 def query_symbols(query: str) -> frozenset[str]:
@@ -174,8 +265,13 @@ def _ready_result(
     chunks: int,
     skipped: SkipReport,
     max_tokens: int,
+    semantic: SemanticNotice | None = None,
 ) -> SearchResult:
-    """Trim candidates to the token budget and build the READY result."""
+    """Trim candidates to the token budget and build the READY result.
+
+    `semantic` is None on the default path, which is what keeps the rendered
+    output byte-identical to 1.0.0 (ADR-16 2).
+    """
     hits, omitted = _trim_to_budget(candidates, max_tokens)
     return SearchResult(
         status=SearchStatus.READY,
@@ -185,6 +281,7 @@ def _ready_result(
         scanned_chunks=chunks,
         skipped=skipped,
         omitted=omitted,
+        semantic=semantic,
     )
 
 
@@ -194,16 +291,19 @@ def search(
     k: int = 5,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     path: str | None = None,
+    *,
+    semantic: SemanticConfig | None = None,
 ) -> SearchResult:
     """Search the index under root and always return a structured status.
 
-    The query is matched in three rungs until one returns candidates: precision
-    (all tokens), identifier-only OR, then the full OR including CJK bigrams.
-    Candidates are ordered in SQL by a test-path tier and an exact
-    `symbol_name` boost (PROJECT.md 3.3); the best k are then re-sorted into
-    source order and trimmed to max_tokens, with the number dropped reported
-    as omitted. path restricts the search to a workspace-relative
-    subdirectory (or file); None searches the whole workspace.
+    The query is matched in three rungs (precision, identifier-only OR, then the
+    full OR with CJK bigrams); the best k are re-sorted into source order
+    (ADR-05) and trimmed to max_tokens, reporting how many hits were dropped.
+    `path` restricts the search to a workspace-relative subdirectory or file.
+
+    The optional backend participates only when `semantic` (by default
+    CODERAG_SEMANTIC) is enabled. An enabled but unusable backend returns
+    exactly the BM25 result plus a `semantic` notice (ADR-16 2/6).
     """
     if not sqlite_caps.fts5_available():
         return _fts5_unavailable(query)
@@ -229,9 +329,76 @@ def search(
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
+    candidates, notice = _apply_semantic(base, query, k, candidates, semantic)
     if not candidates:
         return _empty_result(query, files, chunks, skipped, punctuation_only)
-    return _ready_result(query, candidates, files, chunks, skipped, max_tokens)
+    return _ready_result(query, candidates, files, chunks, skipped, max_tokens, notice)
+
+
+def _apply_semantic(
+    base: Path,
+    query: str,
+    k: int,
+    candidates: list[Hit],
+    semantic: SemanticConfig | None,
+) -> tuple[list[Hit], SemanticNotice | None]:
+    """Fuse the optional backend's candidates in, or explain why it could not.
+
+    Returns the candidates to use and the notice to report. Any failure of the
+    optional path leaves `candidates` exactly as BM25 produced them, which is
+    the frozen meaning of a clean fallback (ADR-16 2).
+    """
+    config, notice = _resolve_semantic(semantic)
+    if config is None or not config.enabled:
+        return candidates, notice
+    try:
+        vector_hits = _semantic_candidates(base, query, config, k)
+    except SemanticError as exc:
+        return candidates, SemanticNotice(code=exc.code, message=exc.message, hint=exc.hint)
+    if not vector_hits:
+        return candidates, notice
+    return fuse_candidates(candidates, vector_hits, limit=k), notice
+
+
+def _resolve_semantic(
+    semantic: SemanticConfig | None,
+) -> tuple[SemanticConfig | None, SemanticNotice | None]:
+    """Return the effective semantic settings plus any notice to report.
+
+    An unset or non-`on` switch yields no settings and no notice, so the default
+    response carries no semantic field at all. A malformed switch value is
+    logged instead of rendered, because ADR-16 2 freezes the non-`on` output as
+    byte-identical to 1.0.0 (a rendered notice would break that and S6).
+    """
+    if semantic is not None:
+        return semantic, None
+    try:
+        loaded = load_semantic_config()
+    except ConfigError as exc:
+        return None, SemanticNotice(
+            code=ErrorCode.SEMANTIC_BACKEND_UNSUPPORTED, message=str(exc)
+        )
+    if loaded.switch_invalid:
+        log_event(
+            "semantic_switch_invalid",
+            level="warning",
+            value=loaded.switch_value,
+        )
+    return loaded, None
+
+
+def _semantic_candidates(
+    base: Path, query: str, config: SemanticConfig, k: int
+) -> list[Hit]:
+    """Embed the query and return the vector index's nearest chunks.
+
+    Raises:
+        SemanticError: Whatever the embedding client or the vector index raises;
+            the caller converts it into a notice and keeps serving BM25.
+    """
+    query_vectors = embed_texts(config, [query])
+    index = vectors.load_index(base, config)
+    return vector_candidates(base, index, query_vectors[0], k)
 
 
 def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:

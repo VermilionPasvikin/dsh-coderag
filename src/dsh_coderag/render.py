@@ -7,7 +7,14 @@ search, rank or trim by token budget.
 
 from __future__ import annotations
 
-from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus, SkipReport
+from dsh_coderag.types import (
+    ErrorCode,
+    Hit,
+    SearchResult,
+    SearchStatus,
+    SemanticNotice,
+    SkipReport,
+)
 
 _CONTEXT_PREFIX_MARKER = "// file: "
 
@@ -45,6 +52,8 @@ def render_search_result(result: SearchResult) -> str:
         ]
     )
     blocks = [header]
+    if result.semantic is not None:
+        blocks.append(_format_semantic_notice(result.semantic))
     for hit in result.hits:
         blocks.append(f"{_format_location(hit)}\n{strip_context_prefix(hit.text)}")
     if result.omitted > 0:
@@ -55,6 +64,21 @@ def render_search_result(result: SearchResult) -> str:
             f" raise max_tokens to see {pronoun}]"
         )
     return "\n\n".join(blocks) + "\n"
+
+
+def _format_semantic_notice(notice: SemanticNotice) -> str:
+    """Render why the enabled optional backend contributed nothing.
+
+    Kept to a single line whose fields are collapsed, so it can never forge an
+    extra `status:` field. It only appears when a notice exists, which is only
+    on the optional path (ADR-16 2), so the default output is untouched.
+    """
+    parts = [f"semantic: BM25 only ({notice.code.value})"]
+    if notice.message:
+        parts.append(_one_line(notice.message))
+    if notice.hint:
+        parts.append(_one_line(notice.hint))
+    return " — ".join(parts)
 
 
 def render_status(
