@@ -148,3 +148,92 @@ def test_save_index_writes_an_unmodified_matrix(tmp_path: Path) -> None:
     save_index(tmp_path, index)
     reloaded = load_index(tmp_path, _config())
     np.testing.assert_allclose(reloaded.matrix, matrix)
+
+
+class _Counting:
+    """A text-only transport that records how many texts it was asked to embed."""
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def __call__(
+        self, url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        batch = list(texts)
+        self.texts.extend(batch)
+        return [
+            [float(len(text) % 7), float(text.count("a")), 1.0, 0.5] for text in batch
+        ]
+
+
+def test_build_refuses_an_empty_workspace(tmp_path: Path) -> None:
+    with pytest.raises(SemanticError) as caught:
+        build_index(tmp_path, _config(), [], transport=_transport)
+    assert caught.value.code is ErrorCode.SEMANTIC_EMBED_FAILED
+
+
+def test_first_build_embeds_every_chunk(tmp_path: Path) -> None:
+    counter = _Counting()
+    chunks = [(1, "alpha"), (2, "beta"), (3, "gamma")]
+    build_index(tmp_path, _config(), chunks, transport=counter)
+    assert len(counter.texts) == 3
+
+
+def test_rebuild_reuses_unchanged_rows_and_embeds_only_the_change(tmp_path: Path) -> None:
+    counter = _Counting()
+    config = _config()
+    original = build_index(
+        tmp_path, config, [(1, "alpha"), (2, "beta"), (3, "gamma")], transport=counter
+    )
+    counter.texts.clear()
+    changed = build_index(
+        tmp_path, config, [(1, "alpha"), (2, "beta!"), (3, "gamma")], transport=counter
+    )
+    assert counter.texts == ["beta!"], "only the changed chunk may be re-embedded"
+    np.testing.assert_allclose(changed.matrix[0], original.matrix[0])
+    np.testing.assert_allclose(changed.matrix[2], original.matrix[2])
+    assert changed.content_hashes[0] == original.content_hashes[0]
+    assert changed.content_hashes[1] != original.content_hashes[1]
+
+
+def test_rebuild_with_no_changes_never_calls_the_transport(tmp_path: Path) -> None:
+    config = _config()
+    chunks = [(1, "alpha"), (2, "beta")]
+    first = build_index(tmp_path, config, chunks, transport=_Counting())
+
+    def explode(url: str, model: str, texts: Sequence[str], timeout: float) -> list[list[float]]:
+        raise AssertionError("an unchanged workspace must not be re-embedded")
+
+    second = build_index(tmp_path, config, chunks, transport=explode)
+    np.testing.assert_allclose(second.matrix, first.matrix)
+
+
+def test_rebuild_after_a_model_change_embeds_every_chunk(tmp_path: Path) -> None:
+    counter = _Counting()
+    build_index(tmp_path, _config(), [(1, "alpha"), (2, "beta")], transport=counter)
+    counter.texts.clear()
+    build_index(tmp_path, _config(model="other"), [(1, "alpha"), (2, "beta")], transport=counter)
+    assert sorted(counter.texts) == ["alpha", "beta"]
+
+
+def test_rebuild_after_a_corrupt_manifest_embeds_every_chunk(tmp_path: Path) -> None:
+    counter = _Counting()
+    build_index(tmp_path, _config(), [(1, "alpha")], transport=counter)
+    (vectors_dir(tmp_path) / MANIFEST_FILENAME).write_text("{broken", encoding="utf-8")
+    counter.texts.clear()
+    build_index(tmp_path, _config(), [(1, "alpha")], transport=counter)
+    assert counter.texts == ["alpha"]
+
+
+def test_rebuild_drops_removed_chunks_and_keeps_the_rest(tmp_path: Path) -> None:
+    counter = _Counting()
+    config = _config()
+    original = build_index(
+        tmp_path, config, [(1, "alpha"), (2, "beta"), (3, "gamma")], transport=counter
+    )
+    counter.texts.clear()
+    rebuilt = build_index(tmp_path, config, [(1, "alpha"), (3, "gamma")], transport=counter)
+    assert counter.texts == []
+    assert rebuilt.chunk_ids == (1, 3)
+    np.testing.assert_allclose(rebuilt.matrix[0], original.matrix[0])
+    np.testing.assert_allclose(rebuilt.matrix[1], original.matrix[2])

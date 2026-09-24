@@ -29,10 +29,12 @@ class _StubHandler(BaseHTTPRequestHandler):
     """A loopback embeddings stub: one deterministic vector per input."""
 
     server_version = "index-vectors-stub/1"
+    batches: list[list[str]] = []
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length))
+        type(self).batches.append(list(payload["input"]))
         embeddings = [[float(index), 1.0] for index, _ in enumerate(payload["input"])]
         body = json.dumps({"embeddings": embeddings}).encode("utf-8")
         self.send_response(200)
@@ -48,6 +50,7 @@ class _StubHandler(BaseHTTPRequestHandler):
 
 @contextmanager
 def _stub_server() -> Iterator[int]:
+    _StubHandler.batches = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _StubHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -155,3 +158,21 @@ def test_vector_build_skips_nothing_and_keeps_chunk_order(
     manifest = json.loads((vectors_dir(workspace) / MANIFEST_FILENAME).read_text("utf-8"))
     assert len(manifest["content_hashes"]) == manifest["chunk_count"]
     assert len(set(manifest["content_hashes"])) >= 1
+
+
+def test_reindex_only_embeds_the_changed_file(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The incremental guarantee: an untouched file must not be re-embedded."""
+    with _stub_server() as port:
+        _enable(monkeypatch, f"http://127.0.0.1:{port}")
+        index_sync(workspace)
+        first = sum(len(batch) for batch in _StubHandler.batches)
+        _StubHandler.batches = []
+        (workspace / "pkg" / "beta.py").write_text(
+            "def beta():\n    return 'beta changed'\n", encoding="utf-8"
+        )
+        index_sync(workspace)
+        second = sum(len(batch) for batch in _StubHandler.batches)
+    assert first > 0
+    assert 0 < second < first, f"expected a partial re-embed, got {second} of {first}"

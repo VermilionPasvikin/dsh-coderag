@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from dsh_coderag.config import SemanticConfig
 from dsh_coderag.embed import EmbeddingCache, SemanticError, Transport, embed_texts
+from dsh_coderag.log import log_event
 from dsh_coderag.types import ErrorCode
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -113,38 +114,144 @@ def build_index(
     cache: EmbeddingCache | None = None,
     transport: Transport | None = None,
 ) -> VectorIndex:
-    """Embed every chunk and persist the vector index.
+    """Embed the chunks and persist the vector index, reusing unchanged rows.
 
-    Args:
-        root: Workspace root; the index is written under `<root>/.coderag/vectors/`.
-        config: Settings from `load_semantic_config`; the backend must be on.
-        chunks: (chunk_id, text) pairs in ascending chunk-id order, which is the
-            row order frozen by ADR-16 5.
-        cache: Optional embedding cache reused across calls.
-        transport: HTTP seam forwarded to `embed_texts`; tests inject one.
-
-    Returns:
-        The index that was written.
+    `chunks` are (chunk_id, text) pairs in ascending chunk-id order, the row
+    order frozen by ADR-16 5. A row whose chunk id and content hash both match
+    the index already on disk is copied instead of re-embedded, so a re-index
+    only pays for what changed.
 
     Raises:
         SemanticError: SEMANTIC_INDEX_TOO_LARGE past the configured ceiling, or
             whatever `embed_texts` raises (see its docstring).
     """
     check_chunk_budget(config, len(chunks))
-    texts = [text for _, text in chunks]
-    vectors = embed_texts(config, texts, cache=cache, transport=transport)
+    _require_chunks(chunks)
     numpy = _numpy()
-    matrix = numpy.asarray(vectors, dtype=numpy.float32)
+    texts = [text for _, text in chunks]
+    ids = [chunk_id for chunk_id, _ in chunks]
+    hashes = [content_hash(text) for text in texts]
+    previous = _load_previous(root, config)
+    matrix, pending = _seed_from_previous(numpy, previous, ids, hashes)
+    matrix = _fill_pending(numpy, matrix, config, texts, pending, cache, transport)
+    log_event(
+        "semantic_index_built",
+        model=config.model,
+        chunks=len(ids),
+        reused=len(ids) - len(pending),
+        embedded=len(pending),
+    )
     index = VectorIndex(
         model=config.model,
         dim=int(matrix.shape[1]),
-        chunk_ids=tuple(chunk_id for chunk_id, _ in chunks),
-        content_hashes=tuple(content_hash(text) for text in texts),
+        chunk_ids=tuple(ids),
+        content_hashes=tuple(hashes),
         matrix=matrix,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
     save_index(root, index)
     return index
+
+
+def _require_chunks(chunks: Sequence[tuple[int, str]]) -> None:
+    """Refuse to write a vector index for a workspace with no chunks.
+
+    Raises:
+        SemanticError: SEMANTIC_EMBED_FAILED; an empty index would be a file
+            that claims to exist but can never answer a query (RL-08).
+    """
+    if not chunks:
+        raise SemanticError(
+            ErrorCode.SEMANTIC_EMBED_FAILED,
+            "no chunks to vectorize; nothing was written",
+            "index the workspace before building the vector index",
+        )
+
+
+def _fill_pending(
+    numpy: Any,
+    matrix: Any | None,
+    config: SemanticConfig,
+    texts: Sequence[str],
+    pending: Sequence[int],
+    cache: EmbeddingCache | None,
+    transport: Transport | None,
+) -> Any:
+    """Embed the pending rows into the matrix, allocating it when it is new.
+
+    Raises:
+        SemanticError: SEMANTIC_EMBED_FAILED when no matrix could be produced.
+    """
+    if pending:
+        embedded = embed_texts(
+            config,
+            [texts[row] for row in pending],
+            cache=cache,
+            transport=transport,
+        )
+        if matrix is None:
+            matrix = numpy.asarray(embedded, dtype=numpy.float32)
+        else:
+            for row, vector in zip(pending, embedded, strict=True):
+                matrix[row] = numpy.asarray(vector, dtype=numpy.float32)
+    if matrix is None:
+        raise SemanticError(
+            ErrorCode.SEMANTIC_EMBED_FAILED,
+            "internal error: no vector matrix was produced",
+        )
+    return matrix
+
+
+def _load_previous(root: Path, config: SemanticConfig) -> VectorIndex | None:
+    """Load the existing index so unchanged rows can be reused.
+
+    Returns None when there is nothing compatible to reuse; that is the normal
+    first-run and post-model-change path, so the reason is logged rather than
+    raised (a rebuild is always a correct answer, just a slower one).
+    """
+    try:
+        return load_index(root, config)
+    except SemanticError as exc:
+        log_event(
+            "semantic_index_no_reuse",
+            code=exc.code.value,
+            reason=exc.message,
+        )
+        return None
+
+
+def _seed_from_previous(
+    numpy: Any,
+    previous: VectorIndex | None,
+    chunk_ids: Sequence[int],
+    content_hashes: Sequence[str],
+) -> tuple[Any | None, list[int]]:
+    """Copy unchanged rows out of `previous`; return the matrix and pending rows.
+
+    A row is reused only when both its chunk id and its content hash still
+    match, so an edit to a file re-embeds that file's chunks (its rows are
+    rewritten under new ids) while untouched files cost nothing. When there is
+    no previous index the matrix is None and every row is pending.
+    """
+    if previous is None:
+        return None, list(range(len(chunk_ids)))
+    reusable = {
+        (chunk_id, digest): row
+        for row, (chunk_id, digest) in enumerate(
+            zip(previous.chunk_ids, previous.content_hashes, strict=True)
+        )
+    }
+    matrix = numpy.empty((len(chunk_ids), previous.dim), dtype=numpy.float32)
+    pending: list[int] = []
+    for row, (chunk_id, digest) in enumerate(
+        zip(chunk_ids, content_hashes, strict=True)
+    ):
+        old_row = reusable.get((chunk_id, digest))
+        if old_row is None:
+            pending.append(row)
+        else:
+            matrix[row] = previous.matrix[old_row]
+    return matrix, pending
 
 
 def save_index(root: Path, index: VectorIndex) -> Path:
