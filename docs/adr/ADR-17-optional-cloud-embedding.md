@@ -92,11 +92,15 @@ env:
 
 | # | 位置 | 由谁落地 |
 |---|---|---|
-| 1 | `cordis.patch.yml` 的 `config.env` 注释（紧邻云端配置项） | `T5-20` |
-| 2 | `README.md` 的「可选语义后端」云端小节 | `T5-20` |
-| 3 | `src/dsh_coderag/config.py` 的 `SemanticConfig` 字段说明 | `T5-19` |
+| 1 | `cordis.patch.yml` 的 `config.env` 注释（紧邻云端配置项） | `T5-21`（已完成，`9b67ead`） |
+| 2 | `README.md` 的「可选语义后端」云端小节 | `T5-21`（已完成，`9b67ead`） |
+| 3 | `src/dsh_coderag/config.py` 的 `SemanticConfig` 字段说明 | `T3-08`（创建 `SemanticConfig` 时一并落地） |
 | 4 | 本 ADR §5 | `T5-18` |
 | 5 | `PROJECT.md` §1.6.4（说明书性质的文件） | `T5-18` |
+
+> **归属修正（2026-09-24）**：本表原把第 1/2 项写成 `T5-20`、第 3 项写成 `T5-19`，与任务表的实际交付不符
+> ——第 1/2 项由 `T5-21` 落地（`9b67ead`），第 3 项的前提是 `SemanticConfig` 本身由 `T3-08` 创建。
+> 已按实情更正；本 ADR 的**决策条文一字未改**。
 
 ---
 
@@ -116,7 +120,7 @@ env:
 - `SEMANTIC_EMBED_FAILED`：涵盖 5xx、超时、响应体非法。
 - `SEMANTIC_MODEL_MISMATCH`：换云端模型后维度变化，必须重建向量索引（`ADR-16` §5.4）。
 
-**登记方式**：与 `ADR-16` §6 相同——`ADR-16`/`ADR-17` 是这些名字的**唯一权威**，同步进 `PROJECT.md` §5.6 与 `src/dsh_coderag/types.py` 的 `ErrorCode` 由实现任务（`T3-08`–`T3-11`、`T5-19`）完成（那会同时改动 `tests/test_types.py` 里对 10 个码的逐项断言）。
+**登记方式**：与 `ADR-16` §6 相同——`ADR-16`/`ADR-17` 是这些名字的**唯一权威**，同步进 `PROJECT.md` §5.6 与 `src/dsh_coderag/types.py` 的 `ErrorCode` 由实现任务（`T3-08`–`T3-11`）完成（那会同时改动 `tests/test_types.py` 里对 10 个码的逐项断言）。
 
 ---
 
