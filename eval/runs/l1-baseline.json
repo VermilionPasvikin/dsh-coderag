@@ -3,7 +3,7 @@
   "k": 5,
   "corpus_root": "/tmp/dsh-coderag-t3-03-corpus",
   "tasks_file": "eval/tasks.jsonl",
-  "golden_version": "m3-b2",
+  "golden_version": "m3-b3",
   "task_count": 43,
   "hit_count": 13,
   "class_counts": {
@@ -792,21 +792,21 @@
     {
       "id": "L-040",
       "class": "natural",
-      "query": "往领域存储里写数据之前会不会先校验结构，不符合约定的时候会怎样",
+      "query": "领域存储里已经落盘的数据，在重新读回来的时候会不会先校验结构，不符合约定会怎么样",
       "status": "ready",
       "hit": false,
       "matched_path": null,
       "rank": null,
       "returned_paths": [
-        "apps/desktop/scripts/package-installed-update.ts",
         "apps/desktop/src/locale.ts",
-        "packages/client/ui-commands/src/client/locales.ts",
-        "scripts/persistence-catalog-text.ts",
-        "website/docs.ts"
+        "packages/client/ui-settings-general/src/client/locales.ts",
+        "packages/client/ui-sidebar-documentpreview/src/client/locales.ts",
+        "packages/client/ui-sidebar-files/src/client/locales.ts",
+        "scripts/persistence-catalog-text.ts"
       ],
       "must_not_hit": [],
       "symbol_hit": null,
-      "token_estimate": 3861,
+      "token_estimate": 3640,
       "error": null
     },
     {
