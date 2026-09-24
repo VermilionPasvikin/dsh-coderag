@@ -14,25 +14,31 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-from dsh_coderag import sqlite_caps
+from dsh_coderag import sqlite_caps, vectors
 from dsh_coderag.chunker import chunk_text
 from dsh_coderag.config import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_MAX_FILE_BYTES,
     DEFAULT_MAX_FILES,
+    ConfigError,
     IndexConfig,
     adaptive_workers,
+    load_semantic_config,
     next_batch_size,
 )
+
+# `_http_transport` is the module's default HTTP seam; the wrapper below only
+# needs to interpose cancellation, not replace the implementation.
+from dsh_coderag.embed import SemanticError, _http_transport
 from dsh_coderag.log import build_audit_record, log_event, write_audit_dump
 from dsh_coderag.sanitize import scan_secret
 from dsh_coderag.text import to_bigrams
-from dsh_coderag.types import Chunk
+from dsh_coderag.types import Chunk, ErrorCode
 from dsh_coderag.walker import WalkReport, walk_with_report
 
 SCHEMA_VERSION = 1
@@ -277,9 +283,7 @@ def index_sync(
         total_chunks, written_ms = _write_batches(connection, prepared, batch_size, check)
         phase_ms["write"] += written_ms
         started = time.monotonic()
-        if not check():
-            _remove_missing_files(connection, current_paths)
-            _mark_ready(connection, base)
+        _finish_index_run(connection, base, current_paths, check)
         phase_ms["cleanup"] = _ms(started)
         return _report_index_done(
             base, report, total_chunks, redacted, phase_ms, run_started
@@ -294,6 +298,104 @@ def index_sync(
 def _ms(started: float) -> float:
     """Return milliseconds elapsed since a time.monotonic() reading."""
     return (time.monotonic() - started) * 1000.0
+
+
+def _finish_index_run(
+    connection: sqlite3.Connection,
+    base: Path,
+    current_paths: set[str],
+    check: Callable[[], bool],
+) -> None:
+    """Clean up deletes, mark the index ready and build vectors when enabled.
+
+    A cancelled run neither marks the index ready nor starts the optional
+    vector build, so an aborted index never looks complete.
+    """
+    if check():
+        return
+    _remove_missing_files(connection, current_paths)
+    _mark_ready(connection, base)
+    _maybe_build_vector_index(base, connection, check)
+
+
+def _indexed_chunks(connection: sqlite3.Connection) -> list[tuple[int, str]]:
+    """Return (chunk_id, text) for every indexed chunk in ascending id order."""
+    rows = connection.execute("SELECT id, text FROM chunks ORDER BY id").fetchall()
+    return [(int(row[0]), str(row[1])) for row in rows]
+
+
+def _maybe_build_vector_index(
+    base: Path,
+    connection: sqlite3.Connection,
+    check: Callable[[], bool],
+) -> None:
+    """Build the optional vector index when CODERAG_SEMANTIC is `on`.
+
+    The optional backend must never be able to break the default path (RL-10),
+    so every failure here is logged and swallowed: the BM25 index is already
+    written and ready by the time this runs, and a missing vector index simply
+    makes search fall back with a structured notice (ADR-16 6).
+    """
+    try:
+        config = load_semantic_config()
+    except ConfigError as exc:
+        log_event("semantic_config_invalid", level="warning", error=str(exc))
+        return
+    if not config.enabled:
+        return
+    chunks = _indexed_chunks(connection)
+    started = time.monotonic()
+    try:
+        index = vectors.build_index(
+            base, config, chunks, transport=_cancellable_transport(check)
+        )
+    except SemanticError as exc:
+        log_event(
+            "semantic_index_failed",
+            level="warning",
+            code=exc.code.value,
+            message=exc.message,
+            chunks=len(chunks),
+        )
+        return
+    except OSError as exc:
+        log_event(
+            "semantic_index_failed",
+            level="error",
+            code=type(exc).__name__,
+            message=str(exc),
+            chunks=len(chunks),
+        )
+        return
+    log_event(
+        "semantic_index_ready",
+        model=index.model,
+        dim=index.dim,
+        chunks=len(index.chunk_ids),
+        duration_ms=_ms(started),
+    )
+
+
+def _cancellable_transport(
+    check: Callable[[], bool],
+) -> Callable[[str, str, Sequence[str], float], list[list[float]]]:
+    """Wrap the default HTTP transport so a cancelled index stops embedding.
+
+    The wrapper raises SemanticError, which the retry loop does not catch, so a
+    cancellation aborts the vector build immediately instead of retrying.
+    """
+
+    def transport(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        if check():
+            raise SemanticError(
+                ErrorCode.SEMANTIC_EMBED_FAILED,
+                "indexing was cancelled before the vector index was finished",
+            )
+        return _http_transport(url, model, texts, timeout)
+
+    return transport
 
 
 def _never_cancelled() -> bool:
