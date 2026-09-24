@@ -1,0 +1,64 @@
+{
+  "schema": "dsh-coderag/eval-gate/v1",
+  "golden_version": "m3-b1",
+  "baseline": "eval/runs/l1-baseline.json",
+  "metrics": {
+    "overall": {
+      "n": 30,
+      "success": {
+        "1": 0.06666666666666667,
+        "3": 0.3,
+        "5": 0.5666666666666667
+      },
+      "mrr": 0.22833333333333333,
+      "token_median": 1974.5
+    },
+    "exact": {
+      "n": 12,
+      "success": {
+        "1": 0.16666666666666666,
+        "3": 0.6666666666666666,
+        "5": 0.9166666666666666
+      },
+      "mrr": 0.45138888888888884,
+      "token_median": 1326.5
+    },
+    "crossfile": {
+      "n": 11,
+      "success": {
+        "1": 0.0,
+        "3": 0.09090909090909091,
+        "5": 0.45454545454545453
+      },
+      "mrr": 0.11212121212121211,
+      "token_median": 2211.0
+    },
+    "natural": {
+      "n": 7,
+      "success": {
+        "1": 0.0,
+        "3": 0.0,
+        "5": 0.14285714285714285
+      },
+      "mrr": 0.028571428571428574,
+      "token_median": 2003.0
+    }
+  },
+  "regression_count": 1,
+  "improvement_count": 5,
+  "verdict": {
+    "schema": "dsh-coderag/eval-diff/v1",
+    "regression_count": 1,
+    "waived_regressions": [],
+    "active_regressions": [
+      "L-015"
+    ],
+    "unused_waivers": [],
+    "golden_version_match": true,
+    "max_regressions": 0,
+    "reasons": [
+      "未豁免回归 1 条 > 容忍 0"
+    ],
+    "passed": false
+  }
+}
