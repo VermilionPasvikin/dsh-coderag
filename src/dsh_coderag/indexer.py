@@ -376,24 +376,42 @@ def _maybe_build_vector_index(
     )
 
 
+SEMANTIC_PROGRESS_EVERY = 2048
+"""Embedded-chunk interval between progress records during a vector build.
+
+A full build on a large repository runs for hours, so leaving the operator with
+no output until it finishes is not acceptable (PROJECT.md 5.7).
+"""
+
+
 def _cancellable_transport(
     check: Callable[[], bool],
 ) -> Callable[[str, str, Sequence[str], float], list[list[float]]]:
-    """Wrap the default HTTP transport so a cancelled index stops embedding.
+    """Wrap the default HTTP transport with cancellation and progress logging.
 
-    The wrapper raises SemanticError, which the retry loop does not catch, so a
-    cancellation aborts the vector build immediately instead of retrying.
+    The wrapper raises SemanticError when cancelled, which the retry loop does
+    not catch, so a cancellation aborts the vector build instead of retrying.
+    Successful batches are counted and reported every SEMANTIC_PROGRESS_EVERY
+    chunks so a long build can be watched.
     """
+    embedded = 0
+    next_report = SEMANTIC_PROGRESS_EVERY
 
     def transport(
         url: str, model: str, texts: Sequence[str], timeout: float
     ) -> list[list[float]]:
+        nonlocal embedded, next_report
         if check():
             raise SemanticError(
                 ErrorCode.SEMANTIC_EMBED_FAILED,
                 "indexing was cancelled before the vector index was finished",
             )
-        return _http_transport(url, model, texts, timeout)
+        vectors = _http_transport(url, model, texts, timeout)
+        embedded += len(texts)
+        if embedded >= next_report:
+            log_event("semantic_index_progress", embedded=embedded)
+            next_report += SEMANTIC_PROGRESS_EVERY
+        return vectors
 
     return transport
 

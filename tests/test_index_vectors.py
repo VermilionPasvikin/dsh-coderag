@@ -176,3 +176,17 @@ def test_reindex_only_embeds_the_changed_file(
         second = sum(len(batch) for batch in _StubHandler.batches)
     assert first > 0
     assert 0 < second < first, f"expected a partial re-embed, got {second} of {first}"
+
+
+def test_vector_build_reports_progress(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A multi-hour build must be watchable (PROJECT.md 5.7)."""
+    monkeypatch.setattr("dsh_coderag.indexer.SEMANTIC_PROGRESS_EVERY", 1)
+    with _stub_server() as port:
+        _enable(monkeypatch, f"http://127.0.0.1:{port}")
+        index_sync(workspace)
+    captured = capsys.readouterr()
+    assert "semantic_index_progress" in captured.err
+    assert "semantic_index_built" in captured.err
+    assert "semantic_index_progress" not in captured.out, "stdout is the MCP channel (RL-04)"
