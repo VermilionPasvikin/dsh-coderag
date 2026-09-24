@@ -3,8 +3,8 @@
   "k": 5,
   "corpus_root": "/tmp/dsh-coderag-t3-03-corpus",
   "tasks_file": "eval/tasks.jsonl",
-  "golden_version": "m3-b1",
-  "task_count": 30,
+  "golden_version": "m3-b2",
+  "task_count": 43,
   "hit_count": 13,
   "class_counts": {
     "exact": {
@@ -16,7 +16,7 @@
       "hit": 1
     },
     "natural": {
-      "total": 7,
+      "total": 20,
       "hit": 0
     }
   },
@@ -608,6 +608,264 @@
       "must_not_hit": [],
       "symbol_hit": null,
       "token_estimate": 2034,
+      "error": null
+    },
+    {
+      "id": "L-031",
+      "class": "natural",
+      "query": "助手把生成好的文件交付给用户的时候，这些文件是记在哪个会话名下的",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-conversation/src/client/locales.ts",
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-sidebar-files/src/client/locales.ts",
+        "packages/client/ui-workspace/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2021,
+      "error": null
+    },
+    {
+      "id": "L-032",
+      "class": "natural",
+      "query": "把办公文档转换成别的格式时，中间产生的临时文件放在哪里，转换完会不会自动清掉",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-sidebar-documentpreview/src/client/locales.ts",
+        "packages/client/ui-sidebar-documentpreview/src/client/office/locales.ts",
+        "packages/client/ui-sidebar-files/src/client/locales.ts",
+        "scripts/persistence-format-facts.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2052,
+      "error": null
+    },
+    {
+      "id": "L-033",
+      "class": "natural",
+      "query": "用户给某一次会话留下反馈的时候，系统会做些什么，会不会为此再跑一次模型",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-model-selection/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-subagent/src/client/locales.ts",
+        "website/docs.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2585,
+      "error": null
+    },
+    {
+      "id": "L-034",
+      "class": "natural",
+      "query": "各个插件自己提供的、给人输入的命令，是由谁统一登记和查找的",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-agent-preset/src/client/locales.ts",
+        "packages/client/ui-plugin-manager/src/client/locales.ts",
+        "packages/client/ui-plugin-manager/src/client/locales.ts",
+        "packages/client/ui-settings-models/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3420,
+      "error": null
+    },
+    {
+      "id": "L-035",
+      "class": "natural",
+      "query": "后台任务的记录在程序重启以后还在不在",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "apps/desktop/src/locale.ts",
+        "packages/client/ui-jobs/src/client/locales.ts",
+        "packages/client/ui-settings-general/src/client/locales.ts",
+        "packages/client/ui-subagent/src/client/locales.ts",
+        "packages/experimental/client-ui-agent-team/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2250,
+      "error": null
+    },
+    {
+      "id": "L-036",
+      "class": "natural",
+      "query": "进入计划模式以后，模型每次收到的请求里会多出什么内容",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-agent-preset/src/client/locales.ts",
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-commands/src/client/locales.ts",
+        "packages/client/ui-permission-presets/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3675,
+      "error": null
+    },
+    {
+      "id": "L-037",
+      "class": "natural",
+      "query": "事先设好的定时提醒，为什么在程序重启之后依然有效",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "apps/desktop/src/locale.ts",
+        "packages/client/ui-deliverables/src/client/locales.ts",
+        "packages/client/ui-plugin-manager/src/client/locales.ts",
+        "packages/client/ui-schedule/src/client/locales.ts",
+        "website/docs.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3925,
+      "error": null
+    },
+    {
+      "id": "L-038",
+      "class": "natural",
+      "query": "代码托管平台推过来的回调请求，怎么确认它确实来自对方而不是别人伪造的",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-message-feedback/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts",
+        "packages/extensions/ui-cordis/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3719,
+      "error": null
+    },
+    {
+      "id": "L-039",
+      "class": "natural",
+      "query": "工作区的清单保存在哪里，一个会话又是怎么确认自己属于哪个工作区的",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-conversation/src/client/locales.ts",
+        "packages/client/ui-permission-presets/src/client/locales.ts",
+        "packages/client/ui-sidebar-files/src/client/locales.ts",
+        "packages/client/ui-workspace/src/client/locales.ts",
+        "packages/client/ui-workspace/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 2135,
+      "error": null
+    },
+    {
+      "id": "L-040",
+      "class": "natural",
+      "query": "往领域存储里写数据之前会不会先校验结构，不符合约定的时候会怎样",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "apps/desktop/scripts/package-installed-update.ts",
+        "apps/desktop/src/locale.ts",
+        "packages/client/ui-commands/src/client/locales.ts",
+        "scripts/persistence-catalog-text.ts",
+        "website/docs.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3861,
+      "error": null
+    },
+    {
+      "id": "L-041",
+      "class": "natural",
+      "query": "交互式终端里一条命令的输出特别多的时候，系统是怎么控制的",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-sidebar-terminal/src/client/locales.ts",
+        "packages/client/ui-trajectory/src/client/locales.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3334,
+      "error": null
+    },
+    {
+      "id": "L-042",
+      "class": "natural",
+      "query": "执行一条外部命令时，如果它超时或者被系统杀掉，失败原因是怎么区分的",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-chat/src/client/locale.ts",
+        "packages/client/ui-permission-presets/src/client/locales.ts",
+        "packages/client/ui-permission-presets/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "website/docs.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3266,
+      "error": null
+    },
+    {
+      "id": "L-043",
+      "class": "natural",
+      "query": "同一个项目里多个请求都要用同一个语言服务的时候，会不会重复启动进程",
+      "status": "ready",
+      "hit": false,
+      "matched_path": null,
+      "rank": null,
+      "returned_paths": [
+        "packages/client/ui-settings-models/src/client/locales.ts",
+        "packages/client/ui-settings-plugins/src/client/locales.ts",
+        "packages/client/ui-sidebar-files/src/client/locales.ts",
+        "website/docs.ts",
+        "website/docs.ts"
+      ],
+      "must_not_hit": [],
+      "symbol_hit": null,
+      "token_estimate": 3378,
       "error": null
     }
   ]
