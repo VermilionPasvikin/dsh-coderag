@@ -12,18 +12,21 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from tree_sitter import Node
 
-from dsh_coderag import sqlite_caps
+from dsh_coderag import sqlite_caps, vectors
 from dsh_coderag.chunker import DECLARATION_KINDS, WRAPPER_NODE_TYPES
 from dsh_coderag.config import DEFAULT_MAX_TOKENS
+from dsh_coderag.embed import SemanticError
 from dsh_coderag.indexer import connect
 from dsh_coderag.parser import detect_language, get_parser
 from dsh_coderag.text import to_bigrams
 from dsh_coderag.types import ErrorCode, Hit, SearchResult, SearchStatus, SkipReport
+from dsh_coderag.vectors import VectorIndex
 from dsh_coderag.walker import walk_with_report
 
 PUNCTUATION_QUERY_HINT = (
@@ -321,6 +324,85 @@ def _search(
     ]
     # ADR-05: selection is by score, but output follows source order.
     hits.sort(key=lambda hit: (hit.path, hit.start_line))
+    return hits
+
+
+def vector_candidates(
+    root: Path,
+    index: VectorIndex,
+    query_vector: Sequence[float],
+    k: int,
+) -> list[Hit]:
+    """Return the k chunks whose vectors are closest to query_vector.
+
+    This is the optional backend's recall step only. Candidates come back in
+    descending cosine order; ADR-05's source ordering and the frozen
+    non-test-first tier are applied by the caller that fuses them with BM25
+    (T3-10), so this function deliberately does not reorder them.
+
+    Args:
+        root: Workspace root holding `.coderag/index.sqlite3`.
+        index: A loaded `VectorIndex` from `vectors.load_index`.
+        query_vector: The embedded query.
+        k: Maximum number of candidates.
+
+    Returns:
+        At most k hits, closest first.
+
+    Raises:
+        SemanticError: SEMANTIC_INDEX_MISSING when a scored chunk is no longer
+            in the BM25 index. That is index drift, not a partial answer, so it
+            is reported instead of silently returning fewer candidates (RL-08).
+    """
+    scored = vectors.cosine_top_k(index.matrix, query_vector, k)
+    if not scored:
+        return []
+    connection = connect(root.resolve() / ".coderag" / "index.sqlite3")
+    try:
+        return _load_scored_hits(connection, index, scored)
+    finally:
+        connection.close()
+
+
+def _load_scored_hits(
+    connection: sqlite3.Connection,
+    index: VectorIndex,
+    scored: Sequence[tuple[int, float]],
+) -> list[Hit]:
+    """Load the scored chunks by id, preserving cosine order."""
+    wanted = [index.chunk_ids[row] for row, _ in scored]
+    placeholders = ", ".join("?" for _ in wanted)
+    rows = connection.execute(
+        "SELECT c.id, f.path, c.seq, c.start_line, c.end_line, c.symbol_kind,"
+        " c.symbol_name, c.text FROM chunks c JOIN files f ON f.id = c.file_id"
+        f" WHERE c.id IN ({placeholders})",
+        wanted,
+    ).fetchall()
+    by_id = {row[0]: row for row in rows}
+    hits: list[Hit] = []
+    for row_index, score in scored:
+        chunk_id = index.chunk_ids[row_index]
+        row = by_id.get(chunk_id)
+        if row is None:
+            raise SemanticError(
+                ErrorCode.SEMANTIC_INDEX_MISSING,
+                f"vector index row {row_index} points at chunk {chunk_id}, which is no "
+                "longer in the BM25 index",
+                "rebuild both indexes with code_index",
+            )
+        _, path, seq, start_line, end_line, symbol_kind, symbol_name, text = row
+        hits.append(
+            Hit(
+                path=path,
+                seq=seq,
+                start_line=start_line,
+                end_line=end_line,
+                text=text,
+                score=score,
+                symbol_kind=symbol_kind,
+                symbol_name=symbol_name,
+            )
+        )
     return hits
 
 
