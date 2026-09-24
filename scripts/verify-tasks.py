@@ -42,7 +42,9 @@ from typing import Any
 
 # ── 阈值与目标比例（EVAL.md §2.3 / §2.4）────────────────────────────────
 MIN_TASKS = 10
-RATIO = {"exact": 12, "crossfile": 11, "natural": 7}
+RATIO = {"exact": 12, "crossfile": 11, "natural": 20}
+# 2026-09-25: natural 由 7 扩到 20（T3-11 后续扩桶）。V1 是 natural 专属判据，
+# 7 条时单条翻转 = 14.3pp，样本量不足以支撑判定；见 EVAL.md §2.3 的后续更新。
 RATIO_SUM = sum(RATIO.values())
 RATIO_TOLERANCE = 1
 VALID_CLASSES = ("exact", "crossfile", "natural")
@@ -287,15 +289,16 @@ def check_natural_identifiers(tasks: list[dict[str, Any]], corpus: Path) -> str:
 
 # ── V9/V10 配比与下限 ──────────────────────────────────────────────────
 def check_ratio(tasks: list[dict[str, Any]]) -> str:
+    ratio_label = ":".join(str(RATIO[c]) for c in VALID_CLASSES)
     total = len(tasks)
     actual = {c: sum(1 for o in tasks if o.get("class") == c) for c in VALID_CLASSES}
     for cls in VALID_CLASSES:
         expected = total * RATIO[cls] / RATIO_SUM
         if abs(actual[cls] - expected) > RATIO_TOLERANCE:
-            fail("V9", f"{cls} 实际 {actual[cls]} 条，目标比例 12:11:7 下应为 "
+            fail("V9", f"{cls} 实际 {actual[cls]} 条，目标比例 {ratio_label} 下应为 "
                        f"{expected:.2f}±{RATIO_TOLERANCE}")
     return (f"exact/crossfile/natural = {actual['exact']}/{actual['crossfile']}/"
-            f"{actual['natural']}，目标比例 12:11:7（±{RATIO_TOLERANCE}）")
+            f"{actual['natural']}，目标比例 {ratio_label}（±{RATIO_TOLERANCE}）")
 
 
 def check_min_tasks(tasks: list[dict[str, Any]]) -> str:
