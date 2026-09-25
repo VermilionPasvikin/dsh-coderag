@@ -5,7 +5,7 @@
 > 安装与打包见 [`docs/m4-bundle.md`](m4-bundle.md) 与 [`docs/m4-install-verification.md`](m4-install-verification.md)。
 > 两者冲突时以**代码**为准，并请提 issue/改文档。
 >
-> 实现版本：`1.0.0`｜Python `>=3.10,<3.13`｜验证环境 macOS + DSH `0.1.5-rc.1`。
+> 实现版本：`2.0.0`｜Python `>=3.10,<3.13`｜验证环境 macOS + DSH `0.1.5-rc.1`。
 
 ---
 
