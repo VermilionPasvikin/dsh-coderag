@@ -1341,7 +1341,14 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 - 后端不可用或未配置时，工具必须返回**结构化状态**并继续以 BM25 工作（`RL-09`），**不得**变成 `isError` 或空列表（`RL-06`）；
 - 实施前**必须先跑向量天花板探针**（`ADR-15` §3.2，见 `T5-14`）：用数据决定是否值得全量实施；
 - 是否发布向量路径服从 `ADR-14` §10.4 的 **V1–V4**（`V4`：C 组不能显著优于 B 组就不发布）；
-- **云端后端额外约束**（`ADR-17`）：非 loopback 地址需要**第二把钥匙** `CODERAG_SEMANTIC_ALLOW_REMOTE=1`；key **只从环境读**、绝不入库入日志（`RL-02`）；**风险声明必须随每一处配置出现**（`D-08`）；`S5`/`V1–V4` **由实际启用的那个后端独立满足**，不得互相背书。
+- **云端后端额外约束**（`ADR-17`）：非 loopback 地址需要**第二把钥匙** `CODERAG_SEMANTIC_ALLOW_REMOTE=1`
+- **发布决定（2026-09-25，项目所有者裁定）**：
+  ① **向量路径不发布**——由 `T3-11` 的 C 组实测触发 `ADR-14` §10.4 的 **`V4`**：`V1` 未达（`natural@5 = 6/20 = 0.300 < 0.40`，扩桶后 20 条）、`V2` 未达（`exact@5 = 0.917 ≠ 1.000`，1 条回归）；只读原型进一步证明**当前 embedding 下的 oracle 上限也只有 7/20 = 0.350**，故融合/重排侧无解。细则见 [`docs/eval-report-m3c.md`](docs/eval-report-m3c.md) §10。
+  ② **2.0.0 只发布在 GitHub**（tag / release），**不发布到 PyPI、也不发布到 npm**；安装方式仍是「克隆 + 装 Python 包 + `--patch`」。
+  ③ 因此 `T5-15`（extra `semantic` + `install.sh` 开关）、`T5-16`（可选安装冒烟）、`T5-20`（云端后端实现）、`T5-22`（云端安全评审）**移出 2.0.0 范围**（任务行保留以备将来重启向量线时使用；`ADR-16`/`ADR-17` 的条文**仍然有效**，只是对应的发布对象不存在）。
+  ④ 2.0.0 的价值主张改为**默认路径的实测提升**：同一份 DSH 语料、13 个任务 × 3 次，装与不装相比
+  任务成功率 `0.282 → 0.821`（+53.8pp，Wilson 区间不重叠），中位 token/次 `−8.9%`，
+  每个做对的任务 token `−62.7%`（原始数据见 [`eval/runs/clean-a3`](eval/runs/clean-a3/report.md) / [`clean-b3`](eval/runs/clean-b3/report.md)）。；key **只从环境读**、绝不入库入日志（`RL-02`）；**风险声明必须随每一处配置出现**（`D-08`）；`S5`/`V1–V4` **由实际启用的那个后端独立满足**，不得互相背书。
 
 **下表按三批排列**：`T5-01`–`T5-13` 是**实现前的文档前置**（依赖 `T5-05` 的 `ADR-16`），`T5-14`–`T5-17` 是**探针、安装收尾、冒烟与发布**，`T5-18`–`T5-22` 是**云端后端**（2026-09-23 需求变更追加：`ADR-17` + 约束/评测对齐 + 实现 + 打包与风险声明 + 安全评审）；核心实现是已重启的 `T3-08`–`T3-11`。
 
@@ -1363,7 +1370,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T5-14 | 跑**向量天花板探针**（`ADR-15` §3.2）：用一次性脚本对 30 条 query + 全量 chunk 做 embedding，测 `natural` / `crossfile` 的 `S@5` / `MRR` **上限**，给出 go/no-go 结论。**结论决定 `T3-08` 是否继续**；探针脚本不进 `src/`（它不是生产路径） | `docs/m5-vector-probe.md` | `test -f docs/m5-vector-probe.md` 且 `grep -c -e natural -e crossfile -e "S@5" docs/m5-vector-probe.md` | 文件存在；四项指标各自可查；含明确的 go/no-go 结论与所用后端 / 模型 / 耗时 | T5-05 | 2h |
 | T5-15 | **可选安装的依赖与安装脚本**：`pyproject.toml` 增加可选 extra `semantic`（内容只有 `numpy`）；默认 `dependencies` **不含** numpy / httpx；`scripts/install.sh` 增加显式开关 `CODERAG_WITH_SEMANTIC` 且**默认路径不装任何向量依赖**。**配置入口与 README 的装法说明由 `T5-21` 负责**（本任务不再重复定义） | `pyproject.toml`, `scripts/install.sh` | `python3 -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(sorted(d['project']['optional-dependencies']))"` 且 `grep -c CODERAG_WITH_SEMANTIC scripts/install.sh` | extra `semantic` 出现且内容只有 numpy；`dependencies` 不含 numpy / httpx；`install.sh` 默认路径不装任何向量依赖 | T3-10 | 1.5h |
 | T5-16 | **可选安装的端到端冒烟测试**（用户指定）：在**全新** `DSH_HOME` 与全新 profile 里跑三件事——（a）默认安装 → 确认没装任何向量依赖、检索逐条与 1.0.0 一致；（b）装可选 extra 并开启后端 → 在 `examples/demo-workspace` 的干净副本上跑通**一次真实语义检索**；（c）后端不可用时 → 返回结构化 `status` 且不报 `isError`（`RL-09`） | `docs/m4-install-verification.md` | `bash scripts/install.sh`（默认态）与 `CODERAG_WITH_SEMANTIC=1 bash scripts/install.sh`（可选态），两态各跑一次 `--dump-config` 与一次 MCP `tools/call` | 两次安装退出码都是 `0`；默认态的解释器里没有 numpy / httpx；可选态下 `code_search` 命中 demo 工作区的目标文件；后端不可用时是结构化状态而不是 `isError` | T5-15 | 2h |
-| T5-17 | **发布 v2.0.0**：版本号 `1.0.0` → `2.0.0`（`pyproject.toml`、`package.json`、README 的"当前版本"与示例输出、`docs/architecture.md` 的"实现版本"），`CHANGELOG.md` 增加 `[2.0.0]` 条目；并核对**发布范围**——默认安装没有新增任何必需的 embedding 依赖（`T5-05` 冻结的约束） | `pyproject.toml`, `package.json`, `CHANGELOG.md`, `README.md`, `docs/architecture.md` | `python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"` 且 `node -e "console.log(require('./package.json').version)"` | 两者都打印 `2.0.0`；`CHANGELOG.md` 含 `## [2.0.0]`；README / `docs/architecture.md` 的"当前版本"类字样已是 `2.0.0`（历史证据里的 `1.0.0` 保留不动）；`CHANGELOG.md` 的 `[2.0.0]` 条目要覆盖**两条**可选后端（本地/云端）与风险声明 | T5-16, T5-13, T5-22 | 1.5h |
+| T5-17 | **发布 v2.0.0（仅 GitHub）**：版本号 `1.0.0` → `2.0.0`（`pyproject.toml`、`package.json`、`src/dsh_coderag/__init__.py`、README 的示例输出、`docs/architecture.md` 的"实现版本"），`CHANGELOG.md` 增加 `[2.0.0]` 条目；**不发生 PyPI / npm 发布**（2026-09-25 裁定，见 §6.5），README 的发布状态要写明「2.0.0 以 GitHub tag 发布、未发布到 PyPI / npm」；并核对**默认安装零向量依赖**（`dependencies` 里不得出现 `numpy` / `httpx` / 任何 embedding 或向量库） | `pyproject.toml`, `package.json`, `src/dsh_coderag/__init__.py`, `CHANGELOG.md`, `README.md`, `docs/architecture.md` | `python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"` 且 `node -e "console.log(require('./package.json').version)"`，再跑 `python3 scripts/verify-plan.py .` | 两者都打印 `2.0.0`；`CHANGELOG.md` 含 `## [2.0.0]`；README / `docs/architecture.md` 的"当前版本"类字样已是 `2.0.0`（**历史证据里的 `1.0.0` 一律保留不动**）；`[2.0.0]` 条目要写清三件事——① 默认路径的实测提升（+53.8pp 等，并注明是诊断性配比）；② **可选向量路径已实现但按 `V4` 不发布**（含 `ADR-16`/`ADR-17` 仍有效）；③ **不发布到 PyPI / npm**，只有 GitHub tag | T5-13 | 1h |
 | T5-18 | **立 `ADR-17`「云端可选后端」并同步约束与矩阵**：冻结形态（与本地对称）、OpenAI 兼容协议、双重开关、key 只从环境读、**风险声明必须随每一处配置出现**（`D-08`）；同时改 `AGENTS.md` 的 `S-01`/`S-02`/`RL-02`/`RL-10`/`E-02` 与 `PROJECT.md` 的 §3.7/§6.8/§1.6.4。**ADR 行与 §6.8 矩阵行必须同一次提交**（`verify-plan` 的 `B1` 强制） | `docs/adr/ADR-17-optional-cloud-embedding.md`, `AGENTS.md`, `PROJECT.md` | `test -f docs/adr/ADR-17-optional-cloud-embedding.md`，`grep -c "^## " docs/adr/ADR-17-optional-cloud-embedding.md`，再跑 `python3 scripts/verify-plan.py .` | 文件存在；`≥6` 个二级小节；门禁全绿且 `ADR` 计数 `17`、矩阵含 `ADR-17` 行（`D-08` 属 `AGENTS.md` 的 `D-0x` 点号系列，与 `D-01`–`D-07` 一样**不进** §6.8 矩阵——那里的 `D1`–`D5` 是 §1.5 的另一套编号） | T5-05 | 2h |
 | T5-19 | 按 `ADR-17` 对齐**评测与测试**口径：`EVAL.md` §3.7 补"判据按后端独立判定"与云端失败注入方式；`TESTING.md` 的 `M11` 扩到云端（无 key / 401 / 429 / 超时四种失败都是结构化回退，且**key 不出现在日志/状态/异常**） | `EVAL.md`, `TESTING.md` | `grep -c -e "ALLOW_REMOTE" -e "按后端" EVAL.md TESTING.md` 再跑 `python3 scripts/verify-plan.py .` | 两项各 `≥1`；`M11` 的离线约束仍成立（用不可达地址与假 key，不联网）；门禁全绿 | T5-18 | 1.5h |
 | T5-20 | **实现云端后端**（OpenAI 兼容 `/v1/embeddings`）：`urllib` POST + `Authorization: Bearer`、批处理、超时、**重试上限 2**、维度以响应为准；`_BACKEND=openai` 与 `ollama` 共存互斥；**未设 key 时不发起任何请求**；**空字符串（含纯空白）一律等价于「未设」**，让默认值继续生效（`ADR-17` §4 冻结；沿用 `config.py` 既有的 `raw is None or not raw.strip()` 语义，**禁止**用 `os.environ.get(name, default)` 直接取值） | `src/dsh_coderag/embed.py` | `python -m pytest -k "embed" -q` | 离线（无网络、无真 key）覆盖：无 key → `SEMANTIC_AUTH_MISSING` 且**零请求**；401/429/5xx/超时 → 结构化回退 BM25；**key 绝不出现在日志、状态与异常文本里**；`_MAX_CHUNKS` 超限显式失败并报实际数量；**`CODERAG_SEMANTIC_MODEL` 为空串时仍用默认 `bge-m3`**（空串 ≠ 覆盖） | T3-08, T5-18 | 3h |
@@ -1468,7 +1475,7 @@ T5-13  ← T5-05
 T5-14  ← T5-05
 T5-15  ← T3-10
 T5-16  ← T5-15
-T5-17  ← T5-13, T5-16, T5-22
+T5-17  ← T5-13
 T5-18  ← T5-05
 T5-19  ← T5-18
 T5-20  ← T3-08, T5-18

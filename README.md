@@ -85,7 +85,8 @@ dsh-coderag 是给 DeepSeek Harness（DSH）用的**代码库检索引擎**，�
 **前置**：Python **3.10–3.12**（`requires-python = ">=3.10,<3.13"`）、
 [DSH](https://www.npmjs.com/package/@deepseek-ai/dsh)、Git、pnpm。
 
-> **当前通过克隆安装**：尚未发布到 PyPI / npm，因此**不能**用 `pip install dsh-coderag`。
+> **发布方式：只发布在 GitHub**（tag / release），**不发布到 PyPI、也不发布到 npm**。
+> 因此安装只能走下面这条「克隆」路径；`pip install dsh-coderag` 与 `npm i dsh-coderag` 都**不可用**。
 
 ```sh
 # 1. 克隆（cordis.patch.yml 在仓库里，必须克隆）
