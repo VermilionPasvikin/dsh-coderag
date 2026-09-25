@@ -12,6 +12,26 @@ dsh-coderag 是给 DeepSeek Harness（DSH）用的**代码库检索引擎**，�
 
 ---
 
+## 项目功能概述
+
+- **4 个 MCP 工具**（固定，不动态增删）：`code_search`（按自然语言或标识符检索，返回**文件路径 + 行号 + 符号名**）、
+  `code_outline`（单文件的符号大纲）、`code_index`（建/刷新索引，**立刻返回 taskId**，后台执行）、
+  `index_status`（索引状态与跳过统计）。DSH 侧看到的完整名字带 `mcp__coderag__` 前缀。
+- **索引**：SQLite **FTS5** + **中文 bigram**，落点 `<工作区>/.coderag/index.sqlite3`；
+  用 **tree-sitter** 按函数/类/接口等声明边界分块。**增量索引**——只重算内容哈希变化的文件；
+  并发度与批大小按 CPU/内存**自适应推导**，不硬编码；文件数超上限**显式失败并报实际数量**。
+- **检索**：BM25 打分。**选按分数、排按源码顺序**（`ADR-05`）——同一批命中按文件与行号输出，
+  便于模型按行号去读原文。召回三级递进：**精度（全部词元）→ 仅标识符 → 含 CJK bigram**；
+  纯标点/短符号查询不做全表扫描，而是返回结构化提示引导改用 `grep`。
+- **状态永远可解释**：索引未就绪、返回为空、后端不可用时都返回**结构化 `status`**（而非空列表），
+  模型不会把"没查到"误读成"不存在"从而编造。
+- **安全过滤**：三层（内置密钥黑名单 → `.gitignore`/`.coderagignore` → 内容级正则），
+  命中的 chunk **不入库**；**过滤结果对模型可见**（`skipped: {count, reasons}`）。
+- **异步与预算**：`code_index` 立刻返回、后台执行（避开工具调用 60 秒超时）；
+  单次检索有 token 预算，超出部分**显式报告**省略条数而不是静默截断。
+
+---
+
 ## 装上之后能带来多少提升（实测）
 
 在一份 DSH 源码副本（**3967 文件 / 63046 chunk**）上，用同一套 **13 个「找代码」任务**各跑 **3 次**
@@ -155,6 +175,28 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 | `CODERAG_BATCH_SIZE` | 索引写库批大小（不设则自适应推导） | 自适应（1–512） |
 | `CODERAG_MAX_WORKERS` | 索引并发度（不设则按 CPU/内存推导） | 自适应（上限 8） |
 
+## 它是怎么工作的
+
+- 引擎是 Python 包 `dsh_coderag`，以 **MCP stdio 服务器**运行。
+- DSH 通过内置包 `@deepseek-ai/dsh-mcp-client` 在本机**拉起一个子进程**
+  （`dsh_coderag.server` 的 stdio 入口，见 `cordis.patch.yml`），两者用 stdin/stdout 上的
+  JSON-RPC 通信，**不经过网络、不监听端口**。
+- 索引存放在 `<工作区>/.coderag/index.sqlite3`（SQLite FTS5 + 中文 bigram），
+  **不写到工作区之外**（`AGENTS.md` S-03/S-04），并被 `.gitignore` 排除。
+- 分块用 **tree-sitter** 按函数/类/接口等声明边界切分；检索用 **BM25**，
+  **选按分数、排按源码顺序**（`ADR-05`）。
+- 大文件重排/超限保护：文件数超 `CODERAG_MAX_FILES`、单文件超 `CODERAG_MAX_FILE_BYTES`
+  都会**显式报告**（进 `skipped` 或直接失败），不静默丢弃。
+- 仓库根的 `cordis.patch.yml` 同时充当本地开发 overlay 与**可分发的 bundle patch**：
+  `dsh plugin add .` 之后 DSH 的组合配置里会出现 `# == dsh-coderag` 层（实测，见
+  [`docs/m4-bundle.md`](docs/m4-bundle.md)）。
+- 关于 `dsh plugin add` 的一个坑：pnpm 10+ 遇到依赖带 install/build script 时会拒绝执行，
+  并让 `add` **静默跳过 bundle 登记**（插件看起来装了却永不加载）。**本项目不含任何
+  install script**，首次 `add` 不会触发它（干净 profile 实测，见
+  [`docs/m4-install-verification.md`](docs/m4-install-verification.md)）。
+
+---
+
 ## 安全与隐私警告
 
 - **三层过滤**（`AGENTS.md` §4.1，按顺序、缺一不可）：
@@ -185,6 +227,23 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 > - **合规**：代码可能是公司资产或含第三方许可限制。**外发前请自行确认你有权发给该服务商。**
 > - **API key**：只从环境读，**绝不**写进仓库、配置文件字面值、README 示例、测试或日志。
 > - **传输**：非 loopback 地址必须显式设 `CODERAG_SEMANTIC_ALLOW_REMOTE=1`，**请使用 `https://`**。
+
+## 文档
+
+| 文件 | 内容 |
+|---|---|
+| `PROJECT.md` | 项目概况、架构、ADR 表、任务表与进度追踪 |
+| `AGENTS.md` | 强制性约束：红线、DSH 环境坑、安全规范、提交规范 |
+| `EVAL.md` / `TESTING.md` | 评测方案 / 测试方案 |
+| [`docs/architecture.md`](docs/architecture.md) | **已实现**的架构：模块与依赖方向、索引/检索数据流、数据模型、工具契约 |
+| [`docs/eval-report-m3.md`](docs/eval-report-m3.md) | M3 的 L1/L2 评测报告（分层指标 + 逐条 diff + 失败归因） |
+| [`docs/eval-report-m3c.md`](docs/eval-report-m3c.md) | C 组（混合检索）评测报告与 `V1`–`V4` 判定 |
+| [`eval/runs/clean-a3/report.md`](eval/runs/clean-a3/report.md) / [`clean-b3`](eval/runs/clean-b3/report.md) | 本文「装上之后能带来多少提升」的原始数据（洁净组 / 装插件组） |
+| [`docs/adr/`](docs/adr/) | 决策记录：`ADR-14`（是否引入向量）、`ADR-15`（执行时机）、`ADR-16`（可选后端形态）、`ADR-17`（云端后端） |
+| [`docs/m4-bundle.md`](docs/m4-bundle.md) / [`docs/m4-install-verification.md`](docs/m4-install-verification.md) | 可分发的 DSH bundle 装载实测 / 安装验证实录 |
+| [`docs/backlog.md`](docs/backlog.md) | 已知但未修的缺陷与欠账 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录（Keep a Changelog） |
+| `cordis.patch.yml` | DSH 接入配置（dev overlay 兼 bundle patch） |
 
 ---
 
