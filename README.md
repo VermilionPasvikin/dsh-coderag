@@ -365,6 +365,38 @@ $env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"      # 桌面版请写进 profile �
 > 这 3 条测试在修复前会红（`assert 2 == 1`、命中数未被裁剪），因此这条路径不会再次静默失效。
 > `T6-17` 又把同一条配置通路接进了 **CLI**（此前 `dsh-coderag index` 完全不读这些变量）。
 
+#### 子进程的工作区根是谁定的（**GUI 里打开哪个文件夹不算**）
+
+`CODERAG_ROOT` 决定 MCP 子进程去哪个目录找 `.coderag/index.sqlite3`。它按这个顺序取值：
+
+1. 环境里有 `CODERAG_ROOT` → 用它（**推荐显式钉死**，见下）；
+2. 否则用 **DSH 宿主进程的 `process.cwd()`**——桌面版从快捷方式启动时，这个值是
+   `%USERPROFILE%\.dsh\profiles\<profile>`（**profile 目录本身**），既不是你的仓库，也不是你在 GUI 里打开的文件夹。
+
+**实测（2026-09-30）**：把根留成 `process.cwd()` 时，子进程报出的工作区是
+`C:\Users\15349\.dsh\profiles\desktop`——同一目录按同一白名单走出来正好 `seen=11 / indexable=2 / other=9`，
+与子进程返回的 `files` 块**逐字一致**，而且**它真的在那个 profile 目录里建了一份 0.1 MB 的索引**；
+与此同时，用户在同一台机器上跑完的 **10.67 GiB** 游戏索引对子进程**完全不可见**，
+`code_search` 于是返回「没有建立索引」。
+
+**所以桌面版必须显式钉死根**（`env` 里写**字面值**，不要留 `process.cwd()`）：
+
+```yaml
+    env:
+      CODERAG_ROOT: 'F:\你的\工作区\绝对路径'
+      CODERAG_EXTRA_EXTENSIONS: '.mxml'
+      CODERAG_MAX_FILES: '200000'      # 可索引文件超过 20000 时**必须**给，否则子进程自己建索引会报 INDEX_TOO_MANY_FILES
+```
+
+三点必须知道：
+
+- **一个 profile 一个根**：`CODERAG_ROOT` 只在**拉起子进程时**求值一次，换工作区得改这一行并**重启桌面版**；
+  在 GUI 里换打开的文件夹**不会**改变它。
+- **CLI 不吃这一套**：`python -m dsh_coderag index` / `search` 只认**参数**（`index <路径>` / `search --root <路径>`），
+  与 patch 无关——所以「CLI 建好的索引」与「子进程要找的目录」是不是同一个，要你自己对齐
+  （见上一小节「谁读哪份配置」）。
+- **改完要重启**：`--dump-config` 只能验证结构，`!!js` 表达式在 dump 里**不求值**（写成字面值就看得见）。
+
 #### 谁读哪份配置——**CLI 与 DSH 读的不是同一份**
 
 这条决定「你在哪设的变量，谁看得见」，也是最容易踩的一处：
@@ -566,6 +598,21 @@ $env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
 > - **合规**：代码可能是公司资产或含第三方许可限制。**外发前请自行确认你有权发给该服务商。**
 > - **API key**：只从环境读，**绝不**写进仓库、配置文件字面值、README 示例、测试或日志。
 > - **传输**：非 loopback 地址必须显式设 `CODERAG_SEMANTIC_ALLOW_REMOTE=1`，**请使用 `https://`**。
+
+## 已知限制
+
+按 `AGENTS.md` `D-03`/`D-05` 集中列出。每条都指向正文或 [`docs/backlog.md`](docs/backlog.md) 的详情。
+
+| 限制 | 表现 | 详情 |
+|---|---|---|
+| **只认白名单里的后缀** | 其余文件**根本不参与遍历结果**（不算 skip）；`Dockerfile` / `Makefile` 这类**没有扩展名**的文件任何配置都收不进来 | [① 扩展白名单](#-让引擎收录别的文件类型扩展白名单)、backlog |
+| **没有 grammar 的后缀是低置信度分块** | 按固定行数切块，`symbol_kind` 为 `None`；且 `Chunk.low_confidence` **只存在于内存**，不入库、不渲染，模型看不到 | backlog |
+| **MCP 子进程的工作区根在启动时就定死** | GUI 里打开别的文件夹**不会**改变它；一个 profile 只有一个根，换工作区要改 patch 并重启 | 上一小节 |
+| **CLI 与 DSH 读不同的配置来源** | shell 里设的变量 CLI 认、DSH 会话不认；写进 patch 则反过来。两者写同一个索引文件，**谁最后跑 `index` 谁的内容生效** | 「谁读哪份配置」 |
+| **CLI 路径没有运行历史** | 中断后 `index_status` 只说「未就绪」，说不出「被中断、跑到多少」 | backlog |
+| **`searcher` 不读 `ready`** | 被中断的索引**仍可被搜到**（保留可用性的取舍）：命中可能来自不完整的数据，判断要靠 `index_status` | backlog |
+| **大文件默认跳过** | 超过 `CODERAG_MAX_FILE_BYTES`（1 MiB）的文件不入库，只在 `skipped.too_large` 里计数 | 配置章节 |
+| **可选向量后端默认关闭，且不声称检索质量** | 本地后端只允许 loopback；按 `ADR-14` §10.4 的 `V4`，`natural` 桶 `S@5 = 0.300 < 0.40` | 「② 本地 embedding 后端」 |
 
 ## 文档
 
