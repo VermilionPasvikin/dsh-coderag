@@ -620,6 +620,7 @@ $env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
 | **CLI 路径没有运行历史** | 中断后 `index_status` 只说「未就绪」，说不出「被中断、跑到多少」 | backlog |
 | **`searcher` 不读 `ready`** | 被中断的索引**仍可被搜到**（保留可用性的取舍）：命中可能来自不完整的数据，判断要靠 `index_status` | backlog |
 | **大文件默认跳过** | 超过 `CODERAG_MAX_FILE_BYTES`（1 MiB）的文件不入库，只在 `skipped.too_large` 里计数 | 配置章节 |
+| **云端后端对超长 chunk 无能为力** | 代码原样发送 chunk 文本、**不截断**；实测一份含几何数据的 89.5 万 chunk 索引里有 **8,270 个超过 3.2 万字符**（≈8k token，多数模型的上限），这些会被服务商拒绝。云端向量化前需先把这类大块从索引里排除 | 配置章节 ③ |
 | **可选向量后端默认关闭，且不声称检索质量** | 本地后端只允许 loopback；按 `ADR-14` §10.4 的 `V4`，`natural` 桶 `S@5 = 0.300 < 0.40` | 「② 本地 embedding 后端」 |
 
 ## 文档
