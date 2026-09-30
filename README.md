@@ -113,32 +113,72 @@ bash scripts/install.sh          # 受限网络：CODERAG_PIP_ARGS="--index-url 
 "$CODERAG_PYTHON" -m dsh_coderag index /path/to/repo
 "$CODERAG_PYTHON" -m dsh_coderag search "用户令牌在哪里校验" --root /path/to/repo
 
-# 4. 把插件挂进 DSH（./scripts/dsh 会自己找到解释器并导出 CODERAG_PYTHON）
-./scripts/dsh --profile web --patch ./cordis.patch.yml
+# 4. 挂插件（推荐）：把本仓库注册成 web profile 的一层，然后确认
+./scripts/dsh plugin --profile web add .
+./scripts/dsh --profile web --dump-config | grep -A2 '== dsh-coderag'
+# 期望：先出现 # == dsh-coderag，紧接着 - id: mcp-coderag
+
+# 5. 启动（web 应用来自 profile 自带的 @deepseek-ai/dsh-web-app）
+./scripts/dsh --profile web
 ```
 
 ### Windows（PowerShell）
+
+> **先确认你手上的 `python` 是哪一个。** Windows 上 `python` / `python3` 很可能只是
+> **Microsoft Store 的占位符**——运行时会打印
+> `Python was not found; run without arguments to install from the Microsoft Store …`，
+> 那不是你装的那个解释器。所以下面**一律用显式路径变量 `$py`**，不依赖 `PATH`：
+>
+> ```powershell
+> py -0p                     # 列出本机已注册的解释器（Windows 官方 launcher）
+> & $py --version            # 换成你自己的路径，确认落在 3.10–3.12
+> ```
 
 ```powershell
 # 1. 克隆
 git clone https://github.com/VermilionPasvikin/dsh-coderag.git
 Set-Location dsh-coderag
 
-# 2. 装引擎与依赖：PowerShell 里没有 sh，所以直接用解释器调 pip / CLI
-python -m pip install .                  # 开发者用 python -m pip install -e ".[dev]"
-python -m dsh_coderag doctor             # 探测解释器 / 版本 / FTS5，并打印 CODERAG_PYTHON
-python -m dsh_coderag index C:\path\to\repo
-python -m dsh_coderag search "用户令牌在哪里校验" --root C:\path\to\repo
+# 2. 指定解释器（示例是 conda 环境；换成你自己的路径）
+$py = "C:\Users\<你>\miniconda3\envs\coderag\python.exe"
+& $py --version                          # 期望：Python 3.10 / 3.11 / 3.12
 
-# 3. 把 doctor 打印的解释器交给 patch（重要：patch 内置默认值是作者机器的 macOS 路径）
-$env:CODERAG_PYTHON = (python -c "import sys; print(sys.executable)")
+# 3. 装引擎与依赖：PowerShell 里没有 sh，所以直接用解释器调 pip / CLI
+& $py -m pip install .                   # 开发者：& $py -m pip install -e ".[dev,semantic]"
+& $py -m dsh_coderag doctor              # 探测解释器 / 版本 / FTS5，并打印 CODERAG_PYTHON
+& $py -m dsh_coderag index C:\path\to\repo
+& $py -m dsh_coderag search "用户令牌在哪里校验" --root C:\path\to\repo
 
-# 4. 挂插件并启动。Windows 上直接用 dsh：本仓库的 ./scripts/dsh 是 sh 脚本，PowerShell 里跑不了
-dsh --profile web --patch .\cordis.patch.yml
-# 没有全局 dsh 时：npx @deepseek-ai/dsh@0.1.5-rc.1 --profile web --patch .\cordis.patch.yml
+# 4. 把解释器交给 patch（重要：patch 内置默认值是作者机器的 macOS 路径）。
+#    这一句只对当前 PowerShell 窗口有效；DSH 从同一个窗口启动就继承得到。
+$env:CODERAG_PYTHON = $py
+
+# 5. 找一个能用的 dsh（见下方说明；本仓库的 ./scripts/dsh 是 sh 脚本，PowerShell 里跑不了）
+$dsh = "F:\dsh\resources\runtime\cli\bin\dsh.cmd"   # 换成你自己的路径，或直接写全局 dsh 的路径
+& $dsh plugin --profile web add .
+& $dsh --profile web --dump-config | Select-String -Pattern '== dsh-coderag' -Context 0,2
+# 期望：先出现 # == dsh-coderag，紧接着 - id: mcp-coderag
+
+# 6. 启动
+& $dsh --profile web
 ```
 
-> **为什么 Windows 用 `python -m pip install .` 而不是 `install-deps`**：`python -m dsh_coderag …`
+> **`dsh` 在 Windows 上不一定在 `PATH` 上**（`AGENTS.md` E-07）。本机实测可用的两种写法：
+> ① **桌面版自带的 CLI**——`<DeepSeek Harness 安装目录>\resources\runtime\cli\bin\dsh.cmd`
+> （本机是 `F:\dsh\...`、版本 `0.2.0-rc.2`，上面第 5 步用的就是它）；
+> ② **Git for Windows 的 bash** + 仓库里的薄包装——`bash scripts/dsh --profile web`（会回退到钉版本的 npx）。
+> 你自己装过全局 `dsh` 的话，`dsh ...` 直接可用。
+
+> **两条路线的区别（Windows 与 macOS 均实测）**：
+> `dsh plugin --profile web add .` 会把**自带的 `web` 模板复制成你的 profile**（`package.json` 里
+> `bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-coderag"]`）——所以它既能挂上
+> 本插件、又保留了 web 应用，`--dump-config` 里会多出 `# == dsh-coderag` 这一层标记。
+> 而 `& $dsh --profile web --patch .\cordis.patch.yml` 只是**临时叠加**：dump 里**只有**
+> `- id: mcp-coderag`、**没有** `# == dsh-coderag`。**长期使用走 `plugin add`，改 patch 时用 `--patch` 叠加调试。**
+> **不要给一个全新的 profile 名（如 `--profile coderag`）当启动目标**——它只拿到 `dsh-base` + 本插件，
+> **没有 web 应用**，`dsh --profile coderag` 起不来界面；它只适合拿来 `--dump-config` 验证。
+
+> **为什么 Windows 用 `& $py -m pip install .` 而不是 `install-deps`**：`& $py -m dsh_coderag …`
 > 要求包**已经可导入**，而全新 clone 上它还没装。`install-deps` 做的是「装 + 装后自检」，
 > 在包可导入之后随时可以重跑它。装了 Git for Windows 的话，也可以直接在 Git Bash 里跑
 > `bash scripts/install.sh`（实测可用）。
@@ -190,33 +230,60 @@ dsh --profile <名字> --dump-config | Select-String -Pattern '== dsh-coderag' -
 
 stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*` / `*PASSWORD*` / `*SECRET*` / `*TOKEN*`
 的变量与**所有** `DSH_*` 变量都会被删除。清洗之后，`cordis.patch.yml` 的 `config.env` 会**合并到最上面**
-（已核实：`{...scrubbedParentEnv(), ...extra}`）——所以**写进 patch 的一定到得了子进程，export 的不一定**。
+（已核实：`{...scrubbedParentEnv(), ...extra}`）——所以**写进 patch 的一定到得了子进程，在 shell 里设的不一定**。
 
 **配置写在哪**（按推荐顺序）：
 
-| 写在哪 | 适合什么 | 会不会入库 |
-|---|---|---|
-| `$DSH_HOME/profiles/<profile>/cordis.patch.yml` | 本机持久设置，**包括密钥字面值** | ❌ 仓库之外，不会 |
-| `$DSH_HOME/cordis.patch.yml` | 同上，且**优先级更高**（对所有 profile 生效） | ❌ 仓库之外，不会 |
-| 启动 dsh 的那个 shell 里 `export` | 只对"名字不含 `KEY/PASSWORD/SECRET/TOKEN`"的变量有效 | ❌ 不涉及文件 |
-| 仓库里的 `cordis.patch.yml`（`env:` 块） | 非密钥的默认值；**密钥只能用 `!!js` 表达式** | ⚠️ 会（**`RL-02`：绝不能写真实 key**） |
+| 写在哪 | Windows 上的路径 | 适合什么 | 会不会入库 |
+|---|---|---|---|
+| profile 的 `cordis.patch.yml` | `%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml` | 本机持久设置，**包括密钥字面值** | ❌ 仓库之外，不会 |
+| `$DSH_HOME/cordis.patch.yml` | `%USERPROFILE%\.dsh\cordis.patch.yml` | 同上，且**优先级更高**（对所有 profile 生效） | ❌ 仓库之外，不会 |
+| 启动 dsh 的那个 shell | `export X=...`（macOS / Linux）／`$env:X = "..."`（PowerShell） | 只对"名字不含 `KEY/PASSWORD/SECRET/TOKEN`"的变量有效；**只活到窗口关闭** | ❌ 不涉及文件 |
+| 仓库里的 `cordis.patch.yml`（`env:` 块） | 同左 | 非密钥的默认值；**密钥只能用 `!!js` 表达式** | ⚠️ 会（**`RL-02`：绝不能写真实 key**） |
 
-> **哪些变量 export 不生效**：`CODERAG_MAX_TOKENS` 的名字里含 `TOKEN`，会被清洗掉；云端的 API key 同理。
+> **哪些变量在 shell 里设不生效**：名字里含 `TOKEN` 的 `CODERAG_MAX_TOKENS` 会被清洗掉；云端的 API key 同理。
 > 这两个**必须**写进上面任一处 patch 的 `env:` 里。`CODERAG_ROOT` 与 `CODERAG_PYTHON` 例外——
-> 它们在 `cordis.patch.yml` 里已被 `!!js` 引用，由宿主进程读取你的 shell 环境。
+> 它们在 `cordis.patch.yml` 里已被 `!!js` 引用，由宿主进程读取你的 shell 环境
+> （PowerShell 用 `$env:CODERAG_PYTHON = $py`，macOS / Linux 用 `export CODERAG_PYTHON=...`）。
 
-> **覆盖时注意**：DSH 的 patch 是**整体替换**而不是深合并——写 `- id: mcp-coderag` 覆盖时，必须把
-> `serverName` / `transport` / `command` / `args` 与**所有想保留的 `env` 项**一并重写，否则它们会消失。
+**Windows 上覆盖到一个持久位置**——把下面这段写进
+`%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`（该文件由 `dsh plugin --profile web add .` 生成，
+初始是 `[]`）：
 
-| 变量 | 作用 | 默认 |
-|---|---|---|
-| `CODERAG_PYTHON` | 运行 MCP 服务器的解释器路径 | 作者机器上的 `forBSH` 路径（**请覆盖**） |
-| `CODERAG_ROOT` | 要索引的工作区根 | DSH 进程的工作目录 |
-| `CODERAG_MAX_FILES` | 文件数上限，**超限显式失败**并报实际数量（不静默截断） | `20000` |
-| `CODERAG_MAX_TOKENS` | 单次检索返回的 token 预算 | `4000` |
-| `CODERAG_MAX_FILE_BYTES` | 单文件大小上限，超过则跳过并计入 `skipped.too_large` | `1048576`（1 MiB） |
-| `CODERAG_BATCH_SIZE` | 索引写库批大小（不设则自适应推导） | 自适应（1–512） |
-| `CODERAG_MAX_WORKERS` | 索引并发度（不设则按 CPU/内存推导） | 自适应（上限 8） |
+```yaml
+- id: mcp-coderag
+  config:
+    serverName: coderag
+    transport: stdio
+    command: 'C:\Users\<你>\miniconda3\envs\coderag\python.exe'
+    args: ['-c', 'import dsh_coderag.server as s; s.run()']
+    env:
+      CODERAG_ROOT: 'C:\path\to\your\workspace'
+      CODERAG_MAX_TOKENS: '8000'
+```
+
+改完用 `dsh --profile web --dump-config`（在配好的 `DSH_HOME` 下）确认组合结果。
+
+> **覆盖时注意：DSH 的 patch 是「整体替换」而不是深合并**——DSH schema 自己的说明就是
+> *"A patch config replaces the whole config."*。**实测**：只写 `config.env` 一项去覆盖
+> `mcp-coderag` 时，`serverName` / `transport` / `args` 会**从结果里消失**。所以上面那个例子把要保留的
+> 字段**全部重写**了一遍；如果你还改了 `cordis.patch.yml` 里其它 `env` 项，也要一并抄过来。
+
+| 变量 | 作用 | 默认 | **当前是否真的生效** |
+|---|---|---|---|
+| `CODERAG_PYTHON` | 运行 MCP 服务器的解释器路径 | 作者机器上的 `forBSH` 路径（**请覆盖**） | ✅ 由 DSH 读（patch 里的 `!!js`） |
+| `CODERAG_ROOT` | 要索引的工作区根 | DSH 进程的工作目录 | ✅ MCP 服务器读它决定工作区 |
+| `CODERAG_MAX_TOKENS` | 单次检索返回的 token 预算 | `4000` | ⚠️ **未生效**——服务端用工具参数 `max_tokens`（默认 4000），不读这个变量（实测：设 `1` 与设 `8000` 输出逐字相同）。**要限预算请用工具参数 `max_tokens`** |
+| `CODERAG_MAX_FILES` | 文件数上限，超限显式失败并报实际数量 | `20000` | ⚠️ **未生效**（实测：设为 `1`、6 个文件的工作区仍全部索引成功） |
+| `CODERAG_MAX_FILE_BYTES` | 单文件大小上限，超过则跳过并计入 `skipped.too_large` | `1048576`（1 MiB） | ⚠️ **未生效**（实测：设为 `20` 字节，48 字节的文件仍入库） |
+| `CODERAG_BATCH_SIZE` | 索引写库批大小（不设则自适应推导） | 自适应（1–512） | ⚠️ **未生效**（源码：建索引时没有把配置传给索引器） |
+| `CODERAG_MAX_WORKERS` | 索引并发度（不设则按 CPU/内存推导） | 自适应（上限 8） | ⚠️ **未生效**（同上一行） |
+
+> **上面五个 ⚠️ 是实测/源码确认的现状，不是文档笔误**：`config.py` 会把它们读进 `IndexConfig`，
+> 但 `server.py` 建索引时把 `index_sync` **裸传**给任务管理器（不带配置），而 `load_config()` 全项目
+> 只在取 `.root` 时调用一次。因此**通过 MCP 使用时这些上限目前都不起作用**。
+> 已知限制与修法登记在 [`docs/backlog.md`](docs/backlog.md)「配置文件面在 MCP 路径上不生效」一条；
+> 本 README 照实写明，**不承诺做不到的事**。
 
 ## 它是怎么工作的
 
