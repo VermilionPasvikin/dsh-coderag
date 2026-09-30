@@ -132,7 +132,15 @@ def wilson_interval(
         * ((proportion * (1.0 - proportion) / total + z * z / (4.0 * total * total)) ** 0.5)
         / denominator
     )
-    return Interval(low=max(0.0, center - margin), high=min(1.0, center + margin))
+    # The endpoints are exactly 0 at 0/n and exactly 1 at n/n: center and
+    # margin are equal there, so `center - margin` is algebraically 0. Evaluated
+    # in floating point the two quantities are computed by different routes and
+    # the difference lands a hair *inside* the interval (2.8e-17 on Windows),
+    # which max(0.0, ...) cannot catch because the residue is positive. Pin the
+    # two exact cases rather than report that residue as a bound.
+    low = 0.0 if successes == 0 else max(0.0, center - margin)
+    high = 1.0 if successes == total else min(1.0, center + margin)
+    return Interval(low=low, high=high)
 
 
 def compute_metrics(
