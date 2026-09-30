@@ -1,12 +1,14 @@
-"""Tests for scripts/install.sh (T4-03).
+"""Tests for the thin `scripts/install.sh` wrapper (T6-02).
 
-The acceptance criterion is "idempotent, re-runnable without error", so the
-tests run the real script twice in its offline mode (`CODERAG_SKIP_INSTALL=1`)
-and assert the two runs are byte-identical. The remaining cases cover the
-environment gates the task requires: a missing interpreter and a Python
-version outside `requires-python`.
+After T6-02 that script no longer holds install logic: it locates an
+interpreter and forwards to `dsh_coderag install-deps`. What is left to assert
+is the wrapper's own contract - valid shell, bounded size, no dependency list
+of its own, and argument pass-through. The interpreter gates the script used to
+own (Python version range, FTS5, pip) are asserted against the CLI in
+`tests/test_cli.py`, because that is where they live now.
 
-Nothing here touches the network or installs anything.
+These tests are skipped where no `bash` is on PATH; they are POSIX-shell
+wrappers, and the Windows path is the Python CLI itself.
 """
 
 from __future__ import annotations
@@ -23,6 +25,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "install.sh"
 BASH = shutil.which("bash")
 
+MAX_WRAPPER_LINES = 40
+"""T6-02's acceptance criterion: each wrapper is at most 40 lines."""
+
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash is required to run install.sh")
 
 
@@ -33,10 +38,10 @@ def install_env(**overrides: str) -> dict[str, str]:
     return env
 
 
-def run_install(**overrides: str) -> subprocess.CompletedProcess[str]:
+def run_install(*args: str, **overrides: str) -> subprocess.CompletedProcess[str]:
     assert BASH is not None
     return subprocess.run(
-        [BASH, str(SCRIPT)],
+        [BASH, str(SCRIPT), *args],
         cwd=REPO_ROOT,
         env=install_env(**overrides),
         capture_output=True,
@@ -55,14 +60,45 @@ def test_install_script_is_syntactically_valid_bash() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_install_script_selfcheck_passes_without_installing() -> None:
+def test_install_script_is_a_thin_wrapper() -> None:
+    lines = SCRIPT.read_text(encoding="utf-8").splitlines()
+
+    assert len(lines) <= MAX_WRAPPER_LINES, f"{len(lines)} lines exceeds {MAX_WRAPPER_LINES}"
+
+
+def test_install_script_carries_no_dependency_list_of_its_own() -> None:
+    """The dependency list must exist in pyproject.toml and nowhere else.
+
+    The guard is on an actual pip invocation (`-m pip`) and on the dependency
+    names, not on the words "pip install" in prose: the wrapper is allowed to
+    explain that the install step moved to the CLI.
+    """
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "-m pip" not in text
+    for dependency in ("tree-sitter", "tree-sitter-language-pack", "pathspec", "mcp>="):
+        assert dependency not in text, dependency
+    assert "-m dsh_coderag install-deps" in text
+
+
+def test_install_script_locates_the_interpreter_from_coderag_python() -> None:
+    assert "CODERAG_PYTHON" in SCRIPT.read_text(encoding="utf-8")
+
+
+def test_install_script_forwards_to_the_python_cli() -> None:
     result = run_install(CODERAG_PYTHON=sys.executable, CODERAG_SKIP_INSTALL="1")
 
     assert result.returncode == 0, result.stderr
-    assert "已跳过（CODERAG_SKIP_INSTALL=1）" in result.stdout
-    assert "FTS5   ：可用 ✅" in result.stdout
-    assert "往返   ：中文查询命中 ✅  标识符命中 ✅  无关词不命中 ✅" in result.stdout
-    assert "完成：安装与自检通过 ✅" in result.stdout
+    assert "== dsh-coderag install-deps" in result.stdout
+    assert "完成：安装与自检通过" in result.stdout
+
+
+def test_install_script_passes_arguments_through_to_the_cli() -> None:
+    """`"$@"` must survive: the wrapper adds no options of its own."""
+    result = run_install("--skip-install", CODERAG_PYTHON=sys.executable)
+
+    assert result.returncode == 0, result.stderr
+    assert "已跳过" in result.stdout
 
 
 def test_install_script_is_idempotent() -> None:
@@ -76,30 +112,8 @@ def test_install_script_is_idempotent() -> None:
 
 def test_install_script_rejects_a_missing_interpreter(tmp_path: Path) -> None:
     missing = tmp_path / "not-a-python"
+
     result = run_install(CODERAG_PYTHON=str(missing), CODERAG_SKIP_INSTALL="1")
 
     assert result.returncode == 2
     assert "解释器不可执行或不存在" in result.stderr
-
-
-def test_install_script_rejects_an_unsupported_python_version(tmp_path: Path) -> None:
-    fake = tmp_path / "fake-python"
-    fake.write_text(
-        "#!/bin/sh\n"
-        "# Reports 3.9.0 when asked to print its version; fails the range probe.\n"
-        'for arg in "$@"; do\n'
-        '  case "$arg" in\n'
-        "    *'print('*) printf '3.9.0\\n'; exit 0 ;;\n"
-        "    *version_info*) exit 1 ;;\n"
-        "  esac\n"
-        "done\n"
-        "exit 1\n",
-        encoding="utf-8",
-    )
-    fake.chmod(0o755)
-
-    result = run_install(CODERAG_PYTHON=str(fake), CODERAG_SKIP_INSTALL="1")
-
-    assert result.returncode == 2
-    assert "Python 版本不符" in result.stderr
-    assert "3.9.0" in result.stderr

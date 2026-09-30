@@ -3,6 +3,13 @@
 This package owns the retrieval engine only. It does not own the MCP
 transport lifecycle, does not choose an embedding provider, and never
 modifies the DeepSeek Harness host.
+
+Importing the package costs only the standard library. `index_sync` and
+`search` pull in third-party wheels (tree-sitter), and the M6 entry point has
+to run on a machine where those are not installed yet - `python -m
+dsh_coderag doctor` and `install-deps` exist precisely to get that machine
+ready (PROJECT.md 6.5.1, T6-02). They are therefore resolved on first use
+through the module `__getattr__` below (PEP 562).
 """
 
 from __future__ import annotations
@@ -24,6 +31,11 @@ def _drop_working_directory_from_sys_path() -> None:
     The engine reads user files as text and never imports them, so dropping the
     working directory here is safe. The package itself is located through
     site-packages or its own `__path__`, not through the working directory.
+
+    This must stay the first executable statement in the module, ahead of every
+    import that is not already loaded at interpreter startup: `typing` pulls in
+    `functools` and therefore `types`, so importing it first lets a workspace
+    `types.py` fail the import (tests/test_cwd_shadowing.py).
     """
     working_directory = os.path.realpath(os.getcwd())
     sys.path[:] = [
@@ -35,10 +47,35 @@ def _drop_working_directory_from_sys_path() -> None:
 
 _drop_working_directory_from_sys_path()
 
-from dsh_coderag.indexer import index_sync  # noqa: E402
-from dsh_coderag.searcher import search  # noqa: E402
-from dsh_coderag.types import SearchStatus  # noqa: E402
+from importlib import import_module  # noqa: E402
+from typing import TYPE_CHECKING, Any  # noqa: E402
+
+if TYPE_CHECKING:
+    from dsh_coderag.types import SearchStatus
 
 __all__ = ["SearchStatus", "__version__", "index_sync", "search"]
 
 __version__ = "2.0.0"
+
+_LAZY_ATTRIBUTES: dict[str, str] = {
+    "index_sync": "dsh_coderag.indexer",
+    "search": "dsh_coderag.searcher",
+    "SearchStatus": "dsh_coderag.types",
+}
+"""Public name to defining module. Resolved on first attribute access."""
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve a public name on first use (PEP 562).
+
+    Kept deliberately narrow: only the names in `_LAZY_ATTRIBUTES` are
+    resolved, so a typo still raises AttributeError instead of importing
+    something unexpected. Submodule access keeps working because the import
+    system falls back to importing `dsh_coderag.<name>` itself.
+    """
+    module_name = _LAZY_ATTRIBUTES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value

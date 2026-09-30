@@ -354,3 +354,62 @@
   **也不降低 macOS 的既有验收**——跨平台是"多一个平台达标"，不是"把原来的标准摊薄"。
 - 另一条相关的未还欠账：`C-07`「单元测试覆盖 Windows 风格输入」当前未达标（本文件有专条），
   归 `T6-03` 一并还清。
+
+## Windows 基线上的既有测试失败（发现于 `T6-02`，**未顺手修**）
+
+> 判定方法：把 HEAD（`dc7d971`）签出到独立 worktree，用**同一个解释器**跑同一批用例——
+> 下面三条在 HEAD 上**同样失败**，即与本任务的改动无关。完整命令与输出见
+> `PROJECT.md` §6.7 的 `T6-02` 行。`T6-03` 的出口判据是「Windows 上全量通过且**无 xfail**」，
+> 所以这三条必须先有处置口径，否则 `T6-03` 无法达标。
+
+### (a) 可选向量依赖 `numpy` 不在任何已声明的 extra 里（6 条用例 + `mypy`）
+
+- 现象：在没有 numpy 的解释器上，`tests/test_vectors.py` 与 `tests/test_vector_search.py`
+  **收集阶段就失败**（`ModuleNotFoundError: No module named 'numpy'`，`--ignore` 之外无解）；
+  `tests/test_index_vectors.py` 的 4 条则断言失败，stderr 给出
+  `"code": "SEMANTIC_BACKEND_UNAVAILABLE", "message": "numpy is required for the optional vector backend"`。
+  `mypy --strict src/` 同时报 `src/dsh_coderag/vectors.py:31: Cannot find implementation or
+  library stub for module named "numpy"`（那是 `if TYPE_CHECKING:` 里的导入）。
+- 根因：`pyproject.toml` 的 `optional-dependencies` **只有 `dev`**——`T5-15`（extra `semantic`）
+  已按 2026-09-25 的发布范围裁决**移出 2.0.0**（见本文件「四个 M5 任务因发布范围调整而出范围」），
+  于是**没有任何声明途径**能装出跑这些测试所需的 numpy。macOS 侧一直是**手工**
+  `pip install numpy` 才跑通的（`T3-09` 的备注即如此记录）。
+- 后果：与 `T6-04` 的判据直接冲突——`T6-04` 要求「**默认态解释器里没有 numpy**（`RL-10`）」，
+  而全量套件又需要 numpy。这两个要求**不能同时满足**，必须由所有者选一个口径。
+- 建议（三选一，需裁决）：
+  1. **恢复 `semantic` extra**（只含 numpy），把跑向量测试写成显式的可选步骤，
+     `T6-03`/`T6-04` 的「全量通过」以默认路径为准并在文档里写明排除项；
+  2. 给这 6 条用例加 `pytest.importorskip("numpy")`，让缺 extra 时**跳过**而不是失败
+     （注意：跳过不等于通过，`T6-03` 的判据得接受 skip）；
+  3. 在 CI/开发环境里**显式**装 numpy，并接受「默认态解释器因此含 numpy」——
+     这会**直接违反** `RL-10` 对 `T6-04` 的要求，不推荐。
+
+### (b) `tests/test_walker.py::test_walk_recurses_into_subdirectories` 断言里假定正斜杠
+
+- 现象：`assert 'pkg/sub/util.js' in ['app.ts', 'lib.c', 'main.py', 'pkg\\sub\\util.js']`。
+- 根因：**测试自己的 helper** 用了 `str(path.relative_to(base))`
+  （`tests/test_walker.py` 的 `_relative_paths`），在 Windows 上产出反斜杠。
+  生产代码是合规的（`walker.py` / `indexer.py` 等 6 处用 `Path.as_posix()` 入库），
+  即这条与 `C-07` 是同一主题的**测试侧**版本。
+- 建议：`_relative_paths` 改成 `path.relative_to(base).as_posix()`，并顺带补 `C-07` 要求的
+  Windows 风格**输入**用例——两条都归 `T6-03`。
+
+### (c) `tests/test_metrics.py::test_wilson_interval_stays_inside_zero_and_one_at_the_boundaries`
+
+- 现象：`wilson_interval(0, 10).low` 在 Windows 上是 `2.7755575615628914e-17`，断言要求 `== 0.0`；
+  macOS 的既有证据（`T3-04`）记的是 `0/10 → [0, 0.277533]`，即当时恰好是精确的 `0.0`。
+- 根因：Wilson 下界在 `p_hat = 0` 时数学上恰为 0，实现按 `center - half_width` 算，
+  浮点相减可能留下约 `2.8e-17` 的残差——**平台/`libm` 相关**，不是逻辑错误。
+- 建议：断言改为容差比较（`abs(low) < 1e-12`）或把区间端点显式 clamp 到 `[0, 1]`。
+  属 `T6-03`「只修平台相关失败，不放宽任何断言」的边界情形——**clamp 实现**比放宽容差更符合
+  `T-08`，建议采用 clamp。需要所有者确认哪个口径。
+
+## 薄包装的 LF 保证目前只靠「写入时是 LF」（发现于 `T6-02`，**未顺手修**）
+
+- 事实：`scripts/dsh` / `scripts/install.sh` / `scripts/eval-gate.sh` 在 git **索引里都是 `i/lf`**，
+  但仓库**没有 `.gitattributes`**，而 Git for Windows 的默认 `core.autocrlf=true` 会把这些文件
+  在工作树里签出成 **CRLF**（本机实测：三个文件均为 `w/crlf`）。
+- 后果：Windows 用户若用 Git for Windows 自带的 `bash` 跑它们，脚本正文带 `\r`；
+  `sh`/`bash` 对 `\r` 的容忍度不一致（本机 `bash -n` 能过，但 `./script.sh` 的 shebang 解析会失败）。
+- 建议：加 `.gitattributes` —— `*.sh text eol=lf` 与 `scripts/dsh text eol=lf`，让**每个平台**都签出 LF；
+  这样 `T6-03` 才能加一条稳定的「脚本无 CRLF」测试。属独立小改动，需所有者确认是否纳入 M6。
