@@ -153,7 +153,7 @@ def _dsh_home(environ: Mapping[str, str]) -> Path | None:
     return default if default.is_dir() else None
 
 
-def _refuse_dsh_home(root: Path, environ: Mapping[str, str]) -> None:
+def _refuse_dsh_home(root: Path, environ: Mapping[str, str], *, from_fallback: bool) -> None:
     """Reject a workspace that points inside DSH's own home (T6-25).
 
     The desktop app starts the engine in its profile directory, so a root that is
@@ -162,6 +162,11 @@ def _refuse_dsh_home(root: Path, environ: Mapping[str, str]) -> None:
     such an index existed, `index_status` reported it ready and the model could
     answer from DSH's own files. A required setting must fail rather than be
     guessed (AGENTS.md 3.2).
+
+    The message names which of the two it was, and the directory itself: during
+    the T6-26 experiment that distinction is the measurement - a value from the
+    patch is the HOST's working directory, one from the fallback is the ENGINE's,
+    and only the latter says anything about how DSH spawns its children.
     """
     home = _dsh_home(environ)
     if home is None:
@@ -172,10 +177,16 @@ def _refuse_dsh_home(root: Path, environ: Mapping[str, str]) -> None:
     except OSError:
         return
     if resolved_root == resolved_home or resolved_home in resolved_root.parents:
+        if from_fallback:
+            subject = (
+                f"{ENV_ROOT} is unset, so the engine used its own working directory "
+                f"({resolved_root}), which is inside"
+            )
+        else:
+            subject = f"{ENV_ROOT} is set to {resolved_root}, which is inside"
         raise ConfigError(
-            f"{ENV_ROOT} points inside DSH's own home ({resolved_home}): {resolved_root}. "
-            f"The desktop app starts the engine in its profile directory, so an unset "
-            f"{ENV_ROOT} lands there; set {ENV_ROOT} to the workspace you want to search."
+            f"{subject} DSH's own home ({resolved_home}). The desktop app works in its "
+            f"profile directory, so {ENV_ROOT} must name the workspace you want to search."
         )
 
 
@@ -204,8 +215,12 @@ def load_config(environ: Mapping[str, str] | None = None) -> IndexConfig:
     """
     env = os.environ if environ is None else environ
     root_value = _read_optional_str(env, ENV_ROOT)
-    root = Path(root_value) if root_value is not None else Path.cwd()
-    _refuse_dsh_home(root, env)
+    if root_value is None:
+        root = Path.cwd()
+        _refuse_dsh_home(root, env, from_fallback=True)
+    else:
+        root = Path(root_value)
+        _refuse_dsh_home(root, env, from_fallback=False)
     return IndexConfig(
         root=root,
         max_files=_read_positive_int(env, ENV_MAX_FILES, DEFAULT_MAX_FILES),

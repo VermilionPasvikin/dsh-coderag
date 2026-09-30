@@ -57,14 +57,34 @@ def test_the_fallback_is_refused_inside_dsh_home(
 
     With no root set, refusing here is what keeps the fallback from silently
     indexing DSH's own files - the failure this experiment must not reintroduce.
+    The message says the value came from the engine's own directory, which is the
+    measurement the experiment is after.
     """
     home = tmp_path / ".dsh"
     profile = home / "profiles" / "desktop"
     profile.mkdir(parents=True)
     monkeypatch.chdir(profile)
 
-    with pytest.raises(ConfigError, match="DSH"):
+    with pytest.raises(ConfigError, match="is unset, so the engine used its own"):
         load_config({"DSH_HOME": str(home)})
+
+
+def test_an_explicit_root_inside_dsh_home_says_it_was_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A value from the patch is the HOST's directory, not the engine's - say so.
+
+    Measured 2026-09-30: the profile patch still carried
+    `process.env.CODERAG_ROOT ?? process.cwd()`, so the first live reading could
+    not tell the two sources apart.
+    """
+    home = tmp_path / ".dsh"
+    profile = home / "profiles" / "desktop"
+    profile.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigError, match="is set to"):
+        load_config({"CODERAG_ROOT": str(profile), "DSH_HOME": str(home)})
 
 
 def test_load_config_raises_when_numeric_value_is_not_an_integer() -> None:
