@@ -541,3 +541,24 @@
 - **建议修法**：`_run_search` 里同样调 `config.load_config_for(root)` 并把 `config.max_tokens`
   传给 `search(...)`（`--max-tokens` 之类的显式参数若存在应优先），
   再补一条测试断言「设了变量时命中被裁剪、不设时不被裁剪」。属独立小改动，需所有者立任务。
+
+## `TooManyFilesError` 在 CLI 里被误报成 `CLI_UNEXPECTED_ERROR`（发现于 `T6-22`，2026-09-30，**待修**）
+
+- **来源**：所有者实际报错（在 PowerShell 里设 `$CODERAG_MAX_FILES = 110000` 后跑 `index`）：
+  `{"status": "error", "code": "CLI_UNEXPECTED_ERROR", "message": "TooManyFilesError: workspace has
+  103973 indexable files, over max_files=20000"}`。
+- **复现（本轮实测，2 个文件的工作区足够）**：`$env:CODERAG_MAX_FILES = '1'` 后
+  `python -m dsh_coderag index <ws>` → 退出码 1，输出与上面同形：
+  `{"status": "error", "code": "CLI_UNEXPECTED_ERROR", "message": "TooManyFilesError: workspace has
+  2 indexable files, over max_files=1"}`。
+- **为什么是缺陷**：`TooManyFilesError` 是**预期内**条件，它自带 `ErrorCode.INDEX_TOO_MANY_FILES`
+  （`walker.py`），`RL-08` 要求的就是「显式失败并报告实际数量」——数量报对了，但：
+  ① `code` 被 `main()` 的 `except Exception` 兜底成 `CLI_UNEXPECTED_ERROR`；
+  ② 消息里泄出 Python 类名 `TooManyFilesError:`（用户可见文本不该有实现词汇）；
+  ③ **不给任何修复提示**——而同一条件在 MCP 路径上（`server.py`）返回的是
+  `Raise CODERAG_MAX_FILES above {actual_count}, or index a subdirectory.`。
+  用户因此得自己猜「变量名对不对、值怎么给」，本轮就实际发生了一次。
+- **建议修法**：在 `main()` 的异常链里显式处理 `TooManyFilesError`（放在 `CliError` 之后、`Exception` 之前），
+  用它自带的 `code` 与 `payload`，并给一条**可照抄**的提示，例如
+  `把 CODERAG_MAX_FILES 提到 103973 以上再重跑（PowerShell：$env:CODERAG_MAX_FILES = '110000'），
+  或只索引子目录`；补一条测试断言 `code == index_too_many_files` 且消息里**不含** `TooManyFilesError`。
