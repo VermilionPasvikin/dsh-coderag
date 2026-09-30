@@ -286,3 +286,111 @@ status ready: True
 - 冒烟用的临时目录（`/tmp/dsh-m6-t603b/`：`dshhome`、`demo-ws`、`dump-config.txt`、`mcp_smoke.py`、
   `broken-conda`、`fakebin`）**保留**以便复查，不属仓库内容。`mcp_smoke.py` 是一次性驱动脚本，
   按 `T5-14` 的先例**不进 `src/` / `scripts/`**。
+
+---
+
+## 7. 发布后复核：`T6-07` 修复的 macOS 实跑（`T6-08`，2026-09-30）
+
+> **为什么要有这一节**：v2.1.0（tag `v2.1.0` → 提交 `7ea1823`）**发布之后**，Windows 侧发现并修复了一个
+> 真实缺陷——`CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_MAX_FILE_BYTES` /
+> `CODERAG_BATCH_SIZE` / `CODERAG_MAX_WORKERS` 这几个可调配置在 **MCP 路径上完全不生效**
+> （`server.py` 建索引时把 `index_sync` 裸传给 `TaskManager`，没有带 `IndexConfig`；检索预算还硬编码 `4000`）。
+> 修复在 **`c4eb4d4`**（`T6-07`）。macOS 的上一次全量实跑停在 **`e9dcb2f`**，此后有 **18 个提交**
+> 没在 macOS 上跑过。本节把这段补上。
+
+### 7.1 被复核的对象
+
+| 项 | 值 |
+|---|---|
+| 提交（HEAD） | **`98186cf`**（`git pull` 后的实际 HEAD，与派单预期的号码一致） |
+| 解释器 | `/opt/anaconda3/envs/forBSH/bin/python` → **Python 3.10.21**（落在 `requires-python` 的 `>=3.10,<3.13` 内） |
+| 与之对比的修复提交 | `c4eb4d4`（`fix(server): pass the tuning config into indexing and search`，`Refs: T6-07`） |
+| macOS 上一次实跑 | `e9dcb2f` → `567 passed, 5 skipped`（本文 §3） |
+
+### 7.2 全量 `pytest` 的原始输出
+
+```
+$ /opt/anaconda3/envs/forBSH/bin/python -m pytest -rs
+........................................................................ [ 12%]
+........................................................................ [ 25%]
+........................................................................ [ 37%]
+........................................................................ [ 50%]
+........................................................................ [ 62%]
+........................................................................ [ 75%]
+........................................................................ [ 87%]
+.......................................................................  [100%]
+=========================== short test summary info ===========================
+SKIPPED [1] tests/test_cases.py:95: set CODERAG_L2_CORPUS to the prepared DSH copy
+SKIPPED [1] tests/test_eval.py:347: set CODERAG_EVAL_CORPUS to an indexed DSH copy to replay the golden set
+SKIPPED [3] tests/test_path_filter.py:72: backslash separators only resolve as path separators on Windows
+570 passed, 5 skipped in 11.42s
+```
+
+**`0 failed`、`0 xfail`**（另跑 `-rxX` 复核，没有 xfail/xpass 报告）。收集总数自检：
+
+```
+$ /opt/anaconda3/envs/forBSH/bin/python -m pytest --collect-only | tail -1
+575 tests collected in 0.28s
+```
+
+其余门禁：
+
+```
+$ /opt/anaconda3/envs/forBSH/bin/python -m ruff check src tests
+All checks passed!
+$ /opt/anaconda3/envs/forBSH/bin/python -m mypy --strict src/
+Success: no issues found in 26 source files
+$ python3 scripts/verify-plan.py .
+计划完备性：通过 ✅   （28 项检查全部实际执行，无空过）
+```
+
+### 7.3 单独验证修复本身：3 条新测试在 macOS 上**必须跑、不许跳**
+
+这 3 条是**平台中立**的（走 MCP 工具、断言环境变量真的到达 `index_sync` / `search`），所以 macOS 上
+它们必须是 `passed`，跳过就等于没验：
+
+```
+$ /opt/anaconda3/envs/forBSH/bin/python -m pytest tests/test_server.py -rs
+..........                                                               [100%]
+10 passed in 0.37s
+```
+
+`tests/test_server.py` 由 7 条变 **10** 条，`10 passed`、**零 skip**。三条新增用例分别是：
+
+- `test_code_index_honours_max_files_instead_of_indexing_past_it`（`RL-08`：超限时任务 `failed`
+  并报出实际文件数 `workspace has 2 indexable files, over max_files=1`）
+- `test_code_index_honours_max_file_bytes`（超限文件被跳过并计入
+  `skipped: {"count": 1, "reasons": {"too_large": 1}}`）
+- `test_code_search_honours_max_tokens_as_its_default_budget`（不传 `max_tokens` 参数时预算取自环境）
+
+**结论：`T6-07` 的修复在 macOS 上同样生效，且没有以 macOS 为代价。**
+
+### 7.4 两平台读数并列（收集总数 575 闭合）
+
+| 检查 | Windows（`T6-07` 提交上的复跑） | macOS（本文实测） |
+|---|---|---|
+| 全量 `pytest` | **573 passed, 2 skipped** | **570 passed, 5 skipped** |
+| 收集总数 | **575** | **575** |
+| `tests/test_server.py` | `10 passed` | `10 passed`（零 skip） |
+| `ruff` / `mypy` | 全过 | 全过 |
+| `verify-plan` | 通过 ✅ | 通过 ✅ |
+
+**差值 3 的归因**：`tests/test_path_filter.py:72` 的
+`test_path_filter_accepts_windows_style_separators` 是**平台守卫的参数化用例**
+（`skipif(sys.platform != "win32")`，`["pkg/sub", PureWindowsPath("pkg","sub"), ".\\pkg\\sub"]` 三个参数）：
+
+- Windows：**跑**这 3 条 → 计入 `passed`（`570 + 3 = 573`）
+- macOS：**跳过**这 3 条 → 计入 `skipped`（`5 = 3 + 2`）
+
+于是 `573 + 2 = 575`、`570 + 5 = 575`，两边**收集总数一致**，差值恰好是这 3 条。
+另 2 条 skip 是两侧相同、与平台无关的语料 opt-in 用例（`CODERAG_L2_CORPUS` / `CODERAG_EVAL_CORPUS`）。
+
+### 7.5 本节不做的事与保留的边界
+
+- **未改任何断言、未放宽任何验收标准**：本节是纯复跑与记录，`src/`、`tests/` 一行未动（`T-08`）。
+- **Linux 未实测**：`README.md` 与 `docs/architecture.md` 仍写「不声称支持 Linux」，保持原样。
+- **macOS 不提供 `RL-10` 的「默认安装路径不装 numpy」证据**：forBSH 里装着 numpy（向量 extra 的前提），
+  这条边界与 §5.4 相同，仍然以 Windows 侧的过渡式断言为准。
+- **两平台实测用的 DSH 版本不同**（macOS `0.1.5-rc.1` / Windows `0.2.0-rc.2`），
+  没有任何一个版本被两平台都跑过——这一条保留，不被本节改变。
+- **未打新 tag、未发 `v2.1.1`、未跑 L1/L2 评测门禁**（`scripts/eval-gate.sh` 需要已索引的语料副本）。
