@@ -5,9 +5,12 @@
 > 安装与打包见 [`docs/m4-bundle.md`](m4-bundle.md) 与 [`docs/m4-install-verification.md`](m4-install-verification.md)。
 > 两者冲突时以**代码**为准，并请提 issue/改文档。
 >
-> 实现版本：`2.0.0`｜Python `>=3.10,<3.13`｜**实测平台：仅 macOS** + DSH `0.1.5-rc.1`。
-> **Windows 与 Linux 尚未验证**，因此不写进这一行；跨平台（Windows / macOS / Linux 同等可用）
+> 实现版本：`2.0.0`｜Python `>=3.10,<3.13`｜**实测平台：macOS 26.4 与 Windows 10（26100，`win_amd64`）**。
+> **Linux 尚未验证**，因此不写进这一行；跨平台（Windows / macOS / Linux 同等可用）
 > 是 M6 的目标（[`PROJECT.md`](../PROJECT.md) §6.5.1）——**未实测的平台不写进这里**。
+> 两平台实测用的 DSH 版本**不同**（macOS `0.1.5-rc.1`、Windows `0.2.0-rc.2`），即没有任何一个版本被
+> 两平台都跑过。逐平台证据：[跨平台基线](m6-crossplatform-baseline.md)、
+> [macOS 复核](m6-macos-verification.md)、[Windows 冒烟](m6-windows-smoke.md)。
 
 ---
 

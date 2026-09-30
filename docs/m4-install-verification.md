@@ -203,7 +203,10 @@ from __future__ import annotations
   （L1 的 `natural` 桶）——这条限制没有因为本任务而改变。
 - **从 registry 安装**：只验证了 `add .`（本地路径）；npm 包尚未发布。
 - **非 macOS / 非 conda**：Python 侧只在 forBSH（conda，Python 3.10.21）上实测过。
-  **后续状态（2026-09-25）**：这条限制**仍然有效**。跨平台（Windows / macOS / Linux）已由项目所有者
-  升为计划内目标（`PROJECT.md` §6.5.1 的 M6，`T6-01`–`T6-05`），但**本文件记录的实测仍全部来自 macOS**；
-  Windows 侧的基线与端到端结论只以 `docs/m6-crossplatform-baseline.md` / `docs/m6-windows-smoke.md`
-  为准，**在那两份报告落地并通过之前，这里不得改写成「已支持 Windows」**。
+  **后续状态（2026-09-30）**：这条限制**已收窄**——Windows 侧已补齐逐平台基线与端到端冒烟，
+  证据在 [`docs/m6-crossplatform-baseline.md`](m6-crossplatform-baseline.md)（依赖 wheel 齐备、FTS5、离线 grammar、
+  MCP 子进程）与 [`docs/m6-windows-smoke.md`](m6-windows-smoke.md)（全新解释器 / 全新 `DSH_HOME` /
+  真实 `code_search` 命中 `src/auth/token.py`）；macOS 侧的集中复核在
+  [`docs/m6-macos-verification.md`](m6-macos-verification.md)。
+  **本文件记录的实测仍然全部来自 macOS**——它是一次 macOS 安装的实录，原文不改。
+  **Linux 仍未实测**，因此「已支持 macOS 与 Windows」成立，「支持 Linux」不成立。
