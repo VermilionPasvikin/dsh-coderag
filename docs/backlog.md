@@ -606,3 +606,20 @@
   「不存在」（`RL-06` 的同一根因）。**若将来要让检索也感知完成度**，建议引入第三个状态
   （例如 `partial`）而不是把 `ready = 0` 当成拒绝条件，并在 `code_search` 的返回体里带上
   「索引未完成」的提示。
+
+## 云端 embedding 后端从不发送 API key（发现于 `T6-27`，2026-09-30，**待修**）
+
+- **事实**：`config.load_semantic_config` 把 `CODERAG_SEMANTIC_API_KEY` 读进 `SemanticConfig.api_key`，
+  但**全仓库没有任何代码使用它**（`grep api_key|Authorization|Bearer src/dsh_coderag/*.py` 只命中
+  `config.py` 的三处：环境变量名、dataclass 字段、读取语句）。真正发包的 `embed._http_transport` 只设
+  `Content-Type: application/json`；`endpoint_for()` = `config.url.rstrip("/") + path`，key 也不在 URL 里。
+- **后果**：任何要求 Bearer 认证的提供方（OpenAI 及所有 OpenAI 兼容端点）都返回 **401**，
+  随后 `SEMANTIC_EMBED_FAILED`（`RETRY_LIMIT = 2`）。云端后端**当前不可用**——不是「很贵」，是「跑不通」。
+- **设计过但没实现**：`ErrorCode.SEMANTIC_AUTH_MISSING` / `SEMANTIC_AUTH_REJECTED` 只在 `types.py`
+  与 `tests/test_types.py` 的契约清单里出现，**没有发出路径**。
+- **为什么测试没抓住**：`tests/test_embed.py` 全部注入假 transport（`transport=recorder`），
+  真实 HTTP 头从未被断言——这是「接缝掩盖缺陷」的又一例（与 `T6-15` 的 `env.CODERAG_PYTHON` 同源：
+  **看起来配好了，实际那条路径从未被真实执行过**）。
+- **建议修法**：`_http_transport` 增加 `Authorization: Bearer <key>`（key 只在内存中，
+  **绝不**进日志/状态/异常文本，`S-05`/`RL-02`）；`on` + `openai` 而无 key → `SEMANTIC_AUTH_MISSING`
+  且**不发起请求**；响应 401/403 → `SEMANTIC_AUTH_REJECTED`；补一条记录请求头的 transport 测试。
