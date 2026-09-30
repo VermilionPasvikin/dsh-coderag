@@ -365,6 +365,31 @@ $env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"      # 桌面版请写进 profile �
 > 这 3 条测试在修复前会红（`assert 2 == 1`、命中数未被裁剪），因此这条路径不会再次静默失效。
 > `T6-17` 又把同一条配置通路接进了 **CLI**（此前 `dsh-coderag index` 完全不读这些变量）。
 
+#### 谁读哪份配置——**CLI 与 DSH 读的不是同一份**
+
+这条决定「你在哪设的变量，谁看得见」，也是最容易踩的一处：
+
+| 谁在跑 | 从哪里读变量 | 看得见 profile 的 `cordis.patch.yml` 吗 |
+|---|---|---|
+| **MCP 子进程**（DSH 会话里的 `mcp__coderag__*` 工具） | DSH 拉起子进程时注入的环境，**以 patch 的 `config.env` 为准** | ✅ **只有它读得到** |
+| **CLI**（你自己敲的 `& $py -m dsh_coderag index` / `search`） | **你当前 shell 的环境** | ❌ **完全不读** |
+
+推论（都是实测过的）：
+
+- 在 shell 里设 `CODERAG_EXTRA_EXTENSIONS`，**CLI 的 `index` 认，DSH 会话不认**；写进 patch 则**反过来**。
+  所以**不要把「命令行跑通了」当成「DSH 里也配好了」**。
+- 两者写的是**同一个** `<工作区>/.coderag/index.sqlite3`——**谁最后跑 `index`，索引内容就是谁那套配置的
+  结果**。只用 shell 变量建好的索引，会被下一次 MCP 侧 `code_index` 按 patch 的配置重建成「不含那些后缀」的版本。
+- 想让**两边一致**：把共享设置写进**两处**，或者用**用户级持久环境变量**
+  （`[Environment]::SetEnvironmentVariable('X','v','User')`）——CLI 直接继承，桌面版**重启后**继承、
+  再由 patch 里的 `!!js process.env.X` 转发给子进程。（这条是机制推论，未在你的桌面上实测。）
+- **`CODERAG_PYTHON` 只对 DSH 有意义**：它在 patch 里由宿主侧求值、决定拉起哪个解释器；
+  CLI 用哪个解释器由**你敲的命令**决定（`& $py …`）。
+- **`CODERAG_ROOT`**：CLI 的根来自**参数**（`index <路径>` / `search --root <路径>`），不设它也照常工作；
+  DSH 侧的根来自 patch 的 `CODERAG_ROOT`，默认 `process.cwd()`（DSH 启动时的工作目录）。
+- ⚠️ **一处已知缺口**：CLI 的 `search` **不读** `CODERAG_MAX_TOKENS`——实测 `CODERAG_MAX_TOKENS=5`
+  与不设该变量时输出**逐字相同**，它只认 `--limit`，token 预算恒为默认 4000。已登记 `docs/backlog.md`。
+
 ### 三类常见配置，照抄即可
 
 每一类都给 **PowerShell** 与 **POSIX** 两种写法。先记住上面那张表的区别：

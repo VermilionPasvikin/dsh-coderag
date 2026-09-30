@@ -527,3 +527,17 @@
   `CODERAG_INCLUDE_EXTENSIONLESS=1`），并让 `walk_with_report` 在 `suffix == ""` 时按该开关收录；
   补一条安全测试——`Dockerfile` 能入库、而 `.env` 这类**同样 `suffix == ""`** 的文件仍被第一层
   密钥黑名单拦下（两者会同时落在这个分支上，必须证明过滤仍先于入库生效）。属独立小改动，需所有者立任务。
+
+## CLI 的 `search` 不读 `CODERAG_MAX_TOKENS`（发现于 `T6-21`，2026-09-30，**未顺手修**）
+
+- **事实（实测）**：`_run_search` 调的是 `search(Path(args.root), args.query, k=args.limit)`，
+  **不传 `max_tokens`**，于是 `searcher.search` 用它的默认值 `DEFAULT_MAX_TOKENS`（4000）。
+  实测：在工作区里造 40 个含同一标识符的文件并 `index`，然后
+  `CODERAG_MAX_TOKENS=5 python -m dsh_coderag search … --limit 40` 与**不设该变量**的输出
+  **逐字相同**（行数、字符数都一样）——变量没有被读。
+- **影响**：`T6-17` 已把配置通路接进 CLI 的 `index`，但 `search` 这条支线漏了。
+  README 的变量表把 `CODERAG_MAX_TOKENS` 标成「✅ 作为 `code_search` 的默认预算」，
+  对 MCP 路径成立、对 **CLI 的 `search` 不成立**——同一份表里两种路径行为不同，容易误判。
+- **建议修法**：`_run_search` 里同样调 `config.load_config_for(root)` 并把 `config.max_tokens`
+  传给 `search(...)`（`--max-tokens` 之类的显式参数若存在应优先），
+  再补一条测试断言「设了变量时命中被裁剪、不设时不被裁剪」。属独立小改动，需所有者立任务。
