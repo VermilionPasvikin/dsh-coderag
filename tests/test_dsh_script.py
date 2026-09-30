@@ -45,12 +45,30 @@ def make_bin(tmp_path: Path, *, with_broken_python: bool = False) -> Path:
     return directory
 
 
+def fake_conda(tmp_path: Path, *, usable: bool) -> Path:
+    """Build a fake CONDA_PREFIX: `bin/python` that either really runs or exits 1.
+
+    A developer's real `CONDA_PREFIX` may hold a perfectly usable interpreter so a
+    test must never depend on that value; it has to stage both the usable and the
+    unusable case itself.
+    """
+    prefix = tmp_path / "conda"
+    (prefix / "bin").mkdir(parents=True)
+    stub = prefix / "bin" / "python"
+    stub.write_text("#!/bin/sh\nexit 0\n" if usable else "#!/bin/sh\nexit 1\n", encoding="utf-8")
+    stub.chmod(0o755)
+    return prefix
+
+
 def run_dsh(
     directory: Path, *args: str, restrict_path: bool = False, **overrides: str
 ) -> subprocess.CompletedProcess[str]:
     """Run scripts/dsh with the fake bin directory ahead of PATH."""
     assert BASH is not None
     env = {key: value for key, value in os.environ.items() if not key.startswith("CODERAG_")}
+    # `CONDA_PREFIX` would otherwise hand the wrapper the developer's own interpreter
+    # and the assertions below would report on this machine instead of on the wrapper.
+    env.pop("CONDA_PREFIX", None)
     inherited = [] if restrict_path else env.get("PATH", "").split(os.pathsep)
     env["PATH"] = os.pathsep.join([str(directory), *inherited])
     env.update(overrides)
@@ -109,3 +127,29 @@ def test_dsh_script_does_not_export_an_unusable_interpreter(tmp_path: Path) -> N
 
     assert result.returncode == 0, result.stderr
     assert "CODERAG_PYTHON=unset" in result.stdout
+
+
+def test_dsh_script_does_not_export_an_unusable_conda_interpreter(tmp_path: Path) -> None:
+    """A `CONDA_PREFIX` that holds an interpreter which cannot run must be rejected too.
+
+    The branch used to accept any existing `${CONDA_PREFIX}/bin/python`, so an
+    activated-but-broken environment was exported and the MCP child then died.
+    """
+    directory = make_bin(tmp_path, with_broken_python=True)
+    prefix = fake_conda(tmp_path, usable=False)
+
+    result = run_dsh(directory, restrict_path=True, CONDA_PREFIX=str(prefix))
+
+    assert result.returncode == 0, result.stderr
+    assert "CODERAG_PYTHON=unset" in result.stdout
+
+
+def test_dsh_script_prefers_a_usable_conda_interpreter(tmp_path: Path) -> None:
+    """When `CONDA_PREFIX` holds a working interpreter it is the one exported."""
+    directory = make_bin(tmp_path)
+    prefix = fake_conda(tmp_path, usable=True)
+
+    result = run_dsh(directory, restrict_path=True, CONDA_PREFIX=str(prefix))
+
+    assert result.returncode == 0, result.stderr
+    assert f"CODERAG_PYTHON={prefix / 'bin' / 'python'}" in result.stdout

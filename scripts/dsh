@@ -12,18 +12,15 @@
 # 换 dsh 版本：改下面这一行，或设 DSH_VERSION=...
 DSH_VERSION="${DSH_VERSION:-0.1.5-rc.1}"
 
+# 每个候选都必须真的能跑：Windows 上 python3 可能是 Microsoft Store 占位符，
+# 而 CONDA_PREFIX 也可能存在却不可用——两者都会让 MCP 子进程起不来（E-06）。
 if [ -z "${CODERAG_PYTHON:-}" ]; then
-  if [ -n "${CONDA_PREFIX:-}" ] && [ -x "${CONDA_PREFIX}/bin/python" ]; then
-    CODERAG_PYTHON="${CONDA_PREFIX}/bin/python"
-  else
-    for candidate in python3 python; do
-      # 只认真的能跑的解释器：Windows 上 python3 可能是 Microsoft Store 占位符。
-      if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c '' >/dev/null 2>&1; then
-        CODERAG_PYTHON=$(command -v "$candidate")
-        break
-      fi
-    done
-  fi
+  for candidate in "${CONDA_PREFIX:-}/bin/python" python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c '' >/dev/null 2>&1; then
+      CODERAG_PYTHON=$(command -v "$candidate")
+      break
+    fi
+  done
   [ -n "${CODERAG_PYTHON:-}" ] && export CODERAG_PYTHON
 fi
 
