@@ -5,8 +5,9 @@
 > 安装与打包见 [`docs/m4-bundle.md`](m4-bundle.md) 与 [`docs/m4-install-verification.md`](m4-install-verification.md)。
 > 两者冲突时以**代码**为准，并请提 issue/改文档。
 >
-> 实现版本：`2.0.0`｜Python `>=3.10,<3.13`｜验证环境 macOS + DSH `0.1.5-rc.1`（**Windows 尚未验证**；
-> 目标与判据见 [`PROJECT.md`](../PROJECT.md) §6.5.1 的 M6）。
+> 实现版本：`2.0.0`｜Python `>=3.10,<3.13`｜**实测平台：仅 macOS** + DSH `0.1.5-rc.1`。
+> **Windows 与 Linux 尚未验证**，因此不写进这一行；跨平台（Windows / macOS / Linux 同等可用）
+> 是 M6 的目标（[`PROJECT.md`](../PROJECT.md) §6.5.1）——**未实测的平台不写进这里**。
 
 ---
 

@@ -330,20 +330,27 @@
 - 说明：`pyproject.toml` **从来没有** `semantic` extra（`T5-15` 未执行），`dependencies` 里
   **没有** numpy / httpx / 任何向量库，因此「默认安装零向量依赖」（`RL-10`）**当前即成立**。
 
-## 平台范围变更：从「只实测 macOS」到计划内支持 Windows（2026-09-25，项目所有者指示）
+## 平台范围变更：从「只实测 macOS」到**跨平台**（2026-09-25，项目所有者指示）
 
-- 事实：项目所有者需要在 **Windows** 机器上继续开发，要求「项目有在 Windows 上运行的能力」。
-  这**推翻了**此前的平台口径——`docs/architecture.md` 声明验证环境只有 macOS，
-  `docs/m4-install-verification.md` 写着「Python 侧只在 forBSH 上实测过」。
+- 事实：项目所有者需要在 **Windows** 机器上继续开发，并要求本项目**具备跨平台能力**——
+  Windows / macOS / Linux 同等可用，**不是**改成只在 Windows 上跑。这**推翻了**此前的平台口径——
+  `docs/architecture.md` 声明验证环境只有 macOS，`docs/m4-install-verification.md` 写着
+  「Python 侧只在 forBSH 上实测过」。
 - 记账：新增里程碑 **M6（v2.1.0）= `PROJECT.md` §6.5.1 的 `T6-01`–`T6-05`**，
-  **不做代码实现**，只把任务与判据写进计划并同步文档。附带发现 `PROJECT.md` §6.6 的导语
+  **本次不做代码实现**，只把任务与判据写进计划并同步文档。附带发现 `PROJECT.md` §6.6 的导语
   仍写「从 §6.1–§6.4 各任务表生成」（脚本实际读整个 §6），已改为「§6.1–§6.5.1」。
+- **设计决定（项目所有者裁定，2026-09-25）**：**Python CLI 是唯一跨平台入口**。
+  把「探测解释器 / 校验版本区间 / 预检 FTS5 / `pip install` / 恒等自检」从 `scripts/install.sh`
+  （239 行）搬进已有的 `src/dsh_coderag/__main__.py`，新增 `doctor` 与 `install-deps` 子命令；
+  `scripts/install.sh` 与 `scripts/dsh` **退化为薄包装**（只做"找到解释器 → 转发"）。
+  **被否决的方案**是为 Windows 另写 `install.ps1` / `dsh.ps1`：那会让 239 行安装逻辑永久分叉，
+  真正的风险是两套实现日后必然漂移，且**无法被 pytest 覆盖**。
+  **不删除**这两个 shell 脚本——macOS 的既有实证记录引用它们，删掉会失去可复现性。
 - **未落地的既有要求（本条的欠账部分）**：`TESTING.md` §5.1 要求跑 **3 OS × 2 Python 矩阵**，
-  而仓库里**没有 `.github/`**——该矩阵至今一次都没跑过，M6 不假装它跑过，
-  也**不把它的结论**算进 Windows 支持的证据；Windows 侧证据只认
-  `docs/m6-windows-baseline.md` 与 `docs/m6-windows-smoke.md`。
-- 边界：M6 **不放宽 2.0.0 的任何既有判据**（`S1`–`S6`、`RL-10` 一律不动）；
-  **不把** `scripts/install.sh` / `scripts/dsh` 改成跨平台（那会让已有实测记录失去可复现性），
-  改为新增 `scripts/install.ps1` / `scripts/dsh.ps1`（`T6-02`）。
+  而仓库里**没有 `.github/`**——该矩阵至今一次都没跑过。M6 不假装它跑过，也不把它的结论
+  算作跨平台证据；证据只认 `docs/m6-crossplatform-baseline.md`（逐平台基线）与
+  `docs/m6-windows-smoke.md`（端到端冒烟，两平台结论并列）。
+- 边界：M6 **不放宽 2.0.0 的任何既有判据**（`S1`–`S6`、`RL-10` 一律不动），
+  **也不降低 macOS 的既有验收**——跨平台是"多一个平台达标"，不是"把原来的标准摊薄"。
 - 另一条相关的未还欠账：`C-07`「单元测试覆盖 Windows 风格输入」当前未达标（本文件有专条），
   归 `T6-03` 一并还清。
