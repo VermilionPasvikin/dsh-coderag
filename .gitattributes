@@ -1,0 +1,13 @@
+# Shell scripts must be LF on every platform.
+#
+# They are executed by sh/bash, and a CRLF shebang line does not resolve on
+# POSIX. Pinning it here makes the guarantee a property of the repository
+# instead of a property of whoever wrote the file: a checkout with
+# core.autocrlf=true (the Git for Windows default) would otherwise hand out
+# CRLF, and `sh script.sh` would fail on the shebang while `bash -n` still
+# passes -- a failure that only shows up on the machine that runs it.
+*.sh text eol=lf
+# This file too, so the rules themselves stay readable on any machine.
+.gitattributes text eol=lf
+# scripts/dsh has no extension, so it needs its own rule.
+scripts/dsh text eol=lf
