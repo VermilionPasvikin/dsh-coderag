@@ -83,6 +83,18 @@ def run_dsh(
     )
 
 
+def exported_interpreter(stdout: str) -> str:
+    """Return the CODERAG_PYTHON value the wrapper handed to the recording fake dsh.
+
+    Callers compare the *value*, not the rendered string: on Windows
+    `CONDA_PREFIX` is already a Windows path, so the wrapper's
+    `${CONDA_PREFIX}/bin/python` comes back with mixed separators and only
+    `Path(...)` normalises both sides.
+    """
+    line = next(line for line in stdout.splitlines() if "CODERAG_PYTHON=" in line)
+    return line.split("CODERAG_PYTHON=", 1)[1].split(" args=", 1)[0]
+
+
 def test_dsh_script_is_syntactically_valid_bash() -> None:
     assert BASH is not None
     result = subprocess.run(
@@ -126,7 +138,7 @@ def test_dsh_script_does_not_export_an_unusable_interpreter(tmp_path: Path) -> N
     result = run_dsh(directory, restrict_path=True)
 
     assert result.returncode == 0, result.stderr
-    assert "CODERAG_PYTHON=unset" in result.stdout
+    assert exported_interpreter(result.stdout) == "unset"
 
 
 def test_dsh_script_does_not_export_an_unusable_conda_interpreter(tmp_path: Path) -> None:
@@ -141,7 +153,7 @@ def test_dsh_script_does_not_export_an_unusable_conda_interpreter(tmp_path: Path
     result = run_dsh(directory, restrict_path=True, CONDA_PREFIX=str(prefix))
 
     assert result.returncode == 0, result.stderr
-    assert "CODERAG_PYTHON=unset" in result.stdout
+    assert exported_interpreter(result.stdout) == "unset"
 
 
 def test_dsh_script_prefers_a_usable_conda_interpreter(tmp_path: Path) -> None:
@@ -152,4 +164,4 @@ def test_dsh_script_prefers_a_usable_conda_interpreter(tmp_path: Path) -> None:
     result = run_dsh(directory, restrict_path=True, CONDA_PREFIX=str(prefix))
 
     assert result.returncode == 0, result.stderr
-    assert f"CODERAG_PYTHON={prefix / 'bin' / 'python'}" in result.stdout
+    assert Path(exported_interpreter(result.stdout)) == prefix / "bin" / "python"
