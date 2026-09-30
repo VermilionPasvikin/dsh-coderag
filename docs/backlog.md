@@ -412,7 +412,12 @@
   `high = 1.0`），与 `Interval` 自己 docstring 的「clamped to [0, 1]」契约一致。
   **没有放宽断言**（`T-08`）——`== 0.0` 与 `== 1.0` 原样保留，这正是 `T6-03a` 要求的修法。
 
-## 薄包装的 LF 保证目前只靠「写入时是 LF」（发现于 `T6-02`，**未顺手修**）
+## 薄包装的 LF 保证目前只靠「写入时是 LF」（发现于 `T6-02`；**已由 `T6-11` 修复**）
+
+> **状态：已修复（`T6-11`，2026-09-30）。** 仓库新增 `.gitattributes`：`*.sh text eol=lf`、
+> `scripts/dsh text eol=lf`、`.gitattributes text eol=lf`；三个脚本由 `w/crlf` 变为 `w/lf`
+> （工作树 CR 由 31 / 38 / 155 变为 0），并由 `tests/test_script_eol.py` 兜住。
+> **没有改脚本内容、也没有改用户级 `core.autocrlf`**。下面的过程记录保留。
 
 - 事实：`scripts/dsh` / `scripts/install.sh` / `scripts/eval-gate.sh` 在 git **索引里都是 `i/lf`**，
   但仓库**没有 `.gitattributes`**，而 Git for Windows 的默认 `core.autocrlf=true` 会把这些文件
