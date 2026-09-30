@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dsh_coderag import __version__
-from dsh_coderag.config import ConfigError, load_config_for
+from dsh_coderag.config import ENV_MAX_FILES, ConfigError, load_config_for
 from dsh_coderag.sqlite_caps import FTS5_HINT, fts5_available
 from dsh_coderag.text import to_bigrams
 
@@ -494,7 +494,10 @@ def _run_search(args: argparse.Namespace) -> int:
     from dsh_coderag.searcher import search
     from dsh_coderag.types import SearchStatus
 
-    result = search(Path(args.root), args.query, k=args.limit)
+    config = load_config_for(Path(args.root))
+    result = search(
+        Path(args.root), args.query, k=args.limit, max_tokens=config.max_tokens
+    )
     if result.status is not SearchStatus.READY:
         detail = result.message or result.hint or ""
         suffix = f": {detail}" if detail else ""
@@ -711,6 +714,9 @@ def main(argv: list[str] | None = None) -> int:
     except CliError as error:
         return report_error(error)
     except Exception as error:  # noqa: BLE001 - RL-09: no traceback may escape the CLI
+        too_many = _as_too_many_files(error)
+        if too_many is not None:
+            return report_error(too_many)
         return report_error(
             CliError(
                 "CLI_UNEXPECTED_ERROR",
@@ -718,6 +724,36 @@ def main(argv: list[str] | None = None) -> int:
                 exit_code=EXIT_FAILED,
             )
         )
+
+
+def _as_too_many_files(error: Exception) -> CliError | None:
+    """Translate a workspace too large for the limit into an actionable error (T6-22).
+
+    The condition is expected, and the walker error already carries the real count
+    and its own code (RL-08), but the generic handler used to replace both with
+    CLI_UNEXPECTED_ERROR and leak the class name — leaving the user to guess which
+    variable to set and how to write it. `walker` is imported here rather than at
+    module level to keep `doctor` and `install-deps` usable in an environment that
+    is still missing third-party dependencies.
+    """
+    from dsh_coderag.walker import TooManyFilesError
+
+    if not isinstance(error, TooManyFilesError):
+        return None
+    assignment = (
+        f"$env:{ENV_MAX_FILES} = '{error.actual_count}'"
+        if platform.system() == "Windows"
+        else f"export {ENV_MAX_FILES}={error.actual_count}"
+    )
+    return CliError(
+        error.code.value,
+        str(error),
+        hint=(
+            f"把 {ENV_MAX_FILES} 设到 {error.actual_count} 或更高再重跑（{assignment}），"
+            "或只索引子目录。"
+        ),
+        exit_code=EXIT_FAILED,
+    )
 
 
 if __name__ == "__main__":

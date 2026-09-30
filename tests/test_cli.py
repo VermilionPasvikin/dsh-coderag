@@ -394,3 +394,54 @@ def test_pip_extra_args_are_split_on_whitespace(
     monkeypatch.setenv(cli.ENV_PIP_ARGS, "--index-url https://example.invalid/simple")
 
     assert cli.pip_extra_args() == ["--index-url", "https://example.invalid/simple"]
+
+
+def test_index_reports_the_file_limit_with_its_own_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An expected limit must not be dressed up as an unexpected failure (T6-22).
+
+    The report that prompted this had the user guessing which variable to set and
+    how to spell it, because the CLI replaced the walker's own code and count with
+    CLI_UNEXPECTED_ERROR and a leaked class name.
+    """
+    for name in ("a.py", "b.py"):
+        (tmp_path / name).write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setenv("CODERAG_MAX_FILES", "1")
+
+    code = cli.main(["index", str(tmp_path)])
+
+    error = capsys.readouterr().err
+    payload = json.loads(error.strip().splitlines()[-1])
+    assert code == cli.EXIT_FAILED
+    assert payload["code"] == "INDEX_TOO_MANY_FILES"
+    # The structured log on stderr names the exception type on purpose (S-05
+    # diagnostics); the user-facing object must not carry it (D-02).
+    assert "TooManyFilesError" not in payload["message"]
+    assert "2 indexable files" in payload["message"]
+    assert "CODERAG_MAX_FILES" in payload["hint"]
+    assert "'2'" in payload["hint"], "the hint must show a value that actually works"
+
+
+def test_search_uses_the_token_budget_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI's search reads CODERAG_MAX_TOKENS, like the MCP path does (T6-22)."""
+    for index in range(40):
+        (tmp_path / f"f{index:02d}.py").write_text(
+            f"def needletoken_{index}():\n    return needletoken\n", encoding="utf-8"
+        )
+    monkeypatch.delenv("CODERAG_MAX_TOKENS", raising=False)
+    assert cli.main(["index", str(tmp_path)]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    args = ["search", "needletoken", "--root", str(tmp_path), "--limit", "40"]
+    assert cli.main(args) == cli.EXIT_OK
+    full = capsys.readouterr().out.splitlines()
+
+    monkeypatch.setenv("CODERAG_MAX_TOKENS", "20")
+    assert cli.main(args) == cli.EXIT_OK
+    trimmed = capsys.readouterr().out.splitlines()
+
+    assert len(full) > 1, full
+    assert 0 < len(trimmed) < len(full), (len(full), len(trimmed))
