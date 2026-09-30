@@ -562,3 +562,21 @@
   用它自带的 `code` 与 `payload`，并给一条**可照抄**的提示，例如
   `把 CODERAG_MAX_FILES 提到 103973 以上再重跑（PowerShell：$env:CODERAG_MAX_FILES = '110000'），
   或只索引子目录`；补一条测试断言 `code == index_too_many_files` 且消息里**不含** `TooManyFilesError`。
+
+## 中断的索引对外自称 `ready`，形成静默的部分索引（发现于 `T6-23`，2026-09-30，**待修**）
+
+- **来源**：所有者在真实工作区（`EXTRACTED_READABLE`，103,002 个可索引 `.mxml`）上跑首次索引，
+  跑到约 78% 时中断。**只读检查**该库得到：
+  - `files` = **80,437**、`chunks` = **275,387**、`index.sqlite3` = **7.34 GiB**；
+  - `workspace_index` = `(root, db_schema=1, ready=1, last_task_id=NULL, updated_at=1790777084)`；
+    而本次运行最早的 `indexed_at` 是 **1790778154**——`updated_at` **早于**它，说明这行状态是上一次运行留下的；
+  - `index_runs` 表 **0 行**（CLI 这条路径没有运行记录）；
+  - 进程列表里没有 `index`（已结束/被打断），`last-index.json` 仍是上次 0 文件运行的记录。
+- **为什么是缺陷**：缺了约 22% 文件的部分索引**对外表现为可检索**（`ready = 1`），于是 `code_search` 会对未入库的那部分返回「无结果」——按 `RL-06`，模型会把「查不到」读成「代码里没有」。这与 §8 的「静默截断」是同一类错误：
+**观察到的结果变少了，但没有任何信号说明它变少了**。`T6-16` 修的是「0 个文件却说不清原因」，
+这里是「少了一部分却完全不说」。
+- **建议修法**：让 CLI 的 `index_sync` 与 MCP 路径对齐——开跑时写一行 `index_runs` 并把
+  `workspace_index.ready` 置 0，跑完（或失败/被取消）时再更新为终态；这样中断后
+  `index_status` 会如实报告「未完成」，而不是静默地少 22%。需补一条测试：
+  在足以被 `SIGINT` 打断的语料上中断，断言 `ready = 0` 且 `index_runs` 有该次记录。
+  属独立改动，需所有者立任务（`T6-23` 已立，待批准）。
