@@ -1,8 +1,10 @@
-"""Tests for the code_search path filter (T2-20)."""
+"""Tests for the code_search path filter (T2-20) and the stored path form (C-07)."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import sqlite3
+import sys
+from pathlib import Path, PureWindowsPath
 
 import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -11,6 +13,9 @@ from dsh_coderag.indexer import index_sync
 from dsh_coderag.searcher import search
 from dsh_coderag.server import build_server
 from dsh_coderag.types import ErrorCode, SearchStatus
+
+WINDOWS_STYLE_SUBDIR = PureWindowsPath("pkg", "sub")
+"""Renders as `pkg\\sub` on every host, which is the separator form Windows users type."""
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -30,6 +35,54 @@ def _repo(tmp_path: Path) -> Path:
     )
     index_sync(tmp_path)
     return tmp_path
+
+
+def _nested_repo(tmp_path: Path) -> Path:
+    """A workspace with one nested file, so a stored path crosses a separator."""
+    (tmp_path / "pkg" / "sub").mkdir(parents=True)
+    (tmp_path / "pkg" / "sub" / "util.py").write_text(
+        "def zzzterm():\n    return 1\n", encoding="utf-8"
+    )
+    (tmp_path / "top.py").write_text("def zzzterm():\n    return 2\n", encoding="utf-8")
+    index_sync(tmp_path)
+    return tmp_path
+
+
+def test_stored_paths_are_forward_slashed_and_workspace_relative(tmp_path: Path) -> None:
+    """C-07: what reaches the database is POSIX-style and relative, on every OS.
+
+    Windows hands the walker `...\\pkg\\sub\\util.py`. Storing that form would
+    make the database contents differ per platform, break the prefix match the
+    `path` filter relies on, and hand the model an absolute host path.
+    """
+    repo = _nested_repo(tmp_path)
+    connection = sqlite3.connect(repo / ".coderag" / "index.sqlite3")
+    try:
+        stored = sorted(row[0] for row in connection.execute("SELECT path FROM files"))
+    finally:
+        connection.close()
+
+    assert stored == ["pkg/sub/util.py", "top.py"]
+    for value in stored:
+        assert "\\" not in value, value
+        assert not PureWindowsPath(value).is_absolute(), value
+        assert ":" not in value, value
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="backslash separators only resolve as path separators on Windows",
+)
+@pytest.mark.parametrize(
+    "argument",
+    ["pkg/sub", str(WINDOWS_STYLE_SUBDIR), ".\\pkg\\sub"],
+)
+def test_path_filter_accepts_windows_style_separators(tmp_path: Path, argument: str) -> None:
+    """A Windows user's `pkg\\sub` must select the same files as `pkg/sub`."""
+    hits = search(_nested_repo(tmp_path), "zzzterm", k=10, path=argument).hits
+
+    assert [hit.path for hit in hits] == ["pkg/sub/util.py"]
+
 
 
 def test_path_filter_returns_only_hits_under_the_subdirectory(tmp_path: Path) -> None:

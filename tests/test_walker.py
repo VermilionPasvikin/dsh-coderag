@@ -8,7 +8,10 @@ from dsh_coderag.walker import CODE_EXTENSIONS, walk
 
 
 def _relative_paths(entries: list[tuple[Path, int, int]], base: Path) -> list[str]:
-    return sorted(str(path.relative_to(base)) for path, _, _ in entries)
+    # as_posix, not str: the workspace-relative path form the engine stores is
+    # always forward-slashed (C-07), so the expectation reads the same on
+    # Windows as on macOS/Linux.
+    return sorted(path.relative_to(base).as_posix() for path, _, _ in entries)
 
 
 def test_walk_returns_whitelisted_files_in_stable_order(tiny_repo: Path) -> None:
