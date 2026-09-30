@@ -14,7 +14,7 @@
 | MCP `serverName` | `coderag` | `cordis.patch.yml` 的 `config.serverName`；工具在模型侧的名字是 **`mcp__coderag__code_search`** |
 | 索引数据目录 | `.coderag/` | `<工作区根>/.coderag/index.sqlite3` |
 | 项目忽略文件 | `.coderagignore` | 工作区根 |
-| 环境变量 | `CODERAG_*` | `CODERAG_ROOT` / `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_PYTHON`；可选向量后端另用 `CODERAG_SEMANTIC`（开关，默认未设=关闭）/ `_BACKEND` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS`（冻结于 `ADR-16` §4），**云端后端**再加 `_API_KEY`（只从环境读）与 `_ALLOW_REMOTE`（非 loopback 的第二把钥匙，冻结于 `ADR-17` §4），安装侧开关为 `CODERAG_WITH_SEMANTIC` |
+| 环境变量 | `CODERAG_*` | `CODERAG_ROOT` / `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_PYTHON`；可选向量后端另用 `CODERAG_SEMANTIC`（开关，默认未设=关闭）/ `_BACKEND` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS`（冻结于 `ADR-16` §4），**云端后端**再加 `_API_KEY`（只从环境读）与 `_ALLOW_REMOTE`（非 loopback 的第二把钥匙，冻结于 `ADR-17` §4），安装侧开关为 `CODERAG_WITH_SEMANTIC`（**尚未实现**，见 §6.5.1 的 `T5-15`） |
 | 开发用 DSH profile | `coderag-dev` | 本地开发，**不要用 `web`** |
 | 评测用 DSH profile | `eval-coderag` / `eval-baseline` | A/B 对照 |
 
@@ -135,7 +135,7 @@ DeepSeek Harness（下称 DSH）是一个"一切皆插件"的 Agent 框架，但
 | 段 | 装什么 | 命令 | 谁需要 |
 |---|---|---|---|
 | **默认段（不变）** | 只有 `mcp` / `tree-sitter` / `tree-sitter-language-pack` / `pathspec`；bundle tarball 与 `scripts/install.sh` 的**默认路径零向量依赖** | `pip install .`（或 `pip install dsh-coderag`）+ `dsh plugin add .` | **所有人**。与 `1.0.0` 完全相同的安装步骤 |
-| **可选段（opt-in）** | extra **`semantic`**（内容只有 `numpy`），以及用户自己装的 **Ollama + `bge-m3`** | `pip install -e ".[semantic]"` 或 `CODERAG_WITH_SEMANTIC=1 bash scripts/install.sh`，再设 `CODERAG_SEMANTIC=on` | 只有想要语义检索的人 |
+| **可选段（opt-in）** | extra **`semantic`**（内容只有 `numpy`），以及用户自己装的 **Ollama + `bge-m3`** | `pip install -e ".[semantic]"` （`CODERAG_WITH_SEMANTIC=1` 那个开关**尚未实现**，见 §6.5.1 的 `T5-15`），再设 `CODERAG_SEMANTIC=on` | 只有想要语义检索的人 |
 
 > **两段都不做的人也永远不会碰到向量**：不装 extra 就没有 `numpy`，不设 `CODERAG_SEMANTIC` 就不联网、行为与 `1.0.0` 逐条一致（`S6`）。**这是 `RL-10` 的可验收形式。**
 
@@ -207,7 +207,7 @@ dsh-coderag/                      ← 仓库根
 | extra 名 | **`semantic`** | `ADR-16` §3.2 |
 | extra 内容 | **只有 `numpy`**（HTTP 走标准库 `urllib.request`，因此不引入 `httpx`；不引入任何向量数据库） | `ADR-16` §3.1/§3.2 |
 | 是否进 tarball | **否**。bundle 仍未含任何 JS，也仍未含任何 Python 依赖——tarball 依旧只有 `package.json` / `cordis.patch.yml` / `LICENSE` / `README.md` | `ADR-16` §7.1 |
-| 是否进 `install.sh` 默认路径 | **否**。`CODERAG_WITH_SEMANTIC` 未设时脚本**不装任何向量依赖** | `ADR-16` §3.2 |
+| 是否进 `install.sh` 默认路径 | **否**。默认路径从不装向量依赖（`CODERAG_WITH_SEMANTIC` 开关**尚未实现**，`T6-18` 复核） | `ADR-16` §3.2 |
 | 用户侧的另一半 | **Ollama + `bge-m3`**：由用户自己安装的系统服务，**不是**本项目的 Python 依赖，也**不是**安装前置 | `ADR-16` §3.1 |
 | **可选后端之二：云端**（`CODERAG_SEMANTIC_BACKEND=openai`） | 任何兼容 **OpenAI `/v1/embeddings`** 的线上服务；**不需任何额外 Python 依赖**（HTTP 走标准库 `urllib`）。需 `CODERAG_SEMANTIC_ALLOW_REMOTE=1` 才允许非 loopback 地址，key 只从环境读（`RL-02`） | `ADR-17` §1/§2/§4 |
 
@@ -453,7 +453,7 @@ code_search(query, path, limit, mode)
 | 基础 | `CODERAG_EXTRA_EXTENSIONS` | 空 = 只用内置白名单 `{.py,.c,.h,.cpp,.hpp,.ts,.js}`；**只增不减**，非法 token 报 `ConfigError` | `T6-17`；扩展名闸门在第 1 层黑名单**之前**，故不放大 `RL-03` 的暴露面 |
 | 本地后端 | `CODERAG_SEMANTIC`（只有 `on` 启用）/ `_BACKEND=ollama` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS` | 关闭 / `ollama` / `http://127.0.0.1:11434` / `bge-m3` / `30` / `16` / `100000` | `ADR-16` §4 |
 | 云端后端 | `_BACKEND=openai` / `_URL`（必须显式给出）/ `_MODEL`（必须显式给出）/ `_API_KEY` / `_ALLOW_REMOTE` | 关闭 / 无 / 无 / 无（缺失 → `SEMANTIC_AUTH_MISSING`，**不发起请求**）/ 未设 = 不允许 | `ADR-17` §4 |
-| 安装侧 | `CODERAG_WITH_SEMANTIC`（只有 `1` 才装 extra） | 未设 = 不装 | `ADR-16` §3.2 |
+| 安装侧 | `CODERAG_WITH_SEMANTIC`（`ADR-16` §3.2 冻结为「只有 `1` 才装 extra」） | **未实现**——`T5-15` 已移出 2.0.0 范围，代码 / 脚本 / 测试里 **0 处命中**；装 extra 目前用 `pip install ".[semantic]"` | `ADR-16` §3.2（条文有效，落点待立任务） |
 | DSH 侧 | `CODERAG_PYTHON` | `python`（Windows）/ `python3`（其它平台），即走 `PATH`；桌面版必须覆盖成绝对路径 | `E-06`；由 `cordis.patch.yml` 的 `command:` 在宿主侧求值，不由 `config.py` 读 |
 
 **取值规则（三条，全部已冻结）**：
@@ -774,7 +774,7 @@ CREATE TABLE IF NOT EXISTS workspace_index (
 
 | 依赖 | 用途 | 备注 |
 |---|---|---|
-| `numpy` | 暴力余弦相似度 | **extra `semantic` 的内容，仅此一项**。安装：`pip install -e ".[semantic]"`，或 `CODERAG_WITH_SEMANTIC=1 bash scripts/install.sh` |
+| `numpy` | 暴力余弦相似度 | **extra `semantic` 的内容，仅此一项**。安装：`pip install -e ".[semantic]"`，（`CODERAG_WITH_SEMANTIC=1` 那个开关**尚未实现**，见 §6.5.1 的 `T5-15`） |
 | `ollama`（外部服务）+ `bge-m3` 模型 | 本地 embedding 后端 | 约 1.2 GB，免费、中文强。**由用户自己安装的系统服务，不是本项目的 Python 依赖，也不是安装前置**；本项目用 HTTP 调用它，客户端走标准库 `urllib.request` |
 
 > **不装这个 extra 时，默认安装的依赖仍只有上面那四项**（`RL-10`、`ADR-16` §7.1）。**`httpx` 与云端 embedding 都不在 2.0.0 的范围内**——`ADR-16` §3.1 已否决云端后端（需 API key、会把代码文本发出机器，违反 `S-01`/`S-02`），HTTP 客户端因此退回标准库。

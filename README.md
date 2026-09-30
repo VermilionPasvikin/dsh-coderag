@@ -102,8 +102,11 @@ dsh-coderag 是给 DeepSeek Harness（DSH）用的**代码库检索引擎**，�
 
 ```sh
 # 1. 克隆（cordis.patch.yml 在仓库里，必须克隆）
+#    ⚠️ 克隆会落在你**当前所在目录**下新建的 dsh-coderag/ 里——先 cd 到想放的位置。
+cd ~                         # 不 cd 的话就落在你打开终端时的那个目录
 git clone https://github.com/VermilionPasvikin/dsh-coderag.git
 cd dsh-coderag
+# 想自己指定目录名：git clone <url> my-coderag && cd my-coderag
 
 # 2. 装引擎并自检：这个薄包装只做「找到解释器 → 转发给 Python CLI 的 install-deps」
 bash scripts/install.sh          # 受限网络：CODERAG_PIP_ARGS="--index-url <镜像>" bash scripts/install.sh
@@ -146,8 +149,12 @@ $py = "$HOME\dsh-coderag-venv\Scripts\python.exe"
 & $py --version                          # 期望：Python 3.10 / 3.11 / 3.12
 
 # 1. 克隆（cordis.patch.yml 在仓库里，必须克隆）
+#    ⚠️ 克隆会落在 **PowerShell 当前所在目录**下新建的 dsh-coderag\ 里。
+Get-Location                 # 先确认你在哪；常见是 C:\Users\<你>
+Set-Location $HOME           # 想放到别处就改这一句
 git clone https://github.com/VermilionPasvikin/dsh-coderag.git
 Set-Location dsh-coderag
+# 不想先 cd，就直接给目录名：git clone <url> C:\src\my-coderag; Set-Location C:\src\my-coderag
 # 克隆失败（公司网络 / 代理 / 连接重置）时：在 GitHub 页面下载 ZIP 解压即可，
 # 这个仓库不需要 .git 也能装；或在能连通的机器上克隆后把整个目录拷过来。
 
@@ -338,6 +345,115 @@ $env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"      # 桌面版请写进 profile �
 > 检索预算还硬编码 4000），`v2.1.0` 发布时如实标注为 ⚠️。**已在 `T6-07` 修好接线并补了 3 条测试**——
 > 这 3 条测试在修复前会红（`assert 2 == 1`、命中数未被裁剪），因此这条路径不会再次静默失效。
 > `T6-17` 又把同一条配置通路接进了 **CLI**（此前 `dsh-coderag index` 完全不读这些变量）。
+
+### 三类常见配置，照抄即可
+
+每一类都给 **PowerShell** 与 **POSIX** 两种写法。先记住上面那张表的区别：
+**在终端里设，只对「从这个终端启动的 dsh」有效；桌面版是从快捷方式启动的，读不到终端变量，
+必须写进 profile 的 `cordis.patch.yml`。** 桌面版最省事：`& $py -m dsh_coderag doctor` 会打印一段
+可直接粘贴的覆盖块，把下面这些变量加进它的 `env:` 即可。
+
+#### ① 让引擎收录别的文件类型（扩展白名单）
+
+内置白名单固定为 `.py` `.c` `.h` `.cpp` `.hpp` `.ts` `.js`；`CODERAG_EXTRA_EXTENSIONS` 在这之上
+**只追加**（去不掉内置项）。逗号或空格分隔、大小写不敏感、可省前导点。
+
+```powershell
+$env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"
+& $py -m dsh_coderag index $repo          # 改完要重新索引一次才生效
+```
+
+```sh
+export CODERAG_EXTRA_EXTENSIONS=".mxml,.as"
+"$CODERAG_PYTHON" -m dsh_coderag index /path/to/repo
+```
+
+```yaml
+# 桌面版：写进 profile 覆盖块的 env
+    env:
+      CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
+      CODERAG_EXTRA_EXTENSIONS: '.mxml,.as'
+```
+
+写错（含点号的 token、路径分隔符、通配符）会**报错**而不是被忽略；没有 grammar 的后缀按固定行数切分
+（`symbol_kind` 为 `None`）。
+
+#### ② 本地 embedding 后端（**代码不出机器**）
+
+先装 `semantic` extra——它只含 `numpy`，**默认安装不带它**（`RL-10`）：
+
+```powershell
+& $py -m pip install ".[semantic]"        # 开发检出用 & $py -m pip install -e ".[dev,semantic]"
+```
+
+```sh
+"$CODERAG_PYTHON" -m pip install ".[semantic]"
+```
+
+再开开关（**默认关闭；只有 `on` 才算开启**）：
+
+```powershell
+$env:CODERAG_SEMANTIC        = "on"                       # 必须正好是 on
+$env:CODERAG_SEMANTIC_BACKEND = "ollama"                  # 默认就是 ollama
+$env:CODERAG_SEMANTIC_URL    = "http://127.0.0.1:11434"   # 本地后端只允许 loopback
+$env:CODERAG_SEMANTIC_MODEL  = "bge-m3"
+& $py -m dsh_coderag index $repo                          # 重新索引：这一步才会生成向量
+```
+
+```sh
+export CODERAG_SEMANTIC=on CODERAG_SEMANTIC_MODEL=bge-m3
+"$CODERAG_PYTHON" -m dsh_coderag index /path/to/repo
+```
+
+- `_URL` **只允许** `127.0.0.1` / `::1` / `localhost`——指向别处会被**拒绝**（`embed.py` 里最后一道闸）。
+  本地后端的全部意义就是"代码不出机器"，所以这条不做成可选项。
+- 其它可调项：`_TIMEOUT`（秒，默认 `30`）、`_BATCH`（默认 `16`）、`_MAX_CHUNKS`（默认 `100000`）。
+- 本机要先有 Ollama 并拉好模型：`ollama pull bge-m3`。
+- **不声称检索质量**：按 `ADR-14` §10.4 的 `V4`，`natural` 桶 `S@5 = 0.300 < 0.40`，所以这条路径
+  默认关闭、也没有随任何版本对外发布。
+
+#### ③ 云端 embedding 后端（**会把代码发出去**）
+
+> **⚠️ 启用前请读完这一段。** 下面这些要点与 [安全与隐私警告](#安全与隐私警告) 里的是同一套
+> （`AGENTS.md` `D-08` 要求它随每一处配置出现）：
+>
+> - **外发内容**：已入库 chunk 的文本，**包括上下文前缀行**（形如
+>   `// file: <工作区相对路径> | symbol: <种类 名字> | lines <起>-<止>`）——
+>   也就是说**文件路径与符号名也会一并外发**。
+> - **不外发的**：三层过滤在入库前执行，被拦下的密钥文件（`.env*`、`*.pem`、`id_rsa*` 等）
+>   **从来没有 chunk**，不可能被外发。
+> - **不再成立**：本地后端的"代码不出机器"在云端下**不成立**。
+> - **费用**：按 token 计费；首次索引对**全量 chunk** 做 embedding，是一次性真实支出。
+> - **合规自负**：代码可能是公司资产或含第三方许可限制，**外发前请确认你有权发给该服务商**。
+> - **key**：只从环境或**仓库之外**的本机配置层读，**绝不**入库、不入日志、不入结构化状态。
+> - **传输**：非 loopback 地址必须**同时**设 `CODERAG_SEMANTIC_ALLOW_REMOTE=1`（第二把钥匙），
+>   并请使用 `https://`。
+
+```powershell
+$env:CODERAG_SEMANTIC              = "on"
+$env:CODERAG_SEMANTIC_BACKEND      = "openai"
+$env:CODERAG_SEMANTIC_URL          = "https://api.openai.com/v1"   # 必须显式给出
+$env:CODERAG_SEMANTIC_MODEL        = "text-embedding-3-small"      # 必须显式给出
+$env:CODERAG_SEMANTIC_ALLOW_REMOTE = "1"                           # 非 loopback 的第二把钥匙
+$env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
+& $py -m dsh_coderag index $repo
+```
+
+桌面版（读不到终端变量）写进 profile 的 `cordis.patch.yml`——**该文件在仓库之外**，
+所以 key 写成字面值是受支持的（`ADR-17` §4、`RL-02`）；`_URL` / `_MODEL` 在云端后端下**必须显式给出**：
+
+```yaml
+    env:
+      CODERAG_SEMANTIC: 'on'
+      CODERAG_SEMANTIC_BACKEND: 'openai'
+      CODERAG_SEMANTIC_URL: 'https://api.openai.com/v1'
+      CODERAG_SEMANTIC_MODEL: 'text-embedding-3-small'
+      CODERAG_SEMANTIC_ALLOW_REMOTE: '1'
+      # 只写在这里；不要贴进任何会被 git 跟踪的文件（RL-02）
+      CODERAG_SEMANTIC_API_KEY: '<你的 API key>'
+```
+
+后端关闭时（未设 `CODERAG_SEMANTIC=on`）这些值**一概不校验**，所以默认安装永远不会因此起不来。
 
 ## 它是怎么工作的
 
