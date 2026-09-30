@@ -375,15 +375,24 @@ $env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"      # 桌面版请写进 profile �
 #### ① 让引擎收录别的文件类型（扩展白名单）
 
 内置白名单固定为 `.py` `.c` `.h` `.cpp` `.hpp` `.ts` `.js`；`CODERAG_EXTRA_EXTENSIONS` 在这之上
-**只追加**（去不掉内置项）。逗号或空格分隔、大小写不敏感、可省前导点。
+**只追加**（去不掉内置项）。**要加多个类型，下面三种写法实测完全等价**（逗号 / 空格 / 大小写 / 点号随意）：
+
+| 写法 | 结果 |
+|---|---|
+| `$env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as,.glsl"` | 三个都收 |
+| `$env:CODERAG_EXTRA_EXTENSIONS = ".mxml .as .glsl"` | 同上 |
+| `$env:CODERAG_EXTRA_EXTENSIONS = " .MXML, AS ,glsl "` | 同上 |
+
+空项会被忽略（`".mxml,,.as"` 等价于 `".mxml,.as"`）；写成数组（`= ".mxml", ".as"`）
+会被 PowerShell 折成空格分隔的字符串、能用，但不如直接写一整串带引号的清楚。
 
 ```powershell
-$env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"
+$env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as,.glsl"
 & $py -m dsh_coderag index $repo          # 改完要重新索引一次才生效
 ```
 
 ```sh
-export CODERAG_EXTRA_EXTENSIONS=".mxml,.as"
+export CODERAG_EXTRA_EXTENSIONS=".mxml,.as,.glsl"
 "$CODERAG_PYTHON" -m dsh_coderag index /path/to/repo
 ```
 
@@ -391,11 +400,17 @@ export CODERAG_EXTRA_EXTENSIONS=".mxml,.as"
 # 桌面版：写进 profile 覆盖块的 env
     env:
       CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
-      CODERAG_EXTRA_EXTENSIONS: '.mxml,.as'
+      CODERAG_EXTRA_EXTENSIONS: '.mxml,.as,.glsl'
 ```
 
-写错（含点号的 token、路径分隔符、通配符）会**报错**而不是被忽略；没有 grammar 的后缀按固定行数切分
-（`symbol_kind` 为 `None`）。
+**不要**用 `*`、`*.mxml` 或 `a.d.ts` 这类写法——含通配符、路径分隔符或点号的 token 会**报错**
+（退出码 2）而不是被忽略：匹配用的是 `Path.suffix`，它只取最后一段。
+
+> **限制**：**没有扩展名的文件收不进来**（`Dockerfile`、`Makefile` 这类）——`Path.suffix` 对它们是
+> 空字符串，而每个 token 都必须以字母或数字开头，所以没法用「空扩展名」表达。需要它们的话目前
+> 只能靠 `grep` 之类的方式。已登记在 [`docs/backlog.md`](docs/backlog.md)。
+
+没有 grammar 的后缀按固定行数切分（`symbol_kind` 为 `None`）。
 
 #### ② 本地 embedding 后端（**代码不出机器**）
 

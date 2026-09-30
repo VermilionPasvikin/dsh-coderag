@@ -514,3 +514,16 @@
 - **建议修法**：给 `chunks` 加一列（`SCHEMA_VERSION` 要一起动）并在渲染的位置行上标出来，
   例如 `── path:1-6  [low-confidence]  (chunk 0)`；补一条走 L4 的渲染快照测试。
   属独立改动，需所有者立任务。
+
+## 白名单无法覆盖「没有扩展名」的文件（发现于 `T6-20`，2026-09-30，**未顺手修**）
+
+- **事实（实测）**：把 `.dockerfile,.makefile` 加进 `CODERAG_EXTRA_EXTENSIONS` 后，索引一个同时含
+  `Dockerfile` / `Makefile` 的工作区，入库的**只有 `.py`**——两者都没被收录。原因是匹配走
+  `candidate.suffix`，而 `Path("Dockerfile").suffix` 是**空字符串**；同时 `_read_extensions` 要求
+  每个 token 以字母或数字开头，所以也无法用「空扩展名」表达这个意思。
+- **影响**：`Dockerfile` / `Makefile` / `LICENSE` 这类无扩展名文件在任何配置下都进不了索引，
+  而它们常常正是「找构建/部署配置」时想搜的东西。
+- **建议修法**：给 `_read_extensions` 增加一个显式记号（例如 token `no-extension`，或单独的
+  `CODERAG_INCLUDE_EXTENSIONLESS=1`），并让 `walk_with_report` 在 `suffix == ""` 时按该开关收录；
+  补一条安全测试——`Dockerfile` 能入库、而 `.env` 这类**同样 `suffix == ""`** 的文件仍被第一层
+  密钥黑名单拦下（两者会同时落在这个分支上，必须证明过滤仍先于入库生效）。属独立小改动，需所有者立任务。
