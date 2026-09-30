@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import sqlite3
 import subprocess
@@ -443,7 +444,15 @@ def _run_index(args: argparse.Namespace) -> int:
     """Build or refresh the index for the workspace at args.path."""
     from dsh_coderag.indexer import index_sync
 
-    summary = index_sync(Path(args.path))
+    root = Path(args.path)
+    if not root.is_dir():
+        raise CliError(
+            "WORKSPACE_NOT_FOUND",
+            f"要索引的目录不存在：{root}",
+            hint="换成实际存在的路径——索引只读工作区，不会凭空创建目录",
+            exit_code=EXIT_FAILED,
+        )
+    summary = index_sync(root)
     _emit(
         f"indexed {summary.files} files, {summary.chunks} chunks "
         f"into {summary.root}/.coderag/index.sqlite3"
@@ -458,11 +467,28 @@ def _run_search(args: argparse.Namespace) -> int:
 
     result = search(Path(args.root), args.query, k=args.limit)
     if result.status is not SearchStatus.READY:
-        sys.stderr.write(f"{result.status.value}: {result.message}\n")
+        detail = result.message or result.hint or ""
+        suffix = f": {detail}" if detail else ""
+        sys.stderr.write(f"{result.status.value}{suffix}\n")
         return EXIT_FAILED
     for hit in result.hits:
         _emit(f"{hit.path}:{hit.start_line}-{hit.end_line}")
     return EXIT_OK
+
+
+def _copyable_assignment(interpreter: str) -> str:
+    """The one-liner that sets CODERAG_PYTHON in this machine's default shell.
+
+    Windows PowerShell and POSIX shells disagree on the syntax, and the only
+    reason to print the line is that it can be pasted as-is: an `export` line is
+    useless in PowerShell, which is what a Windows user is reading this with.
+    `platform.system()` is used rather than `sys.platform` because mypy folds
+    the latter per host platform, which makes one branch unreachable under
+    `warn_unreachable` on every machine.
+    """
+    if platform.system() == "Windows":
+        return f'$env:{ENV_PYTHON} = "{interpreter}"'
+    return f'export {ENV_PYTHON}="{interpreter}"'
 
 
 def _run_doctor(_: argparse.Namespace) -> int:
@@ -473,9 +499,10 @@ def _run_doctor(_: argparse.Namespace) -> int:
     require(checks)
     _emit()
     _emit(f"{ENV_PYTHON}={sys.executable}")
-    _emit(f'export {ENV_PYTHON}="{sys.executable}"')
+    _emit(_copyable_assignment(sys.executable))
     _emit("把上面的值写进 cordis.patch.yml 的 config.env，")
-    _emit("或在启动 dsh 的 shell 里 export（E-02/E-06）。")
+    _emit("或在启动 dsh 的同一个终端里设置它（E-02/E-06）——")
+    _emit("桌面版是从快捷方式启动的，继承不到终端里的变量，那种情况必须写进 patch。")
     configured = os.environ.get(ENV_PYTHON, "")
     if configured and not _same_directory(configured, Path(sys.executable)):
         _emit(f"注意：当前环境里的 {ENV_PYTHON}={configured}，与本次探测到的解释器不同。")
@@ -509,7 +536,8 @@ def _install() -> None:
         raise CliError(
             "SOURCE_CHECKOUT_NOT_FOUND",
             "找不到本仓库的 pyproject.toml，无法执行 pip install",
-            hint="在本仓库内运行该命令；已安装的副本没有可安装的源码",
+            hint="已安装的副本没有源码可装：在仓库根改用 `pip install -e .`（editable），"
+                 "或把仓库的 `src` 目录加进 `PYTHONPATH` 后再运行",
         )
     if not pip_available():
         raise CliError(

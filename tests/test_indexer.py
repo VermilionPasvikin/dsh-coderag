@@ -4,7 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from dsh_coderag.indexer import SCHEMA_VERSION, index_sync, open_index
+
+
+def test_index_sync_refuses_a_root_that_does_not_exist(tmp_path: Path) -> None:
+    """Indexing under a mistyped path used to create it and report zero files."""
+    missing = tmp_path / "typo" / "not" / "here"
+
+    with pytest.raises(FileNotFoundError):
+        index_sync(missing)
+
+    assert not missing.exists()
 
 
 def _query(repo: Path, sql: str) -> list[tuple[object, ...]]:

@@ -76,12 +76,62 @@ def test_importing_the_package_needs_only_the_standard_library() -> None:
     assert "lazy" in result.stdout, "index_sync must not be imported eagerly"
 
 
-def test_doctor_reports_the_interpreter_and_the_copyable_env_value() -> None:
+def test_doctor_reports_the_interpreter_and_a_copyable_assignment() -> None:
+    """The printed assignment must be the one this OS's shell can actually run."""
     result = run_module("doctor")
 
     assert result.returncode == 0, result.stderr
     assert f"{cli.ENV_PYTHON}={sys.executable}" in result.stdout
-    assert f'export {cli.ENV_PYTHON}="{sys.executable}"' in result.stdout
+    if sys.platform == "win32":
+        assert f'$env:{cli.ENV_PYTHON} = "{sys.executable}"' in result.stdout
+        assert f"export {cli.ENV_PYTHON}=" not in result.stdout
+    else:
+        assert f'export {cli.ENV_PYTHON}="{sys.executable}"' in result.stdout
+        assert f"$env:{cli.ENV_PYTHON}" not in result.stdout
+
+
+def test_index_rejects_a_workspace_that_does_not_exist(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A mistyped path used to be created and then reported as a successful run."""
+    missing = tmp_path / "typo" / "not" / "here"
+
+    code = cli.main(["index", str(missing)])
+
+    payload = error_payload(capsys)
+    assert code == cli.EXIT_FAILED
+    assert payload["code"] == "WORKSPACE_NOT_FOUND"
+    assert str(missing) in payload["message"]
+    assert not missing.exists(), "indexing must not create the workspace"
+
+
+def test_search_reports_a_non_ready_index_without_the_none_placeholder(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An empty workspace has no message; the raw None reached the user's terminal."""
+    assert cli.main(["index", str(tmp_path)]) == cli.EXIT_OK
+
+    code = cli.main(["search", "anything", "--root", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_FAILED
+    # stderr also carries the indexer's structured log lines; the status is last.
+    last_line = captured.err.strip().splitlines()[-1]
+    assert last_line.startswith("empty"), captured.err
+    assert "None" not in last_line
+
+
+def test_install_deps_without_a_checkout_points_at_an_editable_install(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The old hint said "run it inside this repository", which is what fails."""
+    monkeypatch.setattr(cli, "pip_available", lambda: True)
+    monkeypatch.setattr(cli, "source_root", lambda: None)
+
+    code = cli.main(["install-deps"])
+
+    assert code == cli.EXIT_ENV_UNUSABLE
+    assert "pip install -e" in error_payload(capsys)["hint"]
 
 
 @pytest.mark.parametrize("command", ["doctor", "install-deps"])

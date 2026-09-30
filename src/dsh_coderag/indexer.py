@@ -259,7 +259,14 @@ def index_sync(
     once it returns True no further rows are written and the workspace index
     is not marked ready. Re-running replaces only the files whose content
     hash changed, adds new files and cascade-deletes removed ones.
+
+    Raises:
+        FileNotFoundError: If root is not an existing directory. Creating the
+            index under a mistyped path would create that path instead, and
+            report a successful run over zero files (T6-13).
     """
+    if not root.is_dir():
+        raise FileNotFoundError(f"workspace root does not exist: {root}")
     if not sqlite_caps.fts5_available():
         raise sqlite_caps.Fts5UnavailableError(sqlite_caps.FTS5_HINT)
     base = root.resolve()
