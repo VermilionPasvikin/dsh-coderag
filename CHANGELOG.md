@@ -5,6 +5,40 @@
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-09-30
+
+**只发布在 GitHub**（tag / release，`v2.1.1`）——**不发布到 PyPI，也不发布到 npm**。
+**默认路径的检索行为没有变化**：本版本只修一个「配置面在 MCP 路径上不生效」的缺陷。
+`2.1.0` 的 README 曾把受影响的 5 个变量**如实**标注为「未生效」，本版本把接线补上、让它们成立。
+
+### 修复
+
+- **可调上限在 MCP 路径上完全不生效**：`CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` /
+  `CODERAG_MAX_FILE_BYTES` / `CODERAG_BATCH_SIZE` / `CODERAG_MAX_WORKERS` 会被 `config.py`
+  读进 `IndexConfig`，但 `server.py` 建索引时把 `index_sync` **裸传**给任务管理器（不带配置），
+  检索预算又**硬编码 `4000`**——因此这些上限从未到达真正执行的那条路径。
+  修法是新增 `server.py::workspace_config(root)`：把已知的 `root` 填进环境副本再调
+  `load_config()`，于是 `build_server(root=...)`（测试与嵌入调用）在**不设 `CODERAG_ROOT`** 时
+  也读得到可调变量，而显式设置的值仍然优先、格式错误仍然抛 `ConfigError`。
+  它接进**三处**：建索引、`code_search` 的**默认**预算（工具参数 `max_tokens` 仍可逐次覆盖）、
+  以及工作区形态 `index_status` 的 `skipped` 统计。
+- **`index_status` 的过滤统计与配置一致**：上一处的修复暴露出它重新遍历工作区时用的还是
+  **默认上限**，因此 `skipped.count` 会与真实过滤结果不符（违反「过滤必须可见」）。
+  现在它按配置的上限统计；超限时返回 `INDEX_TOO_MANY_FILES` + 实际数量，而不是兜底的
+  `SEARCH_FAILED`。**`RL-08` 未被放松**：超限仍显式失败，不静默截断。
+
+### 新增
+
+- **3 条走 MCP 工具的测试**（`tests/test_server.py`）：`CODERAG_MAX_FILES` 超限时任务 `failed`
+  并报实际数量、`CODERAG_MAX_FILE_BYTES` 把超限文件计入 `skipped.too_large`、不传 `max_tokens`
+  时预算取自环境。它们**在修复前会红**（`assert 2 == 1`、命中数未被裁剪），所以这条接线
+  不会再静默失效。**注意**：原有的 `T2-11` / `T2-21` 单测此前一直是**全绿**的——它们把
+  `IndexConfig` 直接交给 `index_sync`，恰好绕过了没传配置的那条路径。
+
+### 变更
+
+- 版本号 `2.1.0` → `2.1.1`（`pyproject.toml`、`package.json`、`src/dsh_coderag/__init__.py`）。
+
 ## [2.1.0] - 2026-09-30
 
 **只发布在 GitHub**（tag / release，`v2.1.0`）——**不发布到 PyPI，也不发布到 npm**；

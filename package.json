@@ -1,6 +1,6 @@
 {
   "name": "dsh-coderag",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Codebase retrieval engine for DeepSeek Harness, exposed over MCP",
   "license": "MIT",
   "files": [
