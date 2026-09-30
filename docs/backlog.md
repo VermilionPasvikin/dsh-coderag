@@ -580,3 +580,29 @@
   `index_status` 会如实报告「未完成」，而不是静默地少 22%。需补一条测试：
   在足以被 `SIGINT` 打断的语料上中断，断言 `ready = 0` 且 `index_runs` 有该次记录。
   属独立改动，需所有者立任务（`T6-23` 已立，待批准）。
+
+## CLI 路径没有运行历史，中断后只剩一个 `ready = 0`（发现于 `T6-23`，2026-09-30，**有意未做**）
+
+- **事实**：`index_runs` 表由 `taskman.TaskManager` 服务于 MCP 的异步路径；CLI 的同步 `index_sync`
+  **不写**这张表。实测所有者那次中断后，`index_runs` 是 **0 行**，而 `workspace_index.ready` = 1
+  （旧值）。`T6-23` 的修复让开跑时把 `ready` 清零，于是中断后至少不再谎称完成——但**「哪次运行、
+  跑到多少」在 CLI 路径上依然不可见**：`index_status` 只会说 `indexing`，说不出「被中断」。
+- **为什么不顺手修**：`TaskManager.create/mark_running/mark_failed` 是异步路径的既有机制，
+  在 `index_sync` 里再建一行会让**异步路径出现两行**（`TaskManager.start` 已经建过）。要合就得
+  把两者的职责重新划清（谁拥有运行行），那是一次涉及 `taskman` 与 `server` 的结构性改动。
+- **建议修法**：让 `index_sync` 接受可选的 `run_recorder`（CLI 传 `TaskManager` 的实例、异步路径传
+  `None`），由调用方决定是否记录；`_workspace_index_status` 的工作区形态再加一个 `last_run` 字段
+  （`state` / `started_at` / `finished_at` / `files`），这样模型能区分「正在建」与「上次没跑完」。
+
+## `searcher` 不读 `ready`：中断后的索引仍可被搜到（发现于 `T6-23`，2026-09-30，**有意保留**）
+
+- **事实**：`searcher.search` 只判断 `<root>/.coderag/index.sqlite3` **是否存在**（`searcher.py:321`），
+  从不读 `workspace_index.ready`。所以 `ready = 0` 只影响 `index_status` 报告的 `status`，
+  不改变检索行为——一个被中断的索引依旧会返回它已入库那部分的命中。
+- **为什么保留**：反过来做（`ready = 0` 就拒绝检索）会伤到另一个常见场景——**重建期间**的检索。
+  重建写的是增量，旧行仍在库里且大体可用，直接拒绝等于让用户在几十分钟的重建期间完全失去检索。
+  当前取舍是：**可用性保留 + 状态如实**（`index_status` 不再说 ready），把判断交给调用方。
+- **遗留风险**：模型若只看 `code_search` 的命中而忽略 `index_status`，仍可能把「查不到」当成
+  「不存在」（`RL-06` 的同一根因）。**若将来要让检索也感知完成度**，建议引入第三个状态
+  （例如 `partial`）而不是把 `ready = 0` 当成拒绝条件，并在 `code_search` 的返回体里带上
+  「索引未完成」的提示。
