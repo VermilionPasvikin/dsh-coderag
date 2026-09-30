@@ -124,50 +124,74 @@ bash scripts/install.sh          # 受限网络：CODERAG_PIP_ARGS="--index-url 
 
 ### Windows（PowerShell）
 
-> **先确认你手上的 `python` 是哪一个。** Windows 上 `python` / `python3` 很可能只是
-> **Microsoft Store 的占位符**——运行时会打印
-> `Python was not found; run without arguments to install from the Microsoft Store …`，
-> 那不是你装的那个解释器。所以下面**一律用显式路径变量 `$py`**，不依赖 `PATH`：
->
-> ```powershell
-> py -0p                     # 列出本机已注册的解释器（Windows 官方 launcher）
-> & $py --version            # 换成你自己的路径，确认落在 3.10–3.12
-> ```
+> **先确认两件事，它们决定了后面每条命令怎么写。**
+
+**① 你手上的 `python` 是哪一个。** Windows 上 `python` / `python3` 很可能只是
+**Microsoft Store 的占位符**——运行时会打印
+`Python was not found; run without arguments to install from the Microsoft Store …`，
+那不是你装的那个解释器。所以下面**一律用显式路径变量 `$py`**，不依赖 `PATH`：
 
 ```powershell
-# 1. 克隆
-git clone https://github.com/VermilionPasvikin/dsh-coderag.git
-Set-Location dsh-coderag
-
-# 2. 指定解释器（示例是 conda 环境；换成你自己的路径）
-$py = "C:\Users\<你>\miniconda3\envs\coderag\python.exe"
-& $py --version                          # 期望：Python 3.10 / 3.11 / 3.12
-
-# 3. 装引擎与依赖：PowerShell 里没有 sh，所以直接用解释器调 pip / CLI
-& $py -m pip install .                   # 开发者：& $py -m pip install -e ".[dev,semantic]"
-& $py -m dsh_coderag doctor              # 探测解释器 / 版本 / FTS5，并打印 CODERAG_PYTHON
-& $py -m dsh_coderag index C:\path\to\repo
-& $py -m dsh_coderag search "用户令牌在哪里校验" --root C:\path\to\repo
-
-# 4. 把解释器交给 patch（重要：patch 内置默认值是作者机器的 macOS 路径）。
-#    这一句只对当前 PowerShell 窗口有效；DSH 从同一个窗口启动就继承得到。
-$env:CODERAG_PYTHON = $py
-
-# 5. 找一个能用的 dsh（见下方说明；本仓库的 ./scripts/dsh 是 sh 脚本，PowerShell 里跑不了）
-$dsh = "F:\dsh\resources\runtime\cli\bin\dsh.cmd"   # 换成你自己的路径，或直接写全局 dsh 的路径
-& $dsh plugin --profile web add .
-& $dsh --profile web --dump-config | Select-String -Pattern '== dsh-coderag' -Context 0,2
-# 期望：先出现 # == dsh-coderag，紧接着 - id: mcp-coderag
-
-# 6. 启动
-& $dsh --profile web
+py -0p                     # 列出本机已注册的解释器（Windows 官方 launcher）
 ```
 
-> **`dsh` 在 Windows 上不一定在 `PATH` 上**（`AGENTS.md` E-07）。本机实测可用的两种写法：
+**② 你实际在跑的是哪个 DSH profile。** 插件必须注册到**你正在用的那个**，否则装好了也看不到工具：
+桌面版跑的是 `desktop`，`dsh web` 用的是 `web`。用 `$env:DSH_PROFILE` 或看
+`%USERPROFILE%\.dsh\profiles\` 下有哪些目录来确认；下面用 `$profile` 指代它。
+
+```powershell
+# 0. 准备一个 Python 环境（3.10–3.12）。已有 conda / venv 就跳过这步，直接设 $py
+& py -m venv "$HOME\dsh-coderag-venv"    # py 会挑一个已注册的解释器；用 py -0p 看它有哪些
+$py = "$HOME\dsh-coderag-venv\Scripts\python.exe"
+& $py --version                          # 期望：Python 3.10 / 3.11 / 3.12
+
+# 1. 克隆（cordis.patch.yml 在仓库里，必须克隆）
+git clone https://github.com/VermilionPasvikin/dsh-coderag.git
+Set-Location dsh-coderag
+# 克隆失败（公司网络 / 代理 / 连接重置）时：在 GitHub 页面下载 ZIP 解压即可，
+# 这个仓库不需要 .git 也能装；或在能连通的机器上克隆后把整个目录拷过来。
+
+# 2. 装引擎与依赖：PowerShell 里没有 sh，所以直接用解释器调 pip / CLI
+& $py -m pip install .                   # 开发者：& $py -m pip install -e ".[dev,semantic]"
+& $py -m dsh_coderag doctor              # 探测解释器 / 版本 / FTS5，并打印可复制的赋值语句
+
+# 3. 验证引擎可用（这一步不涉及 DSH）。$repo 必须换成真实存在的目录
+$repo = "C:\path\to\your\repo"           # ← 换成你要索引的目录
+& $py -m dsh_coderag index $repo
+& $py -m dsh_coderag search "用户令牌在哪里校验" --root $repo
+
+# 4. 把解释器交给 DSH。桌面版是快捷方式启动的、继承不到终端里的变量，
+#    所以最可靠的是写进 profile 的 cordis.patch.yml（见「配置」一节的完整示例）。
+#    只有「从本窗口启动 dsh」时，下面这一句才够用：
+$env:CODERAG_PYTHON = $py
+
+# 5. 先完全退出 DeepSeek Harness 桌面版，再挂插件（见下方说明）
+$dsh = "<DeepSeek Harness 安装目录>\resources\runtime\cli\bin\dsh.cmd"   # 或全局 dsh 的路径
+& $dsh plugin --profile $profile add .   # $profile 换成你实际在跑的那个（桌面版通常是 desktop）
+& $dsh --profile $profile --dump-config | Select-String -Pattern '== dsh-coderag' -Context 0,2
+# 期望：先出现 # == dsh-coderag，紧接着 - id: mcp-coderag
+
+# 6. 重新打开桌面版；若你走的是命令行路线则为 & $dsh --profile $profile
+```
+
+> **`dsh` 在 Windows 上不一定在 `PATH` 上**（`AGENTS.md` E-07）。可用的写法：
 > ① **桌面版自带的 CLI**——`<DeepSeek Harness 安装目录>\resources\runtime\cli\bin\dsh.cmd`
 > （本机是 `F:\dsh\...`、版本 `0.2.0-rc.2`，上面第 5 步用的就是它）；
-> ② **Git for Windows 的 bash** + 仓库里的薄包装——`bash scripts/dsh --profile web`（会回退到钉版本的 npx）。
+> ② **Git for Windows 的 bash** + 仓库里的薄包装——`bash scripts/dsh --profile $profile`（会回退到钉版本的 npx）。
 > 你自己装过全局 `dsh` 的话，`dsh ...` 直接可用。
+
+> **为什么第 5 步要先退出桌面版**：桌面版正在运行时，DSH **拒绝**改动它的 profile——
+> `dsh: Error: Open DeepSeek Harness Desktop once to initialize its profile, then fully quit it
+> before running dsh plugin --profile desktop.`（本机实测）。改完再打开桌面版即可。
+> 注意**不要**把插件注册到一个新起的 profile 名上：那种 profile 只有 `dsh-base` + 本插件、
+> **没有 web 应用**，`dsh --profile <新名字>` 起不来界面。
+
+> **为什么第 4 步不能只靠 `$env:`**：`$env:CODERAG_PYTHON` 只对**从同一个窗口启动**的进程有效。
+> 桌面版是从快捷方式启动的，读不到你在这个窗口里设的变量——那种情况下 MCP 子进程会去用
+> `cordis.patch.yml` 里内置的默认解释器（作者机器的 macOS 路径）而启动失败。
+> 所以桌面版用户请把解释器写进 profile 的 `cordis.patch.yml`（见下节）。
+> 也可以把它设成**用户级环境变量**再重启桌面版（`[Environment]::SetEnvironmentVariable`
+> 的 `User` 作用域；本条未在本机实测）。
 
 > **两条路线的区别（Windows 与 macOS 均实测）**：
 > `dsh plugin --profile web add .` 会把**自带的 `web` 模板复制成你的 profile**（`package.json` 里
@@ -209,8 +233,8 @@ $dsh = "F:\dsh\resources\runtime\cli\bin\dsh.cmd"   # 换成你自己的路径�
 ```
 
 ```powershell
-# Windows
-dsh --profile <名字> --dump-config | Select-String -Pattern '== dsh-coderag' -Context 0,2
+# Windows（$dsh 的取法见上面「Windows」一节，它不一定在 PATH 上）
+& $dsh --profile <名字> --dump-config | Select-String -Pattern '== dsh-coderag' -Context 0,2
 ```
 
 期望看到 `# == dsh-coderag`，紧随一行 `- id: mcp-coderag`。
@@ -218,7 +242,7 @@ dsh --profile <名字> --dump-config | Select-String -Pattern '== dsh-coderag' -
 | 现象 | 怎么办 |
 |---|---|
 | `--dump-config` 里没有 `# == dsh-coderag` | bundle 没被登记：回头看 `add` 的 pnpm 报错；若报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，把 pnpm 打印的精确 key 写进 `~/.dsh/profiles/<名字>/pnpm-workspace.yaml` 的 `allowBuilds:` 下（`<key>: true`）后重跑 `add` |
-| 会话里没有 `mcp__coderag__code_search` | MCP 子进程起不来，最常见是解释器路径。macOS / Linux：`export CODERAG_PYTHON=<真正装了 dsh_coderag 的解释器>`；Windows：`$env:CODERAG_PYTHON = "<同一个路径>"`。用 `python -m dsh_coderag --version`（或 `"$CODERAG_PYTHON" -m dsh_coderag --version`）确认 |
+| 会话里没有 `mcp__coderag__code_search` | MCP 子进程起不来，最常见是解释器路径。macOS / Linux：`export CODERAG_PYTHON=<真正装了 dsh_coderag 的解释器>`；Windows：`$env:CODERAG_PYTHON = "<同一个路径>"`。用 `python -m dsh_coderag --version`（或 `"$CODERAG_PYTHON" -m dsh_coderag --version`）确认。**桌面版请改 profile 的 `cordis.patch.yml`**——快捷方式启动读不到终端变量（见「配置」） |
 | `pip install` 报 `externally-managed-environment` | PEP 668：用 conda 或 venv；**不要**用 `--break-system-packages` |
 | 中文检索总是空 | 该解释器的 SQLite 没编译 FTS5：macOS / Linux 上 `bash scripts/install.sh`、Windows 上 `python -m dsh_coderag install-deps` 都会预检并给指引 |
 
@@ -243,31 +267,36 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 
 > **哪些变量在 shell 里设不生效**：名字里含 `TOKEN` 的 `CODERAG_MAX_TOKENS` 会被清洗掉；云端的 API key 同理。
 > 这两个**必须**写进上面任一处 patch 的 `env:` 里。`CODERAG_ROOT` 与 `CODERAG_PYTHON` 例外——
-> 它们在 `cordis.patch.yml` 里已被 `!!js` 引用，由宿主进程读取你的 shell 环境
+> 它们在 `cordis.patch.yml` 里已被 `!!js` 引用，由宿主进程读取**启动 dsh 的那个进程**的环境
 > （PowerShell 用 `$env:CODERAG_PYTHON = $py`，macOS / Linux 用 `export CODERAG_PYTHON=...`）。
+> **桌面版是从快捷方式启动的，读不到你在终端里设的变量**，所以桌面版用户请把解释器写进下面的 `env:`。
 
-**Windows 上覆盖到一个持久位置**——把下面这段写进
-`%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`（该文件由 `dsh plugin --profile web add .` 生成，
-初始是 `[]`）：
+**Windows 上写到一个持久位置**——打开 `%USERPROFILE%\.dsh\profiles\<你实际在跑的 profile>\cordis.patch.yml`
+（该文件由 `dsh plugin --profile <profile> add .` 生成），**在现有列表后面追加**一条：
 
 ```yaml
 - id: mcp-coderag
   config:
     serverName: coderag
     transport: stdio
-    command: 'C:\Users\<你>\miniconda3\envs\coderag\python.exe'
+    command: 'C:\Users\<你>\dsh-coderag-venv\Scripts\python.exe'
     args: ['-c', 'import dsh_coderag.server as s; s.run()']
     env:
       CODERAG_ROOT: 'C:\path\to\your\workspace'
-      CODERAG_MAX_TOKENS: '8000'
 ```
 
-改完用 `dsh --profile web --dump-config`（在配好的 `DSH_HOME` 下）确认组合结果。
+> **⚠️ 这个文件不是你一个人的，也不是只属于本插件。** 它是该 profile 的**用户层**，DSH 自己也会往里
+> 写东西——本机实测它里面本来就有 `ui-settings-general`（欢迎提示版本）与 `agent-preset-registry`
+> （agent preset）两条。所以：
+> **只能「追加」一条 `- id: mcp-coderag`，绝不能把整个文件替换成上面这段**——替换会连带删掉 DSH 的设置。
+> 本文件是**顶层 YAML 数组**，追加就是在这个数组末尾再加一个 `- id: ...` 元素。
+> 改完用 `& $dsh --profile <profile> --dump-config` 确认组合结果里同时还有 `# == dsh-coderag`。
 
-> **覆盖时注意：DSH 的 patch 是「整体替换」而不是深合并**——DSH schema 自己的说明就是
+> **覆盖 `mcp-coderag` 时注意：DSH 的 patch 是「整体替换」而不是深合并**——DSH schema 自己的说明就是
 > *"A patch config replaces the whole config."*。**实测**：只写 `config.env` 一项去覆盖
 > `mcp-coderag` 时，`serverName` / `transport` / `args` 会**从结果里消失**。所以上面那个例子把要保留的
-> 字段**全部重写**了一遍；如果你还改了 `cordis.patch.yml` 里其它 `env` 项，也要一并抄过来。
+> 字段**全部重写**了一遍；仓库根 `cordis.patch.yml` 里那条 `env` 的其它项（如 `CODERAG_MAX_TOKENS`）
+> 若你也想要，同样要抄进来。
 
 | 变量 | 作用 | 默认 | **生效情况** |
 |---|---|---|---|
