@@ -157,7 +157,7 @@
 - 手法：一律**提取私有 helper**（如 `_search_sql`、`_TraceAcc`、`_plan_group`、`_IndexFacts`、
   `_run_options`），公开 API 与行为不变；拆分后 445 条测试与 L1/L2 门禁全绿。
 
-## 编码规范欠账：没有 Windows 风格路径的测试（发现于 T4-10）
+## ✅ 已还清：没有 Windows 风格路径的测试（发现于 T4-10，由 **T6-03** 还清）
 
 - 现象：`AGENTS.md` C-07 要求「单元测试覆盖 Windows 风格输入」，但 `tests/` 里**一个都没有**
   （搜 `C:\`、`PureWindowsPath`、`ntpath`、反斜杠路径输入均无命中）。
@@ -166,6 +166,12 @@
 - 建议：补一条参数化测试，喂入 Windows 风格（如 `a\\b\\c.py`）与绝对路径，断言入库路径为正斜杠且相对；
   可复用 `tests/test_walker.py` 的 `tmp_path` 模式。
 - 补齐后同步删掉 `AGENTS.md` C-07 行的「当前未达标」标注。
+- **落地（`T6-03`，2026-09-30）**：`tests/test_path_filter.py` 新增
+  `test_stored_paths_are_forward_slashed_and_workspace_relative`（把 `files.path` 钉成
+  `pkg/sub/util.py`，并断言无反斜杠、无盘符、非绝对路径——这条在 Windows 上就是真正的 C-07 检查）
+  与 `test_path_filter_accepts_windows_style_separators`（参数化 `pkg/sub` / `pkg\\sub` / `.\\pkg\\sub`，
+  用 `PureWindowsPath` 构造 Windows 风格输入；`skipif` 非 Windows，因为反斜杠只在 Windows 上作为分隔符解析）。
+  `AGENTS.md` 的 C-07 行已同步去掉「当前未达标」。**Windows 全量套件 568 passed / 2 skipped**。
 
 ## ✅ 已解决：A 批回放用例的条数断言停在 10（发现于 T5-01，2026-09-23 由用户指示修复）
 
@@ -355,14 +361,14 @@
 - 另一条相关的未还欠账：`C-07`「单元测试覆盖 Windows 风格输入」当前未达标（本文件有专条），
   归 `T6-03` 一并还清。
 
-## Windows 基线上的既有测试失败（发现于 `T6-02`，**未顺手修**）
+## Windows 基线上的既有测试失败（发现于 `T6-02`，**T6-03 已处置 (a)(b)(c)**）
 
 > 判定方法：把 HEAD（`dc7d971`）签出到独立 worktree，用**同一个解释器**跑同一批用例——
-> 下面三条在 HEAD 上**同样失败**，即与本任务的改动无关。完整命令与输出见
+> 下面三条在 HEAD 上**同样失败**，即与 `T6-02` 的改动无关。完整命令与输出见
 > `PROJECT.md` §6.7 的 `T6-02` 行。`T6-03` 的出口判据是「Windows 上全量通过且**无 xfail**」，
-> 所以这三条必须先有处置口径，否则 `T6-03` 无法达标。
+> 所以这三条必须先有处置口径。
 
-### (a) 可选向量依赖 `numpy` 不在任何已声明的 extra 里（6 条用例 + `mypy`）
+### ✅ (a) 可选向量依赖 `numpy` 不在任何已声明的 extra 里 —— 已由 `T6-03` 按 2026-09-30 裁决处置
 
 - 现象：在没有 numpy 的解释器上，`tests/test_vectors.py` 与 `tests/test_vector_search.py`
   **收集阶段就失败**（`ModuleNotFoundError: No module named 'numpy'`，`--ignore` 之外无解）；
@@ -374,35 +380,37 @@
   已按 2026-09-25 的发布范围裁决**移出 2.0.0**（见本文件「四个 M5 任务因发布范围调整而出范围」），
   于是**没有任何声明途径**能装出跑这些测试所需的 numpy。macOS 侧一直是**手工**
   `pip install numpy` 才跑通的（`T3-09` 的备注即如此记录）。
-- 后果：与 `T6-04` 的判据直接冲突——`T6-04` 要求「**默认态解释器里没有 numpy**（`RL-10`）」，
-  而全量套件又需要 numpy。这两个要求**不能同时满足**，必须由所有者选一个口径。
-- 建议（三选一，需裁决）：
-  1. **恢复 `semantic` extra**（只含 numpy），把跑向量测试写成显式的可选步骤，
-     `T6-03`/`T6-04` 的「全量通过」以默认路径为准并在文档里写明排除项；
-  2. 给这 6 条用例加 `pytest.importorskip("numpy")`，让缺 extra 时**跳过**而不是失败
-     （注意：跳过不等于通过，`T6-03` 的判据得接受 skip）；
-  3. 在 CI/开发环境里**显式**装 numpy，并接受「默认态解释器因此含 numpy」——
-     这会**直接违反** `RL-10` 对 `T6-04` 的要求，不推荐。
+- **处置（`T6-03`，2026-09-30 项目所有者裁决，方案 A）**：恢复
+  `semantic = ["numpy>=1.26"]`（与 `ADR-16` §3.2 冻结的内容逐字一致）——这不是放宽 `RL-10`，
+  而是修复一处既有的不自洽：`RL-10` 原文要求"向量只能是**可选的 extra**"，而 extra 当时并不存在。
+  `dependencies` / bundle tarball / `install.sh` 默认路径 / README 前置条件一律不动。
+  `T6-04` 的「默认态解释器里没有 numpy」同时改为**过渡式断言**（在一次性全新解释器里跑默认安装后
+  断言 `import numpy` 失败）——那一条原本是**代理指标**：它验的是状态而非因果，既会因别处装了 numpy
+  而假红，也会在 `--skip-install` 时假绿。详见 `PROJECT.md` §6.5.1 的 2026-09-30 裁决。
+- 实测后果（隔离 venv 量出，conda 环境当时保持无 numpy）：全量 `6 failed, 528 passed` →
+  **`564 passed, 2 skipped`**；那三个向量模块 **38 passed**；`mypy --strict src/` 由 1 error 变干净。
+- 仍保留：`ADR-16` §3.2 的 `CODERAG_WITH_SEMANTIC` 安装开关未实现（`T5-15` 仍在范围外）；
+  可选路径目前的安装入口只有 `pip install -e ".[semantic]"`。
 
-### (b) `tests/test_walker.py::test_walk_recurses_into_subdirectories` 断言里假定正斜杠
+### ✅ (b) `tests/test_walker.py::test_walk_recurses_into_subdirectories` 断言里假定正斜杠 —— 已由 `T6-03` 修
 
 - 现象：`assert 'pkg/sub/util.js' in ['app.ts', 'lib.c', 'main.py', 'pkg\\sub\\util.js']`。
 - 根因：**测试自己的 helper** 用了 `str(path.relative_to(base))`
   （`tests/test_walker.py` 的 `_relative_paths`），在 Windows 上产出反斜杠。
   生产代码是合规的（`walker.py` / `indexer.py` 等 6 处用 `Path.as_posix()` 入库），
   即这条与 `C-07` 是同一主题的**测试侧**版本。
-- 建议：`_relative_paths` 改成 `path.relative_to(base).as_posix()`，并顺带补 `C-07` 要求的
-  Windows 风格**输入**用例——两条都归 `T6-03`。
+- 修法：`_relative_paths` 改用 `path.relative_to(base).as_posix()`。断言本身一字未改（`T-08`）。
 
-### (c) `tests/test_metrics.py::test_wilson_interval_stays_inside_zero_and_one_at_the_boundaries`
+### ✅ (c) `tests/test_metrics.py::test_wilson_interval_stays_inside_zero_and_one_at_the_boundaries` —— 已由 `T6-03` 修实现
 
 - 现象：`wilson_interval(0, 10).low` 在 Windows 上是 `2.7755575615628914e-17`，断言要求 `== 0.0`；
   macOS 的既有证据（`T3-04`）记的是 `0/10 → [0, 0.277533]`，即当时恰好是精确的 `0.0`。
-- 根因：Wilson 下界在 `p_hat = 0` 时数学上恰为 0，实现按 `center - half_width` 算，
-  浮点相减可能留下约 `2.8e-17` 的残差——**平台/`libm` 相关**，不是逻辑错误。
-- 建议：断言改为容差比较（`abs(low) < 1e-12`）或把区间端点显式 clamp 到 `[0, 1]`。
-  属 `T6-03`「只修平台相关失败，不放宽任何断言」的边界情形——**clamp 实现**比放宽容差更符合
-  `T-08`，建议采用 clamp。需要所有者确认哪个口径。
+- 根因：Wilson 下界在 `p_hat = 0` 时数学上恰为 0（`center` 与 `margin` 相等），实现按
+  `center - margin` 算，两条式子走了不同的浮点路径，差值落在区间**内部**约 `2.8e-17`——
+  `max(0.0, ...)` 拦不住，因为它只防负数。**平台/`libm` 相关**，不是逻辑错误。
+- 修法：在**实现**里把两个精确端点钉住（`successes == 0` → `low = 0.0`；`successes == total` →
+  `high = 1.0`），与 `Interval` 自己 docstring 的「clamped to [0, 1]」契约一致。
+  **没有放宽断言**（`T-08`）——`== 0.0` 与 `== 1.0` 原样保留，这正是 `T6-03` 要求的修法。
 
 ## 薄包装的 LF 保证目前只靠「写入时是 LF」（发现于 `T6-02`，**未顺手修**）
 

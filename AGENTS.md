@@ -93,7 +93,7 @@
 | **C-04** | **函数单一职责**：一个函数只做一件事。超过 50 行必须拆分 | 人工审阅 + AST 统计（`ast.walk` 量 `end_lineno - lineno + 1`）；当前 **0 个函数 > 50 行** |
 | **C-05** | **禁止可变默认参数**（`def f(x=[])`） | `ruff` 规则 B006 |
 | **C-06** | **所有文件路径必须用 `pathlib.Path`**，禁止字符串拼接路径 | 代码审查 |
-| **C-07** | **所有跨平台路径在存入数据库前必须转成正斜杠的工作区相对路径** | 单元测试覆盖 Windows 风格输入。**当前未达标**：代码里 6 处 `as_posix()` 确实做了转换，但**一个 Windows 风格输入的测试都没有**，登记在 `docs/backlog.md` |
+| **C-07** | **所有跨平台路径在存入数据库前必须转成正斜杠的工作区相对路径** | 单元测试覆盖 Windows 风格输入。**已达标（`T6-03`，2026-09-30）**：代码里 6 处 `as_posix()` 负责转换，`tests/test_path_filter.py` 的 `test_stored_paths_are_forward_slashed_and_workspace_relative` 把入库路径钉成 `pkg/sub/util.py`（无反斜杠、无盘符、非绝对），`test_path_filter_accepts_windows_style_separators` 覆盖 `pkg\sub` 形式的输入 |
 | **C-08** | 行长度上限 100 字符 | `ruff` |
 | **C-09** | 使用 `from __future__ import annotations` 让注解延迟求值 | 每个模块首行 |
 
