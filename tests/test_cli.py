@@ -445,3 +445,23 @@ def test_search_uses_the_token_budget_from_the_environment(
 
     assert len(full) > 1, full
     assert 0 < len(trimmed) < len(full), (len(full), len(trimmed))
+
+
+def test_interrupt_is_reported_as_unfinished(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """T6-23: Ctrl+C must say the run is unfinished, and how to resume it."""
+
+    def interrupt(*args: object, **kwargs: object) -> int:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_run_index", interrupt)
+
+    code = cli.main(["index", str(tmp_path)])
+
+    payload = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+    assert code == cli.EXIT_FAILED
+    assert payload["code"] == "INDEX_INTERRUPTED"
+    assert "未完成" in payload["message"]
+    assert "增量" in payload["hint"], "a re-run resumes; say so"
+    assert "CODERAG_EXTRA_EXTENSIONS" in payload["hint"], "and warn about the wipe risk"

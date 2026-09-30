@@ -206,8 +206,12 @@ def _write_batches(
     return total_chunks, written_ms
 
 
-def _log_index_error(run_started: float, exc: Exception) -> None:
-    """Log the structured failure event for an aborted indexing run."""
+def _log_index_error(run_started: float, exc: BaseException) -> None:
+    """Log the structured failure event for an aborted indexing run.
+
+    BaseException, not Exception: a Ctrl+C aborts a run too, and the log should
+    say so (T6-23). Only the class name is recorded - never a message or content.
+    """
     log_event(
         "index_error",
         level="error",
@@ -290,6 +294,7 @@ def index_sync(
     db_path = base / ".coderag" / "index.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = open_index(db_path)
+    _mark_not_ready(connection, base)
     workers, batch_size, check = _run_options(config, should_cancel)
     phase_ms = {"walk": 0.0, "prepare": 0.0, "write": 0.0, "cleanup": 0.0}
     run_started = time.monotonic()
@@ -312,7 +317,9 @@ def index_sync(
         return _report_index_done(
             base, report, total_chunks, redacted, phase_ms, run_started
         )
-    except Exception as exc:
+    except BaseException as exc:
+        # BaseException, not Exception: a Ctrl+C must still be logged, and the
+        # workspace is left not-ready either way (T6-23).
         _log_index_error(run_started, exc)
         raise
     finally:
@@ -612,6 +619,30 @@ def _mark_ready(connection: sqlite3.Connection, base: Path) -> None:
             " db_schema = excluded.db_schema,"
             " ready = excluded.ready,"
             " last_task_id = excluded.last_task_id,"
+            " updated_at = excluded.updated_at",
+            (str(base), SCHEMA_VERSION, int(time.time())),
+        )
+
+
+def _mark_not_ready(connection: sqlite3.Connection, base: Path) -> None:
+    """Clear the ready flag before a run starts (T6-23).
+
+    A run that is interrupted must not leave a workspace looking complete. Only a
+    finished run sets the flag, so clearing it here covers every way a run can end
+    early - Ctrl+C, a crash, a kill - including the case that used to slip through:
+    a run aborted after an earlier run had already marked the workspace ready.
+
+    The optional vector build and everything search does are untouched: search
+    reads the rows, not this flag, so an interrupted index stays searchable while
+    reporting itself as unfinished.
+    """
+    with connection:
+        connection.execute(
+            "INSERT INTO workspace_index (root, db_schema, ready, last_task_id, updated_at)"
+            " VALUES (?, ?, 0, NULL, ?)"
+            " ON CONFLICT(root) DO UPDATE SET"
+            " db_schema = excluded.db_schema,"
+            " ready = 0,"
             " updated_at = excluded.updated_at",
             (str(base), SCHEMA_VERSION, int(time.time())),
         )

@@ -37,7 +37,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dsh_coderag import __version__
-from dsh_coderag.config import ENV_MAX_FILES, ConfigError, load_config_for
+from dsh_coderag.config import (
+    ENV_EXTRA_EXTENSIONS,
+    ENV_MAX_FILES,
+    ConfigError,
+    load_config_for,
+)
 from dsh_coderag.sqlite_caps import FTS5_HINT, fts5_available
 from dsh_coderag.text import to_bigrams
 
@@ -713,6 +718,21 @@ def main(argv: list[str] | None = None) -> int:
         )
     except CliError as error:
         return report_error(error)
+    except KeyboardInterrupt:
+        # An interrupted index is unfinished, not broken: say so, and say what a
+        # re-run does - it resumes, but only within the whitelist in effect (T6-23).
+        return report_error(
+            CliError(
+                "INDEX_INTERRUPTED",
+                "操作被 Ctrl+C 中断，未完成。",
+                hint=(
+                    f"重跑同一条命令即可继续（索引是增量的）。两个变量要带上："
+                    f"{ENV_EXTRA_EXTENSIONS} 必须与上次一致，否则已入库的文件会被清掉；"
+                    f"索引状态会保持「未就绪」直到某次运行正常结束。"
+                ),
+                exit_code=EXIT_FAILED,
+            )
+        )
     except Exception as error:  # noqa: BLE001 - RL-09: no traceback may escape the CLI
         too_many = _as_too_many_files(error)
         if too_many is not None:

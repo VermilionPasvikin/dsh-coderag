@@ -69,3 +69,38 @@ def test_workspace_index_is_marked_ready(tiny_repo: Path) -> None:
     assert _query(tiny_repo, "SELECT ready, db_schema FROM workspace_index") == [
         (1, SCHEMA_VERSION)
     ]
+
+
+def test_interrupted_index_stops_claiming_the_workspace_is_ready(
+    tiny_repo: Path,
+) -> None:
+    """T6-23: a Ctrl+C after an earlier completed run used to leave ready = 1.
+
+    Measured on a real workspace: 80,437 of 103,002 files indexed at the moment of
+    the interrupt, while the state row still said ready - so a fifth of the
+    workspace looked searchable-complete.
+    """
+    index_sync(tiny_repo)
+    assert _query(tiny_repo, "SELECT ready FROM workspace_index") == [(1,)]
+
+    calls = {"count": 0}
+
+    def interrupt_on_second_check() -> bool:
+        calls["count"] += 1
+        if calls["count"] > 1:
+            raise KeyboardInterrupt
+        return False
+
+    with pytest.raises(KeyboardInterrupt):
+        index_sync(tiny_repo, should_cancel=interrupt_on_second_check)
+
+    assert _query(tiny_repo, "SELECT ready FROM workspace_index") == [(0,)]
+
+
+def test_a_cancelled_run_also_does_not_claim_readiness(tiny_repo: Path) -> None:
+    """Cancellation is a normal outcome: no ready flag, and no cleanup either."""
+    index_sync(tiny_repo)
+
+    index_sync(tiny_repo, should_cancel=lambda: True)
+
+    assert _query(tiny_repo, "SELECT ready FROM workspace_index") == [(0,)]
