@@ -421,3 +421,35 @@
   `sh`/`bash` 对 `\r` 的容忍度不一致（本机 `bash -n` 能过，但 `./script.sh` 的 shebang 解析会失败）。
 - 建议：加 `.gitattributes` —— `*.sh text eol=lf` 与 `scripts/dsh text eol=lf`，让**每个平台**都签出 LF；
   这样 `T6-03a` 才能加一条稳定的「脚本无 CRLF」测试。属独立小改动，需所有者确认是否纳入 M6。
+- **后续实测（2026-09-30，`T6-05` 复核）把这条的严重度下调**：`git ls-files --eol` 显示三个脚本的
+  **blob 都是 `i/lf`**（仓库侧本来就是对的），CRLF 只出现在本机工作树；而 **Git for Windows 的 bash
+  容忍 CRLF**——实测 `./scripts/dsh --version` 在 CRLF 下正常打印 `0.1.5-rc.1`（走钉版本的 npx）。
+  所以「CRLF 会让 sh/bash 报错」在**能跑这两个脚本的那个 shell 上并不成立**。`*.sh text eol=lf`
+  仍是一个便宜的加固（能让「脚本必须 LF」在每个平台都可断言），但**已不再是隐患**。
+
+## 环境变量配置面在 MCP 路径上不生效（发现于 `T6-05` 复核，2026-09-30，**未顺手修**）
+
+- **现象（实测）**：`README.md` 的配置表曾承诺 5 个上限变量，但通过 MCP 使用时**没有一个起作用**：
+
+  | 变量 | 实测 | 结果 |
+  |---|---|---|
+  | `CODERAG_MAX_TOKENS` | 子进程环境设 `1` 与设 `8000`，同一条 `code_search` 输出**逐字相同**（6 hits、无省略提示） | 不生效 |
+  | `CODERAG_MAX_FILES` | 设为 `1`，6 个文件的工作区 `index_status` 仍是 `state: ready, total_files: 6` | 不生效 |
+  | `CODERAG_MAX_FILE_BYTES` | 设为 `20` 字节，48 字节的文件仍被索引（`total_files: 2`、`skipped.count: 0`） | 不生效 |
+  | `CODERAG_BATCH_SIZE` / `CODERAG_MAX_WORKERS` | 未单独观测（它们只改**怎么做**、不改结果） | 源码判定不生效 |
+
+- **根因（源码）**：`config.py` 确实把这 5 个读进 `IndexConfig`，但
+  ① `server.py:295` 建索引时把 `index_sync` **裸传**给 `TaskManager.start(...)`，**不带配置**；
+  ② `load_config()` 全项目只被调用一次（`server.py:155`），且**只取 `.root`**；
+  ③ `server.py:218` 的 `max_tokens` 是**硬编码默认 4000**，不读 `CODERAG_MAX_TOKENS`。
+  `__main__.py:446` 的 `index_sync(Path(args.path))` 同样不带配置。
+- **后果**：`cordis.patch.yml` 里那条 `CODERAG_MAX_TOKENS`（还专门为「`TOKEN` 会被清洗」写了注释）
+  以及 README 承诺的文件数/文件大小/并发上限**目前都是空承诺**——想用小机器保护自己的用户拿不到保护。
+  注意这**不是**「静默截断」（`RL-08`）：上限根本没被应用，没有截断发生。
+- **已做的处置**：`README.md` 的表格照实改写成「当前是否真的生效」四列，并指出**要限检索预算请用
+  MCP 工具参数 `max_tokens`**；本任务**不修代码**（`T6-05` 的产出文件只有文档）。
+- **建议修法**（需所有者立任务）：把 `load_config()` 的结果传进建索引路径
+  （`TaskManager(...).start(target, lambda p: index_sync(p, config=load_config()))` 或等价改法），
+  并让 `_code_search` 的默认预算取 `load_config().max_tokens`。补 3 条测试（每个上限一条，断言
+  「设小了就真的失败/跳过」）。**这也解释了 `T2-21` / `T2-11` 的单测为什么全绿却端到端无效**：
+  它们直接调 `index_sync(config=...)`，绕过了没传配置的那条路。
