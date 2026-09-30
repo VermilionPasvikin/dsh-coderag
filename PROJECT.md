@@ -1411,6 +1411,25 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 - 边界：**不删除**这两个 shell 脚本——macOS / Linux 的既有实证记录引用它们
   （`docs/m4-install-verification.md` 等），删掉会让那些记录失去可复现性。它们保留，只是不再承载逻辑。
 
+**裁决（2026-09-30，项目所有者）：恢复可选 extra `semantic`，默认路径判据由「状态」改为「过渡」**
+
+- 触发：`T6-01` 的 Windows 基线实测发现，本机解释器上跑全量套件时有 **6 条向量用例失败或无法收集**
+  （`tests/test_vectors.py`、`tests/test_vector_search.py`、`tests/test_index_vectors.py`），
+  而 `T6-04` 又要求「默认安装的解释器里没有 numpy」——**这两个要求不能同时满足**。
+- 根因有两层：① `RL-10` 原文要求「向量只能是**可选的 extra**」，但 `T5-15`（extra `semantic` +
+  `install.sh` 的 `CODERAG_WITH_SEMANTIC` 开关）已随 2.0.0 的发布范围裁决**移出**，于是
+  `optional-dependencies` 只剩 `dev`——**numpy 失去了声明住所**，macOS 侧一直靠手工
+  `pip install numpy` 才跑得动（`T3-09` 的备注即如此记录）。② `T6-04` 那一句是从 `T5-16` 原样抄来的，
+  它验的是**状态**（解释器里有没有 numpy）而不是**因果**（默认安装这条路径做了什么）——所以它既会
+  因别处装了 numpy 而假红，也会在 `--skip-install` 或 pip 静默失败时假绿。
+- **裁决**：① 恢复 `pyproject.toml` 的 `semantic = ["numpy>=1.26"]`，与 `ADR-16` §3.2 冻结的内容逐字一致；
+  `dependencies` / bundle tarball / `install.sh` 默认路径 / README 安装前置条件**一律不动**，
+  `RL-10` 的其余条款不受影响。② `T6-04` 的判据改为**过渡式**：在一次性全新解释器里走默认安装路径，
+  断言 `import numpy` 失败——比原来的状态式更强，且不会因环境里恰好有 numpy 而假红。③ 本部分工作
+  **归属 `T6-03`**（含 `pyproject.toml`、本节的判据改写与 §6.8 的 `RL-10` 强制点同步）。
+- 仍保留的欠账：`ADR-16` §3.2 的 `CODERAG_WITH_SEMANTIC` 安装开关**未实现**（`T5-15` 仍在范围外）；
+  可选路径目前的安装入口只有 `pip install -e ".[semantic]"`。
+
 **⚠️ 已知的、真实的阻碍（开工前就必须承认）**：
 
 - 依赖含原生扩展（`tree-sitter`、`tree-sitter-language-pack`），**Windows 的 wheel 是否齐备未经核实**；
@@ -1430,7 +1449,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | T6-01 | **跨平台兼容性基线审计**（先取证、再改代码）：逐平台核四件事——① 依赖 wheel 在 **`win_amd64`** 上是否齐备（`tree-sitter` / `tree-sitter-language-pack` / `mcp` / `pathspec`），并记录 Linux 侧的对应结论；② 目标解释器的 `sqlite3` 是否带 **FTS5**；③ `tree-sitter-language-pack` 能否在**无网络**条件下给出已编译的 grammar；④ **MCP 子进程能否被拉起**——`cordis.patch.yml` 的 `command` 是解释器路径（`CODERAG_PYTHON` 可覆盖成 Windows 形态）、`args` 是 `-c`，**不含 POSIX 假设**，这是全链路里**唯一天然跨平台**的一环。**逐条写清「已核实（含实际命令与输出）」与「未验证」，并按平台分开记录**，不得用推断代替实测；两个外壳脚本的 POSIX 依赖只**登记**，修法归 `T6-02` | `docs/m6-crossplatform-baseline.md` | `test -f docs/m6-crossplatform-baseline.md` 且 `grep -c -e "已核实" -e "未验证" docs/m6-crossplatform-baseline.md` 再跑 `python3 scripts/verify-plan.py .` | 文件存在；两项各自 `≥1`（已核实与未验证**分区列出**且**按平台标注**）；四项事实逐条有结论；**未实测的平台显式标为未验证**；门禁全绿 | T5-17 | 2h |
 | T6-02 | **Python CLI 成为唯一跨平台入口**（本里程碑的核心）：在 `src/dsh_coderag/__main__.py` 新增 **`doctor`**（探测解释器、校验 Python 版本落在 `requires-python` 区间、预检 SQLite FTS5、打印可复制的 `CODERAG_PYTHON` 值）与 **`install-deps`**（`pip install` + 装后自检：FTS5 可用 + 中文 bigram 往返）两个子命令，逻辑**从 `scripts/install.sh` 平移**而非重写；`scripts/install.sh` 与 `scripts/dsh` **退化为薄包装**（只做"找到解释器 → 转发"，逻辑单点，避免两套实现永久分叉）。**默认路径零向量依赖**（`RL-10` 不变）；新增子命令必须有 `tests/` 覆盖（`T-01`），错误一律结构化 + 退出码（`RL-09` 同源），版本区间**不得硬编码**（读 `pyproject.toml`，`RL-07`）；脚本文件必须以 **LF** 换行（CRLF 会让 `sh` / `bash` 报错） | `src/dsh_coderag/__main__.py`, `scripts/install.sh`, `scripts/dsh` | `/opt/anaconda3/envs/forBSH/bin/python -m dsh_coderag doctor --help` 且 `/opt/anaconda3/envs/forBSH/bin/python -m dsh_coderag install-deps --help` 且 `grep -c -e CODERAG_PYTHON -e "import dsh_coderag" scripts/install.sh scripts/dsh` 再跑 `python3 scripts/verify-plan.py .` | 两个子命令都能跑出帮助且退出码 `0`；两个 shell 脚本**都只做转发**（`scripts/install.sh` 与 `scripts/dsh` 各自 **≤ 40 行**，且不再自带 pip / 依赖清单）；依赖清单只在 `pyproject.toml` 出现一次（无第二份）；门禁全绿 | T6-01 | 3h |
 | T6-03 | **Windows 上跑通测试套件并修平台相关失败**：在 **Windows** 解释器上跑全量 `pytest`，逐条归因并修掉平台相关失败；**同一提交内**在 macOS 上复跑确认零退化。**已知三类**：① **路径规范化**——`C-07` 要求跨平台路径入库前转正斜杠相对路径（`indexer.py` / `walker.py` / `chunker.py` / `searcher.py` 的 `as_posix()`），而 Windows 风格输入的测试**一个都没有**，本任务一并还清（`docs/backlog.md`）；② **行尾**——CRLF 输入下 chunk 行号偏移（需实测确认是否真存在）；③ **文件句柄**——WAL 的 `-wal`/`-shm` 未关闭时 `DeleteFile` 失败（`TESTING.md` §6 已警示），必要时收紧 fixture 的关闭顺序。**只修平台相关失败，不放宽任何断言**（`T-08`） | （改动落在既有模块内，无新增源文件）`tests/test_path_filter.py` | `/opt/anaconda3/envs/forBSH/bin/python -m pytest` 再跑 `python3 scripts/verify-plan.py .` | Windows 上全量通过且**无 xfail**；**同一份代码在 macOS 上仍全量通过**（回归口径同 `S6`）；新增至少一条 Windows 风格路径用例（`PureWindowsPath` / `C:\` / 反斜杠）断言入库路径为**正斜杠相对路径**；`C-07` 欠账在 `docs/backlog.md` 标记还清；门禁全绿 | T6-01 | 3h |
-| T6-04 | **Windows 端到端冒烟**（用户指定）：在**全新 `DSH_HOME` + 全新 profile** 里——（a）用 `T6-02` 的 CLI（`doctor` + `install-deps`）装好引擎，确认**默认路径零向量依赖**（`RL-10`）；（b）`dsh plugin add .` 后**没有** `ERR_PNPM_...` 之类的静默跳过，`--dump-config` 里出现 `# == dsh-coderag`；（c）在 `examples/demo-workspace` 的干净副本上跑一次 `code_search`，命中目标文件；（d）记录 PowerShell 与 `pwsh` 两代终端的差异、以及 `doctor` 打印的 `CODERAG_PYTHON` 值。**不修改任何已有文件**——产物是副本与一份报告。**macOS 侧不退化为前提**：同一次冒烟在 macOS 上复跑一遍，两平台结论并列 | `docs/m6-windows-smoke.md` | `test -f docs/m6-windows-smoke.md` 且 `grep -c -e "code_search" -e "dump-config" -e "CODERAG_PYTHON" docs/m6-windows-smoke.md` 再跑 `python3 scripts/verify-plan.py .` | 文件存在；三项各自 `≥1`；默认态解释器里**没有** numpy（`RL-10`）；`code_search` 返回 `status: ready` 且含目标文件与行号；安装退出码 `0`；**Windows 与 macOS 的结论并列可查**；门禁全绿 | T6-02, T6-03 | 2h |
+| T6-04 | **Windows 端到端冒烟**（用户指定）：在**全新 `DSH_HOME` + 全新 profile + 一次性全新解释器**里——（a）用 `T6-02` 的 CLI（`doctor` + `install-deps`）装好引擎，确认**默认路径零向量依赖**（`RL-10`）；（b）`dsh plugin add .` 后**没有** `ERR_PNPM_...` 之类的静默跳过，`--dump-config` 里出现 `# == dsh-coderag`；（c）在 `examples/demo-workspace` 的干净副本上跑一次 `code_search`，命中目标文件；（d）记录 PowerShell 与 `pwsh` 两代终端的差异、以及 `doctor` 打印的 `CODERAG_PYTHON` 值。**不修改任何已有文件**——产物是副本与一份报告。**macOS 侧不退化为前提**：同一次冒烟在 macOS 上复跑一遍，两平台结论并列 | `docs/m6-windows-smoke.md` | `test -f docs/m6-windows-smoke.md` 且 `grep -c -e "code_search" -e "dump-config" -e "CODERAG_PYTHON" docs/m6-windows-smoke.md` 再跑 `python3 scripts/verify-plan.py .` | 文件存在；三项各自 `≥1`；**默认安装路径不装 numpy**——在一次性全新解释器里跑默认安装后 `import numpy` 必须失败（**过渡式断言**，不是「当前解释器里没有 numpy」；见 §6.5.1 的 2026-09-30 裁决），且 `dependencies` 仍不含 numpy / httpx / 向量库；`code_search` 返回 `status: ready` 且含目标文件与行号；安装退出码 `0`；**Windows 与 macOS 的结论并列可查**；门禁全绿 | T6-02, T6-03 | 2h |
 | T6-05 | **README / 架构文档的平台对齐**：把 `README.md` 现有**纯 Unix** 的安装章节改为**跨平台**写法（`git clone` → Python CLI 的 `doctor` / `install-deps` → `dsh plugin add`；POSIX 专用的 `export` / `command -v` 与 `./scripts/dsh` 标注为「macOS / Linux 用法」并给出 Windows 等价形态）；`docs/architecture.md` 的「验证环境」由**只有 macOS** 改为**实测过的平台清单**——**未实测的平台不得写进去**；`docs/m4-install-verification.md` 的「非 macOS / 非 conda」限制按 `T6-04` 的实测结论收窄或保留。**证据只取 `T6-01`/`T6-04` 的实际输出**（`AGENTS.md` §5.1：验收命令不说谎） | `README.md`, `docs/architecture.md`, `docs/m4-install-verification.md` | `grep -c -e Windows -e PowerShell README.md` 且 `grep -c Windows docs/architecture.md` 且 `grep -c "只发布在 GitHub" README.md` 再跑 `python3 scripts/verify-plan.py .` | README 的 Windows 内容 `≥2` 处、`docs/architecture.md` `≥1` 处；README 的安装章节**不再暗示只有 POSIX**；**发布状态那一段仍在**（`2.0.0` 仅 GitHub tag/release、不发布 PyPI/npm，2026-09-25 裁定）；两份文档的平台表述与实测一致、无「照做即可」的未验证步骤；门禁全绿 | T6-04 | 2h |
 
 ---
@@ -1697,7 +1716,7 @@ T6-05  ← T6-04
 | RL-07 | T2-10 | 禁止硬编码资源参数 |
 | RL-08 | T2-11, T2-21 | 禁止静默截断 |
 | RL-09 | T1-13, T2-22 | 禁止让异常冒泡成 `isError` |
-| RL-10 | T3-10, T5-15, T5-16 | **改写后**（旧表述"决策门前禁止 embedding"的使命已由 `T3-07` 完成）：向量不得进入默认路径或必需依赖——`dependencies`/tarball/`install.sh` 默认路径零向量依赖（强制于 `T5-15`），未配置时逐条回退纯 BM25（强制于 `T3-10`），默认安装的解释器里没有 numpy（强制于 `T5-16`）；形态冻结于 `ADR-16` §1/§3.2/§7.1 |
+| RL-10 | T3-10, T6-03, T6-04 | **改写后**（旧表述"决策门前禁止 embedding"的使命已由 `T3-07` 完成）：向量不得进入默认路径或必需依赖——`dependencies`/tarball/`install.sh` 默认路径零向量依赖（强制于 `T6-03`：`semantic` 是**可选** extra、numpy 有声明住所，而 `dependencies` 里始终没有 numpy），未配置时逐条回退纯 BM25（强制于 `T3-10`），**默认安装路径不装 numpy**（强制于 `T6-04`：一次性全新解释器里跑默认安装后 `import numpy` 必须失败）；形态冻结于 `ADR-16` §1/§3.2/§7.1。原强制点 `T5-15`/`T5-16` 已随发布范围**移出 2.0.0**，本条自 2026-09-30 起由 M6 的 `T6-03`/`T6-04` 强制 |
 | RL-11 | *全局* | 提交纪律：工作区干净、一任务一提交 |
 | S1 | T3-04, T3-06 | 成功标准：检索本身有效（Success@5 ≥ 0.80） |
 | S2 | T3-04, T3-06 | 成功标准：排序质量合格（MRR ≥ 0.60） |
