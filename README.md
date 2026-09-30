@@ -89,6 +89,12 @@ dsh-coderag 是给 DeepSeek Harness（DSH）用的**代码库检索引擎**，�
 > 因此安装只能走下面这条「克隆」路径；`pip install dsh-coderag` 与 `npm i dsh-coderag` 都**不可用**。
 > **当前版本 `2.0.0` 同样只在 GitHub 上以 tag / release 发布**（`v2.0.0`），PyPI 与 npm 上没有任何版本。
 
+> **平台状态：Windows 尚未验证。** 下面所有命令都是 **macOS / Linux（POSIX shell）** 形态——
+> `scripts/dsh` 是 `#!/bin/sh`、`scripts/install.sh` 是 `bash`，还用到 `export`、`command -v` 与管道 `grep`，
+> **在 PowerShell / CMD 里不能直接用**。在 Windows 上请改用 `scripts/install.ps1` 与 `scripts/dsh.ps1`
+> （对应上面两个脚本的 PowerShell 版本）。在 Windows 实测基线补完之前，本项目**不声称支持 Windows**；
+> 任务与判据见 [`PROJECT.md`](PROJECT.md) §6.5.1（`T6-01`–`T6-05`）。
+
 ```sh
 # 1. 克隆（cordis.patch.yml 在仓库里，必须克隆）
 git clone https://github.com/VermilionPasvikin/dsh-coderag.git

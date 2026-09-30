@@ -203,3 +203,7 @@ from __future__ import annotations
   （L1 的 `natural` 桶）——这条限制没有因为本任务而改变。
 - **从 registry 安装**：只验证了 `add .`（本地路径）；npm 包尚未发布。
 - **非 macOS / 非 conda**：Python 侧只在 forBSH（conda，Python 3.10.21）上实测过。
+  **后续状态（2026-09-25）**：这条限制**仍然有效**。Windows 已由项目所有者升为计划内目标
+  （`PROJECT.md` §6.5.1 的 M6，`T6-01`–`T6-05`），但**本文件记录的实测仍全部来自 macOS**；
+  Windows 侧的安装与端到端冒烟结论只以 `docs/m6-windows-baseline.md` / `docs/m6-windows-smoke.md`
+  为准，**在那两份报告落地并通过之前，这里不得改写成「已支持 Windows」**。
