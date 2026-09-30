@@ -139,3 +139,75 @@ async def test_code_search_finds_indexed_code(
     text = (await client.call_tool("code_search", {"query": "verify_token"})).content[0].text
     assert text.startswith("status: ready")
     assert "token.py" in text
+
+
+# ── the CODERAG_* tuning variables must reach the path the MCP server uses ──
+# The engine's own unit tests hand an IndexConfig straight to `index_sync` /
+# `search`, which is exactly the wiring the server used to skip: it called the
+# indexer bare and hardcoded the search budget. These three go through the
+# tools instead, so a regression in that wiring fails here.
+#
+# Each test drops CODERAG_ROOT so the server has to satisfy the config from the
+# `build_server(root=...)` argument it was built with.
+
+
+@pytest.mark.anyio
+async def test_code_index_honours_max_files_instead_of_indexing_past_it(
+    client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RL-08: over the limit the task fails and reports the real count."""
+    (tmp_path / "a.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def beta():\n    return 2\n", encoding="utf-8")
+    monkeypatch.delenv("CODERAG_ROOT", raising=False)
+    monkeypatch.setenv("CODERAG_MAX_FILES", "1")
+
+    payload = json.loads((await client.call_tool("code_index", {})).content[0].text)
+    final = await _wait_for_ready(client, payload["taskId"])
+
+    assert final["state"] == "failed"
+    assert final["message"] == snapshot(
+        "TooManyFilesError: workspace has 2 indexable files, over max_files=1"
+    )
+
+
+@pytest.mark.anyio
+async def test_code_index_honours_max_file_bytes(
+    client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file over the byte limit is skipped and counted, not indexed."""
+    (tmp_path / "small.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "big.py").write_text("y = '" + "A" * 40 + "'\n", encoding="utf-8")
+    monkeypatch.delenv("CODERAG_ROOT", raising=False)
+    monkeypatch.setenv("CODERAG_MAX_FILE_BYTES", "20")
+
+    payload = json.loads((await client.call_tool("code_index", {})).content[0].text)
+    final = await _wait_for_ready(client, payload["taskId"])
+    status = json.loads((await client.call_tool("index_status", {})).content[0].text)
+
+    assert final["state"] == "ready"
+    assert final["total_files"] == 1
+    assert status["skipped"] == snapshot({"count": 1, "reasons": {"too_large": 1}})
+
+
+@pytest.mark.anyio
+async def test_code_search_honours_max_tokens_as_its_default_budget(
+    client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a `max_tokens` argument the budget comes from the environment."""
+    for index in range(2):
+        (tmp_path / f"mod{index}.py").write_text(
+            f"def alpha{index}():\n    return 'zzzterm {index}'\n", encoding="utf-8"
+        )
+    monkeypatch.delenv("CODERAG_ROOT", raising=False)
+    monkeypatch.setenv("CODERAG_MAX_TOKENS", "1")
+    payload = json.loads((await client.call_tool("code_index", {})).content[0].text)
+    await _wait_for_ready(client, payload["taskId"])
+
+    text = (await client.call_tool("code_search", {"query": "zzzterm", "limit": 5})).content[0].text
+
+    assert text.startswith("status: ready")
+    assert "hits: 2" not in text, "the budget must have dropped one hit"
+    omitted = [line for line in text.splitlines() if "omitted by token budget" in line]
+    assert omitted == snapshot(
+        ["[1 more hit omitted by token budget; raise max_tokens to see it]"]
+    )

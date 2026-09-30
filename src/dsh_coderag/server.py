@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -19,13 +21,13 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from dsh_coderag import __version__, sqlite_caps
-from dsh_coderag.config import ConfigError, load_config
+from dsh_coderag.config import ENV_ROOT, ConfigError, IndexConfig, load_config
 from dsh_coderag.indexer import index_sync, open_index
 from dsh_coderag.render import render_search_result, render_status
 from dsh_coderag.searcher import OutlineSymbol, outline, search
 from dsh_coderag.taskman import TaskManager, TaskNotFoundError
 from dsh_coderag.types import ErrorCode, SearchStatus
-from dsh_coderag.walker import walk_with_report
+from dsh_coderag.walker import TooManyFilesError, walk_with_report
 
 SERVER_NAME = "coderag"
 
@@ -165,6 +167,21 @@ def build_server(root: Path | None = None) -> Server:
     return server
 
 
+def workspace_config(root: Path) -> IndexConfig:
+    """Return the tuning settings for the workspace this server is serving.
+
+    `load_config` needs `CODERAG_ROOT`, but this server may legitimately be
+    given the workspace another way (`build_server(root=...)`, used by tests and
+    by embedded callers), and the optional tuning variables must still apply
+    then. So the already-known root is filled in before reading them; an
+    explicitly set `CODERAG_ROOT` still wins, and a malformed value still raises
+    `ConfigError` rather than being silently replaced.
+    """
+    environ = dict(os.environ)
+    environ.setdefault(ENV_ROOT, str(root))
+    return load_config(environ)
+
+
 def _dispatch(
     name: str, arguments: dict[str, Any], root_provider: Callable[[], Path]
 ) -> str:
@@ -215,7 +232,7 @@ def _code_search(arguments: dict[str, Any], root: Path) -> str:
             code=ErrorCode.SEARCH_INVALID_QUERY,
         )
     limit = min(int(arguments.get("limit", 5)), 50)
-    max_tokens = int(arguments.get("max_tokens", 4000))
+    max_tokens = int(arguments.get("max_tokens", workspace_config(root).max_tokens))
     path_arg = arguments.get("path")
     path_filter = path_arg if isinstance(path_arg, str) and path_arg.strip() else None
     result = search(root, query, k=limit, max_tokens=max_tokens, path=path_filter)
@@ -292,7 +309,8 @@ def _code_index(arguments: dict[str, Any], root: Path) -> str:
         target = (root / relative).resolve()
     db_path = target.resolve() / ".coderag" / "index.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    task_id = TaskManager(db_path).start(target, index_sync)
+    config = workspace_config(root)
+    task_id = TaskManager(db_path).start(target, partial(index_sync, config=config))
     return json.dumps(
         {
             "taskId": task_id,
@@ -345,7 +363,21 @@ def _workspace_index_status(root: Path, db_path: Path) -> str:
         connection.close()
     if row is None:
         return _no_index_status()
-    skipped = walk_with_report(root).reasons
+    config = workspace_config(root)
+    try:
+        report = walk_with_report(
+            root, max_files=config.max_files, max_file_bytes=config.max_file_bytes
+        )
+    except TooManyFilesError as exc:
+        # The walk cannot finish under the configured limit, so report the real
+        # count with its own code instead of falling through to SEARCH_FAILED.
+        return render_status(
+            SearchStatus.ERROR,
+            message=str(exc),
+            code=exc.code,
+            hint=f"Raise CODERAG_MAX_FILES above {exc.actual_count}, or index a subdirectory.",
+        )
+    skipped = report.reasons
     return json.dumps(
         {
             "status": "ready" if row[0] else "indexing",

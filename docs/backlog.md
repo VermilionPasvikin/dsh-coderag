@@ -427,7 +427,10 @@
   所以「CRLF 会让 sh/bash 报错」在**能跑这两个脚本的那个 shell 上并不成立**。`*.sh text eol=lf`
   仍是一个便宜的加固（能让「脚本必须 LF」在每个平台都可断言），但**已不再是隐患**。
 
-## 环境变量配置面在 MCP 路径上不生效（发现于 `T6-05` 复核，2026-09-30，**未顺手修**）
+## 环境变量配置面在 MCP 路径上不生效（发现于 `T6-05` 复核，2026-09-30；**已由 `T6-07` 修复**）
+
+> **状态：已修复（`T6-07`，2026-09-30）。** 修法与验收见下；本条目保留为「症状 → 根因 → 修法」的记录，
+> 因为它是「单测全绿但端到端无效」这一类缺陷的样本，且 `docs/` 里曾以它为已知限制引用过。
 
 - **现象（实测）**：`README.md` 的配置表曾承诺 5 个上限变量，但通过 MCP 使用时**没有一个起作用**：
 
@@ -448,8 +451,15 @@
   注意这**不是**「静默截断」（`RL-08`）：上限根本没被应用，没有截断发生。
 - **已做的处置**：`README.md` 的表格照实改写成「当前是否真的生效」四列，并指出**要限检索预算请用
   MCP 工具参数 `max_tokens`**；本任务**不修代码**（`T6-05` 的产出文件只有文档）。
-- **建议修法**（需所有者立任务）：把 `load_config()` 的结果传进建索引路径
-  （`TaskManager(...).start(target, lambda p: index_sync(p, config=load_config()))` 或等价改法），
-  并让 `_code_search` 的默认预算取 `load_config().max_tokens`。补 3 条测试（每个上限一条，断言
-  「设小了就真的失败/跳过」）。**这也解释了 `T2-21` / `T2-11` 的单测为什么全绿却端到端无效**：
+- **修法（`T6-07` 已实施，2026-09-30）**：新增 `server.py::workspace_config(root)`——它把已知的
+  `root` 填进环境后再调 `load_config()`，因此 `build_server(root=...)`（测试与嵌入调用）在不设
+  `CODERAG_ROOT` 时也读得到可调变量，而显式设置的值仍然优先、格式错误仍然抛 `ConfigError`。
+  然后把它接进三处：**建索引**（`TaskManager(...).start(target, partial(index_sync, config=config))`）、
+  **检索的默认预算**（`arguments.get("max_tokens", workspace_config(root).max_tokens)`）、
+  **工作区形态 `index_status` 的 skip 统计**（`walk_with_report(root, max_files=..., max_file_bytes=...)`，
+  `§4.2` 要求过滤可见；超限时返回 `INDEX_TOO_MANY_FILES` 而不是兜底的 `SEARCH_FAILED`）。
+- **验收（`T6-07`）**：`tests/test_server.py` 新增 3 条**走 MCP 工具**的测试（`CODERAG_MAX_FILES` /
+  `CODERAG_MAX_FILE_BYTES` / `CODERAG_MAX_TOKENS` 各一条），**实测在未修复的 `server.py` 上 3 条全红**
+  （`3 failed`，症状为 `assert 2 == 1` 与命中数未被裁剪），修复后全绿；`README.md` 的配置表随之
+  由「未生效」改回真实状态。**这也解释了 `T2-21` / `T2-11` 的单测为什么全绿却端到端无效**：
   它们直接调 `index_sync(config=...)`，绕过了没传配置的那条路。
