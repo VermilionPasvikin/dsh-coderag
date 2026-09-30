@@ -153,20 +153,13 @@ def _dsh_home(environ: Mapping[str, str]) -> Path | None:
     return default if default.is_dir() else None
 
 
-def _refuse_dsh_home(root: Path, environ: Mapping[str, str], *, from_fallback: bool) -> None:
+def _refuse_dsh_home(root: Path, environ: Mapping[str, str]) -> None:
     """Reject a workspace that points inside DSH's own home (T6-25).
 
-    The desktop app starts the engine in its profile directory, so a root that is
-    merely inherited from the working directory lands in DSH's own state. Indexing
-    that is never what the user meant, yet it used to succeed silently - and once
-    such an index existed, `index_status` reported it ready and the model could
-    answer from DSH's own files. A required setting must fail rather than be
-    guessed (AGENTS.md 3.2).
-
-    The message names which of the two it was, and the directory itself: during
-    the T6-26 experiment that distinction is the measurement - a value from the
-    patch is the HOST's working directory, one from the fallback is the ENGINE's,
-    and only the latter says anything about how DSH spawns its children.
+    Indexing DSH's own state is never what the user meant, yet it used to succeed
+    silently - and once such an index existed, `index_status` reported it ready and
+    the model could answer from DSH's own files. A required setting must fail
+    rather than be guessed (AGENTS.md 3.2).
     """
     home = _dsh_home(environ)
     if home is None:
@@ -177,50 +170,63 @@ def _refuse_dsh_home(root: Path, environ: Mapping[str, str], *, from_fallback: b
     except OSError:
         return
     if resolved_root == resolved_home or resolved_home in resolved_root.parents:
-        if from_fallback:
-            subject = (
-                f"{ENV_ROOT} is unset, so the engine used its own working directory "
-                f"({resolved_root}), which is inside"
-            )
-        else:
-            subject = f"{ENV_ROOT} is set to {resolved_root}, which is inside"
         raise ConfigError(
-            f"{subject} DSH's own home ({resolved_home}). The desktop app works in its "
-            f"profile directory, so {ENV_ROOT} must name the workspace you want to search."
+            f"{ENV_ROOT} is set to {resolved_root}, which is inside DSH's own home "
+            f"({resolved_home}). The desktop app works in its profile directory, so "
+            f"{ENV_ROOT} must name the workspace you want to search."
         )
+
+
+def _missing_root_error(environ: Mapping[str, str]) -> ConfigError:
+    """Explain a missing root, naming DSH's own directory when that is the trap.
+
+    The engine does not guess a workspace, and the only thing a default could be is
+    the process working directory. Measured 2026-09-30 (T6-26): the directory the
+    desktop app gives its MCP child IS `$DSH_HOME/profiles/<profile>` - it is not
+    the folder the session was opened on - so a user who simply never set the
+    variable would otherwise get a bare "required", with the reason invisible.
+    """
+    home = _dsh_home(environ)
+    if home is not None:
+        try:
+            working, resolved_home = Path.cwd().resolve(), home.resolve()
+        except OSError:
+            return ConfigError(f"{ENV_ROOT} is required and must be a non-empty path")
+        if working == resolved_home or resolved_home in working.parents:
+            return ConfigError(
+                f"{ENV_ROOT} is required and is not set. The engine will not guess: the "
+                f"only candidate would be its own working directory ({working}), which is "
+                f"inside DSH's own home ({resolved_home}) - that is DSH's state, not your "
+                f"workspace. Set {ENV_ROOT} to the workspace you want to search."
+            )
+    return ConfigError(f"{ENV_ROOT} is required and must be a non-empty path")
 
 
 def load_config(environ: Mapping[str, str] | None = None) -> IndexConfig:
     """Build an IndexConfig from environment variables.
 
-    The workspace comes from CODERAG_ROOT, or - when that is unset or empty, as
-    for every other variable here - from the directory the engine was started in.
-    For the MCP child DSH spawns, that directory is the session's workspace: the
-    host carries "which folder this conversation is on" as the working directory
-    it gives its children (T6-26), whereas a patch expression can only see the
-    host's *own* directory, which is DSH's profile folder (T6-25).
-
-    This is deliberately not a guessed default: it is the runtime directory the
-    host chose, and a root that lands inside DSH's own home is refused outright,
-    so the fallback can never silently index DSH's state. It is one line to
-    revert if the assumption about the working directory turns out to be wrong.
+    The workspace must be given: CODERAG_ROOT is required and there is no default,
+    because the only candidate a default could name is the process working
+    directory - and for the child the desktop app spawns that is its own profile
+    folder, never the folder the user opened (measured 2026-09-30, T6-26). An empty
+    value counts as unset, as it does for every other variable here, and a root
+    inside DSH's own home is refused outright.
 
     Args:
         environ: Mapping to read. Defaults to os.environ; tests pass a
             controlled mapping instead of mutating the process environment.
 
     Raises:
-        ConfigError: If the workspace is inside DSH's own home, or if a numeric
-            setting is not a positive integer.
+        ConfigError: If CODERAG_ROOT is missing or empty, if the workspace is
+            inside DSH's own home, or if a numeric setting is not a positive
+            integer.
     """
     env = os.environ if environ is None else environ
     root_value = _read_optional_str(env, ENV_ROOT)
     if root_value is None:
-        root = Path.cwd()
-        _refuse_dsh_home(root, env, from_fallback=True)
-    else:
-        root = Path(root_value)
-        _refuse_dsh_home(root, env, from_fallback=False)
+        raise _missing_root_error(env)
+    root = Path(root_value)
+    _refuse_dsh_home(root, env)
     return IndexConfig(
         root=root,
         max_files=_read_positive_int(env, ENV_MAX_FILES, DEFAULT_MAX_FILES),

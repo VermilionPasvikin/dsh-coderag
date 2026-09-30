@@ -64,14 +64,14 @@
         command: !!js "process.env.CODERAG_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')"
         args: ['-c', 'import dsh_coderag.server as s; s.run()']
         env:
-          # CODERAG_ROOT is not set here, deliberately. An expression in this
-          # file is evaluated by the HOST process, so `process.cwd()` would name
-          # $DSH_HOME/profiles/<profile> - DSH's own state, never the folder the
-          # user opened (measured 2026-09-30). The engine instead falls back to
-          # its own working directory, which is the directory DSH gives its
-          # children, i.e. the session's workspace (T6-26); set CODERAG_ROOT
-          # here or in the environment to override that, and a root inside
-          # DSH's own home is refused with WORKSPACE_INVALID either way.
+          # CODERAG_ROOT is required, and it is not set here because no useful
+          # default exists. An expression in this file is evaluated by the HOST
+          # process, so `process.cwd()` would name $DSH_HOME/profiles/<profile>;
+          # and the engine's own working directory is the same profile directory
+          # (both measured 2026-09-30, T6-25 / T6-26) - DSH's own state, never the
+          # folder the user opened. Set it here or in the environment; left unset,
+          # or set inside DSH's own home, the engine answers WORKSPACE_INVALID and
+          # reports the root it resolved.
           #
           # CODERAG_PYTHON is deliberately NOT repeated here. Only `command`
           # above decides which executable DSH spawns, and the engine itself

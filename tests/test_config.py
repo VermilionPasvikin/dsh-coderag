@@ -22,51 +22,10 @@ def test_load_config_reads_root_and_numeric_overrides(tmp_path: Path) -> None:
     assert config.max_tokens == 456
 
 
-def test_a_missing_root_uses_the_process_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """T6-26: DSH carries the session workspace as the child's working directory.
-
-    Measured on this machine: the host gives its children the folder the
-    conversation is on, while a patch expression would only see the host's own
-    directory - which is DSH's profile folder (T6-25).
-    """
-    monkeypatch.chdir(tmp_path)
-
-    config = load_config({"DSH_HOME": str(tmp_path / "elsewhere")})
-
-    assert config.root == tmp_path
 
 
-@pytest.mark.parametrize("value", ["", "   "])
-def test_an_empty_root_counts_as_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
-    """Empty counts as unset here, exactly as it does for every other variable."""
-    monkeypatch.chdir(tmp_path)
-
-    config = load_config({"CODERAG_ROOT": value, "DSH_HOME": str(tmp_path / "elsewhere")})
-
-    assert config.root == tmp_path
 
 
-def test_the_fallback_is_refused_inside_dsh_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The desktop app's inherited directory is DSH's own state, not a workspace.
-
-    With no root set, refusing here is what keeps the fallback from silently
-    indexing DSH's own files - the failure this experiment must not reintroduce.
-    The message says the value came from the engine's own directory, which is the
-    measurement the experiment is after.
-    """
-    home = tmp_path / ".dsh"
-    profile = home / "profiles" / "desktop"
-    profile.mkdir(parents=True)
-    monkeypatch.chdir(profile)
-
-    with pytest.raises(ConfigError, match="is unset, so the engine used its own"):
-        load_config({"DSH_HOME": str(home)})
 
 
 def test_an_explicit_root_inside_dsh_home_says_it_was_set(
@@ -218,6 +177,48 @@ def test_load_config_for_lets_an_explicit_root_win(tmp_path: Path) -> None:
     other = tmp_path / "other"
     config = load_config_for(tmp_path, {"CODERAG_ROOT": str(other)})
     assert config.root == other
+
+
+def test_a_missing_root_is_refused_with_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T6-26 verdict: DSH does NOT give the MCP child the session's directory.
+
+    Measured on the owner's desktop: with the variable unset, the engine's own
+    working directory was `$DSH_HOME/profiles/desktop`, so a fallback could only
+    ever name DSH's own state. The root is therefore required again (AGENTS.md
+    3.2) - but the error explains that situation instead of just saying
+    "required", because the reason is otherwise invisible.
+    """
+    home = tmp_path / ".dsh"
+    profile = home / "profiles" / "desktop"
+    profile.mkdir(parents=True)
+    monkeypatch.chdir(profile)
+
+    with pytest.raises(ConfigError, match="only candidate would be its own working"):
+        load_config({"DSH_HOME": str(home)})
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_an_empty_root_counts_as_unset_and_is_refused(
+    tmp_path: Path, value: str
+) -> None:
+    """Empty means unset here, exactly as it does for every other variable."""
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    with pytest.raises(ConfigError, match="CODERAG_ROOT is required"):
+        load_config({"CODERAG_ROOT": value, "DSH_HOME": str(tmp_path / "elsewhere")})
+
+
+def test_a_missing_root_elsewhere_gets_the_plain_required_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The long explanation is only for the DSH-home trap, not for every miss."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigError, match="required and must be a non-empty path"):
+        load_config({"DSH_HOME": str(tmp_path / "elsewhere")})
 
 
 def test_a_root_inside_dsh_home_is_refused(tmp_path: Path) -> None:

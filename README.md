@@ -369,12 +369,14 @@ $env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"      # 桌面版请写进 profile �
 
 `CODERAG_ROOT` 决定 MCP 子进程去哪个目录找 `.coderag/index.sqlite3`。它按这个顺序取值：
 
-1. 环境里或 profile 的 `cordis.patch.yml` 里有 `CODERAG_ROOT` → 用它（**推荐显式钉死**，见下）；
-2. 否则用**引擎自己的工作目录**——DSH 正是用工作目录承载「这次会话在哪个文件夹」
-   （实测：宿主给子进程的 cwd 就是你在 GUI 里打开的那个目录）。所以**若** MCP 客户端把它传给子进程，
-   桌面版无需任何配置即可工作，这也正是 `T6-26` 那次实验要验证的一点；
-3. 若这个目录**落在 DSH 自己的 home 之内**（`%USERPROFILE%\.dsh`）→ **直接报 `WORKSPACE_INVALID`**，
-   并在状态里给出实际解析到的根。这一步是必须的：它保证「回退」永远不会静默地去索引 DSH 自己的状态。
+1. `CODERAG_ROOT`（环境里或 profile 的 `cordis.patch.yml` 里）→ 用它。**桌面版必须显式钉死**，见下；
+2. **不设就是错误**：引擎不会猜一个默认值——唯一能当默认值的只有「本进程的工作目录」，
+   而**实测（2026-09-30，`T6-26`）桌面版给 MCP 子进程的正是 `%USERPROFILE%\.dsh\profiles\<profile>`**，
+   也就是 DSH 自己的状态目录，**不是**你在 GUI 里打开的那个文件夹（那个实验的结论就是「不能用它」）。
+   未设时返回 `WORKSPACE_INVALID`，并说明「唯一候选是引擎自己的工作目录（…），它落在 DSH 的 home 之内」；
+   若工作目录不在 DSH home 内，则是简洁的「`CODERAG_ROOT` is required」；
+3. 设了但落在 DSH 自己的 home 之内 → 同样 `WORKSPACE_INVALID`（消息写作 `is set to …`），
+   状态里给出实际解析到的根。
 
 **实测（2026-09-30，正是这次去掉兜底的原因）**：发行 patch 曾写 `CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()`，
 而这个 `process.cwd()` 由**宿主**求值——桌面版从快捷方式启动时它是
@@ -613,7 +615,7 @@ $env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
 | **只认白名单里的后缀** | 其余文件**根本不参与遍历结果**（不算 skip）；`Dockerfile` / `Makefile` 这类**没有扩展名**的文件任何配置都收不进来 | [① 扩展白名单](#-让引擎收录别的文件类型扩展白名单)、backlog |
 | **没有 grammar 的后缀是低置信度分块** | 按固定行数切块，`symbol_kind` 为 `None`；且 `Chunk.low_confidence` **只存在于内存**，不入库、不渲染，模型看不到 | backlog |
 | **MCP 子进程的工作区根在启动时就定死** | GUI 里打开别的文件夹**不会**改变它；一个 profile 只有一个根，换工作区要改 patch 并重启 | 上一小节 |
-| **根落在 DSH 自己的 home 之内会被拒绝** | 引擎返回 `WORKSPACE_INVALID`（不再静默索引 `%USERPROFILE%\.dsh`）；状态里会带上**实际使用的** `root` 绝对路径，便于一眼看出根错在哪 | 上一小节 |
+| **`CODERAG_ROOT` 是必填项，且不能靠「会话工作区」自动推导** | 实测桌面版给 MCP 子进程的工作目录是 `%USERPROFILE%\.dsh\profiles\<profile>`，**不是**你打开的那个文件夹；未设或落在 DSH 自己的 home 之内都会返回 `WORKSPACE_INVALID`（状态里带**实际使用的** `root` 绝对路径） | 上一小节 |
 | **CLI 与 DSH 读不同的配置来源** | shell 里设的变量 CLI 认、DSH 会话不认；写进 patch 则反过来。两者写同一个索引文件，**谁最后跑 `index` 谁的内容生效** | 「谁读哪份配置」 |
 | **CLI 路径没有运行历史** | 中断后 `index_status` 只说「未就绪」，说不出「被中断、跑到多少」 | backlog |
 | **`searcher` 不读 `ready`** | 被中断的索引**仍可被搜到**（保留可用性的取舍）：命中可能来自不完整的数据，判断要靠 `index_status` | backlog |
