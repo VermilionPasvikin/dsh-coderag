@@ -20,6 +20,13 @@ dependencies = [
 dsh-coderag = "dsh_coderag.__main__:main"
 
 [project.optional-dependencies]
+# The optional vector backend's only Python dependency, exactly as ADR-16 3.2
+# froze it. It must never move into `dependencies`: RL-10 requires the default
+# path to stay free of numpy, so a plain `pip install .` must not pull it in.
+# The vector tests (`tests/test_vectors.py`, `test_vector_search.py`,
+# `test_index_vectors.py`) need it, so a development environment installs
+# `.[dev,semantic]`.
+semantic = ["numpy>=1.26"]
 dev = [
   "pytest>=8",
   "pytest-cov",
