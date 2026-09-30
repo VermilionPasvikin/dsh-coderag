@@ -40,6 +40,7 @@ from dsh_coderag import __version__
 from dsh_coderag.config import (
     ENV_EXTRA_EXTENSIONS,
     ENV_MAX_FILES,
+    ENV_ROOT,
     ConfigError,
     load_config_for,
 )
@@ -554,7 +555,10 @@ def profile_override_block(interpreter: str) -> list[str]:
         f"    command: '{interpreter}'",
         "    args: ['-c', 'import dsh_coderag.server as s; s.run()']",
         "    env:",
-        "      CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()",
+        # A placeholder, not a guess: the only default available here is this
+        # process's working directory, which for the desktop app is DSH's own
+        # profile directory rather than any workspace (T6-25).
+        f"      {ENV_ROOT}: '<把这里换成你要检索的工作区绝对路径>'",
     ]
 
 
@@ -575,6 +579,8 @@ def _run_doctor(_: argparse.Namespace) -> int:
     _emit("若文件里还有占位符 `[]`，用下面这段【替换】掉那一行；")
     _emit("若已有条目（DSH 自己的设置也在里面），就【追加】到末尾——不要替换整个文件。")
     _emit("id 定向 patch 会整体替换 config，所以下面把要保留的字段都写全了：")
+    _emit(f"把 {ENV_ROOT} 换成你要检索的工作区【绝对路径】——不换的话引擎会报 WORKSPACE_INVALID，")
+    _emit("因为唯一能当默认值的只有本进程的工作目录，而桌面版那就是它自己的 profile 目录。")
     _emit()
     for line in profile_override_block(sys.executable):
         _emit(line)

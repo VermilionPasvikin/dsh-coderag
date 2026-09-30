@@ -6,9 +6,10 @@
 # JavaScript of its own.
 #
 # The interpreter is overridable with CODERAG_PYTHON (E-06). The workspace the
-# engine indexes defaults to the process working directory and is overridable
-# with CODERAG_ROOT; both are set through config.env because stdio child
-# environments are scrubbed (E-02).
+# engine indexes must be given with CODERAG_ROOT — there is no usable default,
+# because the only thing a default could be is the HOST process's working
+# directory. Both are set through config.env because stdio child environments
+# are scrubbed (E-02).
 #
 # --- Where to configure -----------------------------------------------------
 # This `config.env` block is THE configuration entry point for the engine: it is
@@ -63,7 +64,16 @@
         command: !!js "process.env.CODERAG_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')"
         args: ['-c', 'import dsh_coderag.server as s; s.run()']
         env:
-          CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
+          # NO fallback for CODERAG_ROOT, deliberately. `process.cwd()` in this
+          # expression is evaluated by the HOST process, and for a desktop app
+          # started from a shortcut that value is $DSH_HOME/profiles/<profile> —
+          # DSH's own state, never the folder the user opened (measured
+          # 2026-09-30: opening a folder in the GUI does not change it). Indexing
+          # it used to succeed silently, which is how a 10.67 GiB index came to
+          # look missing. Set CODERAG_ROOT to your workspace, here or in the
+          # environment; left unset, the engine fails with WORKSPACE_INVALID and
+          # reports the root it actually resolved.
+          #
           # CODERAG_PYTHON is deliberately NOT repeated here. Only `command`
           # above decides which executable DSH spawns, and the engine itself
           # never reads this variable — a copy in `env` only made a broken

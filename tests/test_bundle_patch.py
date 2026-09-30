@@ -61,3 +61,29 @@ def test_doctor_block_names_the_same_row_as_the_patch() -> None:
     """doctor prints a ready-to-paste override, so its identifiers must match."""
     assert f"id: {cli.MCP_ROW_ID}" in PATCH
     assert cli.MCP_CLIENT_PACKAGE in PATCH
+
+
+def _without_comments(text: str) -> str:
+    """The effective YAML: a full-line comment carries no behaviour."""
+    return "\n".join(
+        line for line in text.splitlines() if not line.strip().startswith("#")
+    )
+
+
+def test_neither_the_patch_nor_doctor_guesses_the_workspace() -> None:
+    """`process.cwd()` there is the HOST's directory, not the user's workspace.
+
+    Measured 2026-09-30: for a desktop app started from a shortcut that value is
+    $DSH_HOME/profiles/<profile>, so a root resolved this way indexes DSH's own
+    state and reports itself ready while the user's 10.67 GiB index sits
+    elsewhere, invisible (T6-25).
+    """
+    block = "\n".join(cli.profile_override_block("python"))
+    effective = _without_comments(PATCH)
+
+    assert "process.cwd()" not in effective
+    assert "process.cwd()" not in block
+    assert not re.search(r"^\s+CODERAG_ROOT:", effective, re.M), (
+        "the shipped bundle must set no root at all rather than guess one"
+    )
+    assert f"{cli.ENV_ROOT}: " in block, "doctor must show where the root goes"

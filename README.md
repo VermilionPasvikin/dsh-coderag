@@ -369,17 +369,19 @@ $env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"      # 桌面版请写进 profile �
 
 `CODERAG_ROOT` 决定 MCP 子进程去哪个目录找 `.coderag/index.sqlite3`。它按这个顺序取值：
 
-1. 环境里有 `CODERAG_ROOT` → 用它（**推荐显式钉死**，见下）；
-2. 否则用 **DSH 宿主进程的 `process.cwd()`**——桌面版从快捷方式启动时，这个值是
-   `%USERPROFILE%\.dsh\profiles\<profile>`（**profile 目录本身**），既不是你的仓库，也不是你在 GUI 里打开的文件夹。
+1. 环境里或 profile 的 `cordis.patch.yml` 里有 `CODERAG_ROOT` → 用它（**推荐显式钉死**，见下）；
+2. **否则引擎直接报 `WORKSPACE_INVALID`**，并在状态里给出它实际解析到的根——**不再猜一个默认值**。
+   引擎**没有**默认工作区：唯一能当默认值的只有「本进程的工作目录」，而桌面版那一个就是下面这个目录。
 
-**实测（2026-09-30）**：把根留成 `process.cwd()` 时，子进程报出的工作区是
-`C:\Users\15349\.dsh\profiles\desktop`——同一目录按同一白名单走出来正好 `seen=11 / indexable=2 / other=9`，
-与子进程返回的 `files` 块**逐字一致**，而且**它真的在那个 profile 目录里建了一份 0.1 MB 的索引**；
-与此同时，用户在同一台机器上跑完的 **10.67 GiB** 游戏索引对子进程**完全不可见**，
-`code_search` 于是返回「没有建立索引」。
+**实测（2026-09-30，正是这次去掉兜底的原因）**：发行 patch 曾写 `CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()`，
+而这个 `process.cwd()` 由**宿主**求值——桌面版从快捷方式启动时它是
+`%USERPROFILE%\.dsh\profiles\<profile>`（**DSH 自己的 profile 目录**），既不是你的仓库，也不是你在 GUI 里打开的文件夹。
+证据：该目录按同一白名单走出来正好 `seen=11 / indexable=2 / other=9`，与当时子进程返回的 `files` 块**逐字一致**，
+而且**它真的在那个 profile 目录里建了一份 0.1 MB 的索引**；与此同时用户在同一台机器上跑完的
+**10.67 GiB** 游戏索引对子进程**完全不可见**，`code_search` 于是返回「没有建立索引」。
+现在这条路径的两种结局都不再是静默的：设了根就按你指的工作区工作；没设就明确报错。
 
-**所以桌面版必须显式钉死根**（`env` 里写**字面值**，不要留 `process.cwd()`）：
+**所以桌面版必须显式钉死根**（`env` 里写**字面值**）：
 
 ```yaml
     env:
