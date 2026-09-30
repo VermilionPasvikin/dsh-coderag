@@ -266,6 +266,25 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 的变量与**所有** `DSH_*` 变量都会被删除。清洗之后，`cordis.patch.yml` 的 `config.env` 会**合并到最上面**
 （已核实：`{...scrubbedParentEnv(), ...extra}`）——所以**写进 patch 的一定到得了子进程，在 shell 里设的不一定**。
 
+**`$DSH_HOME` 在哪**——上面那些路径里的 `$DSH_HOME` 指的是 **DSH 的"主目录"**，
+本机的 profile、会话与凭据都住在它下面：
+
+| 平台 | 默认位置 | 怎么确认 |
+|---|---|---|
+| Windows | `%USERPROFILE%\.dsh`（例如 `C:\Users\<你>\.dsh`） | `$env:DSH_HOME`；若为空则 `Test-Path "$env:USERPROFILE\.dsh"` |
+| macOS / Linux | `$HOME/.dsh` | `echo "${DSH_HOME:-$HOME/.dsh}"` |
+
+- **换位置只有一种办法：设环境变量 `DSH_HOME`。** 依据是 DSH 自己的帮助文本——
+  `--profile <name>` 的说明是 *"the profile under `$DSH_HOME/profiles` to boot"*，
+  而 `dsh --help` 里**没有** `--home` 之类的选项（所以也不存在 XDG 之类的另一套路径，别去找）。
+- **在 DSH 里开出来的终端，`DSH_HOME` 总是有值**：DSH 进程会把它设好再传给子进程
+  （本机实测：系统级的 User / Machine 作用域里它是**空的**，值来自 DSH 进程本身）。
+- 目录里除了 `profiles/`，还有 `sessions/`、`storages/` 与 **`.credentials.yaml`**（DSH 自己的凭据）
+  ——所以这是**本机机密目录**，别把它整个拷进任何仓库或共享目录。
+- 与本插件有关的只有两个文件：**该 profile 的** `$DSH_HOME/profiles/<profile>/cordis.patch.yml`
+  与 **对所有 profile 生效、优先级更高**的 `$DSH_HOME/cordis.patch.yml`（下一张表）。
+- 不确定自己在跑哪个 profile：看 `$env:DSH_PROFILE`，或列 `$DSH_HOME/profiles/` 下的目录名。
+
 **配置写在哪**（按推荐顺序）：
 
 | 写在哪 | Windows 上的路径 | 适合什么 | 会不会入库 |
