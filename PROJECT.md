@@ -447,7 +447,7 @@ code_search(query, path, limit, mode)
 
 | 组 | 变量 | 默认 | 冻结于 |
 |---|---|---|---|
-| 基础 | `CODERAG_ROOT` | **无默认，缺失即 `ConfigError`** | — |
+| 基础 | `CODERAG_ROOT` | 未设或为空 → 用**引擎自己的工作目录**（DSH 用它承载会话工作区；`T6-26` 实验，待重启验证）；落在 `$DSH_HOME` 内一律拒绝 | `T6-26`（`T6-25` 的守卫保留） |
 | 基础 | `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_MAX_FILE_BYTES` | `20000` / `4000` / `1048576` | — |
 | 基础 | `CODERAG_BATCH_SIZE` / `CODERAG_MAX_WORKERS` | 不设则按机器自适应（`RL-07` 禁止硬编码） | — |
 | 基础 | `CODERAG_EXTRA_EXTENSIONS` | 空 = 只用内置白名单 `{.py,.c,.h,.cpp,.hpp,.ts,.js}`；**只增不减**，非法 token 报 `ConfigError` | `T6-17`；扩展名闸门在第 1 层黑名单**之前**，故不放大 `RL-03` 的暴露面 |

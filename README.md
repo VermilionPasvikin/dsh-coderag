@@ -370,8 +370,11 @@ $env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"      # 桌面版请写进 profile �
 `CODERAG_ROOT` 决定 MCP 子进程去哪个目录找 `.coderag/index.sqlite3`。它按这个顺序取值：
 
 1. 环境里或 profile 的 `cordis.patch.yml` 里有 `CODERAG_ROOT` → 用它（**推荐显式钉死**，见下）；
-2. **否则引擎直接报 `WORKSPACE_INVALID`**，并在状态里给出它实际解析到的根——**不再猜一个默认值**。
-   引擎**没有**默认工作区：唯一能当默认值的只有「本进程的工作目录」，而桌面版那一个就是下面这个目录。
+2. 否则用**引擎自己的工作目录**——DSH 正是用工作目录承载「这次会话在哪个文件夹」
+   （实测：宿主给子进程的 cwd 就是你在 GUI 里打开的那个目录）。所以**若** MCP 客户端把它传给子进程，
+   桌面版无需任何配置即可工作，这也正是 `T6-26` 那次实验要验证的一点；
+3. 若这个目录**落在 DSH 自己的 home 之内**（`%USERPROFILE%\.dsh`）→ **直接报 `WORKSPACE_INVALID`**，
+   并在状态里给出实际解析到的根。这一步是必须的：它保证「回退」永远不会静默地去索引 DSH 自己的状态。
 
 **实测（2026-09-30，正是这次去掉兜底的原因）**：发行 patch 曾写 `CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()`，
 而这个 `process.cwd()` 由**宿主**求值——桌面版从快捷方式启动时它是

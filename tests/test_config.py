@@ -22,9 +22,49 @@ def test_load_config_reads_root_and_numeric_overrides(tmp_path: Path) -> None:
     assert config.max_tokens == 456
 
 
-def test_load_config_raises_when_required_root_is_missing() -> None:
-    with pytest.raises(ConfigError, match="CODERAG_ROOT"):
-        load_config({"CODERAG_MAX_FILES": "123"})
+def test_a_missing_root_uses_the_process_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T6-26: DSH carries the session workspace as the child's working directory.
+
+    Measured on this machine: the host gives its children the folder the
+    conversation is on, while a patch expression would only see the host's own
+    directory - which is DSH's profile folder (T6-25).
+    """
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config({"DSH_HOME": str(tmp_path / "elsewhere")})
+
+    assert config.root == tmp_path
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_an_empty_root_counts_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """Empty counts as unset here, exactly as it does for every other variable."""
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config({"CODERAG_ROOT": value, "DSH_HOME": str(tmp_path / "elsewhere")})
+
+    assert config.root == tmp_path
+
+
+def test_the_fallback_is_refused_inside_dsh_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The desktop app's inherited directory is DSH's own state, not a workspace.
+
+    With no root set, refusing here is what keeps the fallback from silently
+    indexing DSH's own files - the failure this experiment must not reintroduce.
+    """
+    home = tmp_path / ".dsh"
+    profile = home / "profiles" / "desktop"
+    profile.mkdir(parents=True)
+    monkeypatch.chdir(profile)
+
+    with pytest.raises(ConfigError, match="DSH"):
+        load_config({"DSH_HOME": str(home)})
 
 
 def test_load_config_raises_when_numeric_value_is_not_an_integer() -> None:

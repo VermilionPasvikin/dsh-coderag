@@ -75,8 +75,14 @@ async def test_search_with_no_matches_is_empty_not_a_bare_array(
 async def test_missing_workspace_config_returns_a_structured_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """M10 / RL-09: an internal failure must not surface as a transport error."""
+    """M10 / RL-09: an internal failure must not surface as a transport error.
+
+    The malformed setting is what fails here since T6-26: a missing root now falls
+    back to the working directory instead of raising, so this needs a
+    configuration failure that is still guaranteed to happen.
+    """
     monkeypatch.delenv("CODERAG_ROOT", raising=False)
+    monkeypatch.setenv("CODERAG_MAX_FILES", "not-a-number")
     server = build_server()
     async with create_connected_server_and_client_session(server) as session:
         result = await session.call_tool("code_search", {"query": "x"})

@@ -182,19 +182,29 @@ def _refuse_dsh_home(root: Path, environ: Mapping[str, str]) -> None:
 def load_config(environ: Mapping[str, str] | None = None) -> IndexConfig:
     """Build an IndexConfig from environment variables.
 
+    The workspace comes from CODERAG_ROOT, or - when that is unset or empty, as
+    for every other variable here - from the directory the engine was started in.
+    For the MCP child DSH spawns, that directory is the session's workspace: the
+    host carries "which folder this conversation is on" as the working directory
+    it gives its children (T6-26), whereas a patch expression can only see the
+    host's *own* directory, which is DSH's profile folder (T6-25).
+
+    This is deliberately not a guessed default: it is the runtime directory the
+    host chose, and a root that lands inside DSH's own home is refused outright,
+    so the fallback can never silently index DSH's state. It is one line to
+    revert if the assumption about the working directory turns out to be wrong.
+
     Args:
         environ: Mapping to read. Defaults to os.environ; tests pass a
             controlled mapping instead of mutating the process environment.
 
     Raises:
-        ConfigError: If CODERAG_ROOT is missing or empty, or if a numeric
+        ConfigError: If the workspace is inside DSH's own home, or if a numeric
             setting is not a positive integer.
     """
     env = os.environ if environ is None else environ
-    root_value = env.get(ENV_ROOT)
-    if root_value is None or not root_value.strip():
-        raise ConfigError(f"{ENV_ROOT} is required and must be a non-empty path")
-    root = Path(root_value)
+    root_value = _read_optional_str(env, ENV_ROOT)
+    root = Path(root_value) if root_value is not None else Path.cwd()
     _refuse_dsh_home(root, env)
     return IndexConfig(
         root=root,
@@ -210,11 +220,11 @@ def load_config(environ: Mapping[str, str] | None = None) -> IndexConfig:
 def load_config_for(root: Path, environ: Mapping[str, str] | None = None) -> IndexConfig:
     """Load the config for a workspace whose root the caller already knows.
 
-    `load_config` requires CODERAG_ROOT, but the CLI takes the workspace as an
-    argument and `build_server(root=...)` lets a caller supply it outright. Both
-    still need the optional settings (limits, extra extensions), so the known
-    root is filled in first; an explicitly set CODERAG_ROOT still wins, and a
-    malformed value still raises rather than being replaced.
+    The CLI takes the workspace as an argument and `build_server(root=...)` lets a
+    caller supply it outright, and both still need the optional settings (limits,
+    extra extensions), so the known root is filled in first; an explicitly set
+    CODERAG_ROOT still wins, and a malformed value still raises rather than being
+    replaced.
     """
     env = dict(os.environ if environ is None else environ)
     env.setdefault(ENV_ROOT, str(root))
