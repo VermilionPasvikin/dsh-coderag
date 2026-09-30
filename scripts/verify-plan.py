@@ -60,6 +60,18 @@ def bad(item: str, msg: str) -> None:
     CHECKS.append((item, "FAIL", msg))
 
 
+CELL_SPLIT = re.compile(r"(?<!\\)\|")
+
+
+def split_row(line: str) -> list[str]:
+    """Split a table row into cells on **unescaped** pipes only.
+
+    Pasted command output inside a cell is escaped as '\\|' (see G1), so a plain
+    split would shift every following cell by one and make the row unparseable.
+    """
+    return [cell.strip() for cell in CELL_SPLIT.split(line.strip().strip("|"))]
+
+
 def section(lines: list[str], start: str, ends: tuple[str, ...]) -> list[str]:
     out, on = [], False
     for line in lines:
@@ -225,7 +237,7 @@ def parse_tasks(proj_lines: list[str]) -> dict[str, dict]:
         if not m:
             continue
         tid = m.group(1)
-        cells = [c.strip() for c in raw.strip().strip("|").split("|")]
+        cells = split_row(raw)
         cell = cells[5] if len(cells) >= 6 else ""
         lineno = lineno_of.get(id(raw), -1)
         if tid in tasks:
@@ -362,7 +374,7 @@ def check_testing(test_lines: list[str], agents_lines: list[str], tasks: dict[st
         m = MUSTTEST_ROW.match(line)
         if not m:
             continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        cells = split_row(line)
         rows[m.group(1)] = ANY_TASK_ID.findall(cells[-1]) if cells else []
     if len(rows) < MIN_TEST_ITEMS:
         fail("E2", f"必测清单只解析到 {len(rows)} 项，低于下限 {MIN_TEST_ITEMS}")
@@ -392,6 +404,40 @@ def check_testing(test_lines: list[str], agents_lines: list[str], tasks: dict[st
         fail("E4", "必测清单没有 L3（端到端）项")
     else:
         ok("E4", "必测清单覆盖 L3 端到端层")
+
+
+# ══ G1：§6.7 进度表的行形态 ═══════════════════════════════════════════
+PROGRESS_STATES = ("已完成", "进行中", "未开始")
+PROGRESS_ROW = re.compile(r"^\|\s*[`*]*\s*(T[0-9]-[0-9]+[a-z]?)\s*[`*]*\s*\|")
+UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+
+
+def check_progress_rows(proj_lines: list[str]) -> None:
+    """Every §6.7 progress row must keep exactly 5 columns.
+
+    Pasted command output regularly contains '|' (shell pipelines, whole tables
+    copied out of a report). Markdown reads each one as a cell delimiter, so the
+    row silently gains columns; escaping it as '\\|' keeps the reading intact and
+    still renders a single '|'. Only unescaped pipes count as delimiters.
+    """
+    body = section(proj_lines, "### 6.7", ("### 6.8",))
+    rows = 0
+    broken = 0
+    for line in body:
+        match = PROGRESS_ROW.match(line)
+        cells = split_row(line)
+        if len(cells) < 2 or cells[1] not in PROGRESS_STATES:
+            continue
+        rows += 1
+        found = len(UNESCAPED_PIPE.findall(line))
+        if found != 6:
+            broken += 1
+            fail("G1", f"§6.7 的 {match.group(1)} 行不是 5 列（未转义的 `|` 有 {found} 个，"
+                       f"应为 6）——把单元格内部的 `|` 转义成 `\\|`")
+    if rows == 0:
+        fail("G1", "§6.7 里一行进度记录都没解析到（这是解析失败，不是文档为空）")
+    elif broken == 0:
+        ok("G1", f"§6.7 进度表 {rows} 行的列数全部为 5")
 
 
 # ══ main ══════════════════════════════════════════════════════════════
@@ -428,6 +474,7 @@ def main() -> int:
     matrix = parse_matrix(proj_lines)
     check_matrix(proj_lines, agents_lines, tasks, matrix)
     check_testing(test_lines, agents_lines, tasks)
+    check_progress_rows(proj_lines)
 
     print("\n" + "─" * 70)
     for item, status, msg in CHECKS:

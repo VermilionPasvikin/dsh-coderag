@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -24,9 +25,16 @@ HERE = Path(__file__).resolve().parent
 
 
 def run(root: Path) -> tuple[int, str]:
+    """Run the validator and return (exit code, combined output).
+
+    The child prints ✅/❌, so it has to be pinned to UTF-8 in both directions:
+    without this a cp936 console (Windows) hands the parent bytes it cannot
+    decode, and the run dies on a UnicodeDecodeError instead of testing anything.
+    """
     r = subprocess.run([sys.executable, str(HERE / "verify-plan.py"), str(root)],
-                       capture_output=True, text=True)
-    return r.returncode, r.stdout + r.stderr
+                       capture_output=True, text=True, encoding="utf-8",
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
 def mutate_drop_matrix_row(key: str):
@@ -204,8 +212,21 @@ def mutate_drop_whole_matrix_section():
     return f
 
 
-CASES: list[tuple[str, str, callable]] = [
-    ("B1", "删掉矩阵里的 S2 行", mutate_drop_matrix_row("S2")),
+def mutate_progress_row_pipe(tid: str = "T4-05"):
+    """把 §6.7 某行里一处 `\\|` 的转义去掉 —— 该行会因此多出一列。"""
+    def f(files: dict[str, str]) -> dict[str, str]:
+        lines = files["PROJECT.md"].splitlines(keepends=True)
+        for i, l in enumerate(lines):
+            if l.startswith(f"| **{tid}**"):
+                assert "\\|" in l, f"{tid} 行没有可去掉的转义竖线"
+                lines[i] = l.replace("\\|", "|", 1)
+                files["PROJECT.md"] = "".join(lines)
+                return files
+        raise AssertionError(f"没找到 {tid} 行")
+    return f
+
+
+CASES: list[tuple[str, str, callable]] = [    ("B1", "删掉矩阵里的 S2 行", mutate_drop_matrix_row("S2")),
     ("B1", "删掉矩阵里的 S4 行", mutate_drop_matrix_row("S4")),
     ("B2", "删掉矩阵里的 D3 行", mutate_drop_matrix_row("D3")),
     ("B1", "删掉矩阵里的 RL-08 行", mutate_drop_matrix_row("RL-08")),
@@ -224,6 +245,7 @@ CASES: list[tuple[str, str, callable]] = [
     ("D1", "清空 T1-06 的依赖（孤立 T1 任务）", mutate_orphan_t1()),
     ("A5", "在 EVAL.md §6 塞一个不存在的任务 ID", mutate_eval_ghost()),
     ("E3", "把 TESTING.md M5 的任务映射改成不存在的 ID", mutate_testing_mapping()),
+    ("G1", "去掉 §6.7 里 T4-05 行一处 `\\|` 的转义（多出一列）", mutate_progress_row_pipe()),
 ]
 
 
