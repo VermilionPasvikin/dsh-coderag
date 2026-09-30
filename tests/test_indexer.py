@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -104,3 +105,35 @@ def test_a_cancelled_run_also_does_not_claim_readiness(tiny_repo: Path) -> None:
     index_sync(tiny_repo, should_cancel=lambda: True)
 
     assert _query(tiny_repo, "SELECT ready FROM workspace_index") == [(0,)]
+
+
+def test_the_vector_build_forwards_the_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T6-27: this wrapper is the index build's only route to HTTP.
+
+    It used to call the transport without the configured key, so a cloud build went
+    out unauthenticated while `embed_texts` — which the unit tests call directly —
+    sent the header correctly. Only the end-to-end run against a stub endpoint
+    could see the difference.
+    """
+    from dsh_coderag import indexer
+
+    seen: dict[str, object] = {}
+
+    def fake_transport(
+        url: str,
+        model: str,
+        texts: Sequence[str],
+        timeout: float,
+        *,
+        api_key: str | None = None,
+    ) -> list[list[float]]:
+        seen["api_key"] = api_key
+        return [[1.0] for _ in texts]
+
+    monkeypatch.setattr(indexer, "_http_transport", fake_transport)
+    transport = indexer._cancellable_transport(lambda: False, "k-123")
+
+    assert transport("http://127.0.0.1:1/v1/embeddings", "m", ["a"], 1.0) == [[1.0]]
+    assert seen["api_key"] == "k-123"

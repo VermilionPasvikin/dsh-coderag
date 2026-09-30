@@ -378,7 +378,7 @@ def _maybe_build_vector_index(
     started = time.monotonic()
     try:
         index = vectors.build_index(
-            base, config, chunks, transport=_cancellable_transport(check)
+            base, config, chunks, transport=_cancellable_transport(check, config.api_key)
         )
     except SemanticError as exc:
         log_event(
@@ -417,6 +417,7 @@ no output until it finishes is not acceptable (PROJECT.md 5.7).
 
 def _cancellable_transport(
     check: Callable[[], bool],
+    api_key: str | None = None,
 ) -> Callable[[str, str, Sequence[str], float], list[list[float]]]:
     """Wrap the default HTTP transport with cancellation and progress logging.
 
@@ -424,6 +425,11 @@ def _cancellable_transport(
     not catch, so a cancellation aborts the vector build instead of retrying.
     Successful batches are counted and reported every SEMANTIC_PROGRESS_EVERY
     chunks so a long build can be watched.
+
+    `api_key` is forwarded to the transport: this wrapper is the index build's
+    only route to HTTP, so a key that stops here leaves the whole build
+    unauthenticated. A unit test calling `embed_texts` directly cannot see that
+    (T6-27); the end-to-end run against a stub endpoint did.
     """
     embedded = 0
     next_report = SEMANTIC_PROGRESS_EVERY
@@ -437,7 +443,7 @@ def _cancellable_transport(
                 ErrorCode.SEMANTIC_EMBED_FAILED,
                 "indexing was cancelled before the vector index was finished",
             )
-        vectors = _http_transport(url, model, texts, timeout)
+        vectors = _http_transport(url, model, texts, timeout, api_key=api_key)
         embedded += len(texts)
         if embedded >= next_report:
             log_event("semantic_index_progress", embedded=embedded)
