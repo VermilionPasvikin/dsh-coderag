@@ -83,38 +83,65 @@ dsh-coderag 是给 DeepSeek Harness（DSH）用的**代码库检索引擎**，�
 ## 安装
 
 **前置**：Python **3.10–3.12**（`requires-python = ">=3.10,<3.13"`）、
-[DSH](https://www.npmjs.com/package/@deepseek-ai/dsh)、Git、pnpm。
+[DSH](https://www.npmjs.com/package/@deepseek-ai/dsh)、Git。
+**pnpm 不用自己准备**：`dsh` 自带一个（实测：Windows 的 `PATH` 上**没有** pnpm，
+`dsh plugin add` 仍用自带的 pnpm 11.7.0 正常完成）。
 
 > **发布方式：只发布在 GitHub**（tag / release），**不发布到 PyPI、也不发布到 npm**。
 > 因此安装只能走下面这条「克隆」路径；`pip install dsh-coderag` 与 `npm i dsh-coderag` 都**不可用**。
 > **当前版本 `2.0.0` 同样只在 GitHub 上以 tag / release 发布**（`v2.0.0`），PyPI 与 npm 上没有任何版本。
 
-> **平台状态：跨平台是目标，但 Windows 尚未验证。** 引擎本身（Python 包 + MCP stdio）与平台无关，
-> 入口逻辑也正在搬到**跨平台的 Python CLI**（`dsh-coderag doctor` / `install-deps`）；下面这段示例里的
-> `export`、`command -v` 与 `./scripts/dsh` 是 **macOS / Linux 用法**——`scripts/dsh` 是 `#!/bin/sh`、
-> `scripts/install.sh` 是 `bash`，它们在 PowerShell / CMD 里不能直接用。
-> **已实测的平台只有 macOS**；Windows 与 Linux 的实测基线尚未补完，因此本项目**暂不声称支持它们**。
-> 计划与判据见 [`PROJECT.md`](PROJECT.md) §6.5.1（M6 的 `T6-01`–`T6-05`）。
+> **平台状态（实测，2026-09-30）**：**macOS 26.4** 与 **Windows 10（26100，`win_amd64`）** 已实测通过——
+> 安装、`dsh plugin add`、`--dump-config` 与一次真实 `code_search` 两边都跑通，两边的全量 `pytest` 也通过。
+> **Linux 尚未实测，因此本项目不声称支持 Linux。**
+> 三份证据：[跨平台基线](docs/m6-crossplatform-baseline.md)（依赖 wheel、FTS5、离线 grammar、MCP 子进程）、
+> [macOS 复核](docs/m6-macos-verification.md)、[Windows 冒烟](docs/m6-windows-smoke.md)。
+> 计划与判据见 [`PROJECT.md`](PROJECT.md) §6.5.1（`T6-01`–`T6-05`）。
+
+### macOS / Linux（POSIX shell）
 
 ```sh
 # 1. 克隆（cordis.patch.yml 在仓库里，必须克隆）
 git clone https://github.com/VermilionPasvikin/dsh-coderag.git
 cd dsh-coderag
 
-# 2. 装 Python 包（用你自己环境里的解释器；conda 或 venv 都行）
-python -m pip install .          # 开发者用 pip install -e ".[dev]"
+# 2. 装引擎并自检：这个薄包装只做「找到解释器 → 转发给 Python CLI 的 install-deps」
+bash scripts/install.sh          # 受限网络：CODERAG_PIP_ARGS="--index-url <镜像>" bash scripts/install.sh
 
 # 3. 验证引擎可用（这一步不涉及 DSH）
-dsh-coderag --version            # 期望输出：dsh-coderag 2.0.0
-dsh-coderag index /path/to/repo  # 期望：indexed N files, M chunks into .../.coderag/index.sqlite3
-dsh-coderag search "用户令牌在哪里校验" --root /path/to/repo
+"$CODERAG_PYTHON" -m dsh_coderag doctor     # 打印可复制的 CODERAG_PYTHON
+"$CODERAG_PYTHON" -m dsh_coderag index /path/to/repo
+"$CODERAG_PYTHON" -m dsh_coderag search "用户令牌在哪里校验" --root /path/to/repo
 
-# 4. 告诉 DSH 用哪个解释器（重要：patch 里的默认值是作者机器的路径）
-export CODERAG_PYTHON="$(command -v python)"
-
-# 5. 把插件挂进 DSH
-./scripts/dsh web --patch ./cordis.patch.yml
+# 4. 把插件挂进 DSH（./scripts/dsh 会自己找到解释器并导出 CODERAG_PYTHON）
+./scripts/dsh --profile web --patch ./cordis.patch.yml
 ```
+
+### Windows（PowerShell）
+
+```powershell
+# 1. 克隆
+git clone https://github.com/VermilionPasvikin/dsh-coderag.git
+Set-Location dsh-coderag
+
+# 2. 装引擎与依赖：PowerShell 里没有 sh，所以直接用解释器调 pip / CLI
+python -m pip install .                  # 开发者用 python -m pip install -e ".[dev]"
+python -m dsh_coderag doctor             # 探测解释器 / 版本 / FTS5，并打印 CODERAG_PYTHON
+python -m dsh_coderag index C:\path\to\repo
+python -m dsh_coderag search "用户令牌在哪里校验" --root C:\path\to\repo
+
+# 3. 把 doctor 打印的解释器交给 patch（重要：patch 内置默认值是作者机器的 macOS 路径）
+$env:CODERAG_PYTHON = (python -c "import sys; print(sys.executable)")
+
+# 4. 挂插件并启动。Windows 上直接用 dsh：本仓库的 ./scripts/dsh 是 sh 脚本，PowerShell 里跑不了
+dsh --profile web --patch .\cordis.patch.yml
+# 没有全局 dsh 时：npx @deepseek-ai/dsh@0.1.5-rc.1 --profile web --patch .\cordis.patch.yml
+```
+
+> **为什么 Windows 用 `python -m pip install .` 而不是 `install-deps`**：`python -m dsh_coderag …`
+> 要求包**已经可导入**，而全新 clone 上它还没装。`install-deps` 做的是「装 + 装后自检」，
+> 在包可导入之后随时可以重跑它。装了 Git for Windows 的话，也可以直接在 Git Bash 里跑
+> `bash scripts/install.sh`（实测可用）。
 
 > **`CODERAG_PYTHON` 不设会怎样**：patch 的内置默认值是
 > `/opt/anaconda3/envs/forBSH/bin/python`——那是**作者本机**的路径，在你的机器上多半不存在，
@@ -124,29 +151,36 @@ export CODERAG_PYTHON="$(command -v python)"
 > （`--port` / `--no-open` / `--host`）**之前**，否则报 `error: unknown option '--patch'`。
 > 正确写法：`./scripts/dsh --profile web --patch ./cordis.patch.yml --port 3099`（实测）。
 
-> **`dsh` 不一定在 PATH 上**，所以本仓库统一用 `./scripts/dsh`（`AGENTS.md` E-07）；
-> 若你已有全局 `dsh`，它等价于直接敲 `dsh`。
-
-一键安装脚本（会检查解释器、Python 版本与 FTS5，并验证中文 bigram 往返；可重复运行）：
-
-```sh
-bash scripts/install.sh                       # 受限网络：CODERAG_PIP_ARGS="--index-url <镜像>" ...
-```
+> **`dsh` 不一定在 PATH 上**，所以 macOS / Linux 上本仓库统一用 `./scripts/dsh`（`AGENTS.md` E-07）；
+> 若你已有全局 `dsh`，它等价于直接敲 `dsh`。**Windows 上没有 `sh`，请直接用全局 `dsh`**
+> 或 `npx @deepseek-ai/dsh@<钉的版本>`——`./scripts/dsh` 在 PowerShell 里跑不了。
+>
+> **两个 shell 脚本的平台范围**：`scripts/install.sh`（`bash`）与 `scripts/dsh`（`sh`）是
+> **macOS / Linux 用法**；它们只做「找到解释器 → 转发」，安装与自检逻辑都在跨平台的 Python CLI
+> （`dsh-coderag doctor` / `install-deps`）里，所以三个平台走的是**同一条代码路径**，
+> 而且那条路径能被 `pytest` 直接覆盖。
 
 **怎么确认装上了**——`dsh plugin add` 在 pnpm 非零退出时会**静默跳过 bundle 登记**，
 插件看起来装上了却永远不会加载（`AGENTS.md` E-05）。务必自查这一条：
 
 ```sh
+# macOS / Linux
 ./scripts/dsh --profile <名字> --dump-config | grep -A2 '== dsh-coderag'
-# 期望看到：# == dsh-coderag   然后  - id: mcp-coderag
 ```
+
+```powershell
+# Windows
+dsh --profile <名字> --dump-config | Select-String -Pattern '== dsh-coderag' -Context 0,2
+```
+
+期望看到 `# == dsh-coderag`，紧随一行 `- id: mcp-coderag`。
 
 | 现象 | 怎么办 |
 |---|---|
 | `--dump-config` 里没有 `# == dsh-coderag` | bundle 没被登记：回头看 `add` 的 pnpm 报错；若报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，把 pnpm 打印的精确 key 写进 `~/.dsh/profiles/<名字>/pnpm-workspace.yaml` 的 `allowBuilds:` 下（`<key>: true`）后重跑 `add` |
-| 会话里没有 `mcp__coderag__code_search` | MCP 子进程起不来，最常见是解释器路径：`export CODERAG_PYTHON=<真正装了 dsh_coderag 的解释器>`，用 `"$CODERAG_PYTHON" -m dsh_coderag --version` 确认 |
+| 会话里没有 `mcp__coderag__code_search` | MCP 子进程起不来，最常见是解释器路径。macOS / Linux：`export CODERAG_PYTHON=<真正装了 dsh_coderag 的解释器>`；Windows：`$env:CODERAG_PYTHON = "<同一个路径>"`。用 `python -m dsh_coderag --version`（或 `"$CODERAG_PYTHON" -m dsh_coderag --version`）确认 |
 | `pip install` 报 `externally-managed-environment` | PEP 668：用 conda 或 venv；**不要**用 `--break-system-packages` |
-| 中文检索总是空 | 该解释器的 SQLite 没编译 FTS5：`bash scripts/install.sh` 会预检并给指引 |
+| 中文检索总是空 | 该解释器的 SQLite 没编译 FTS5：macOS / Linux 上 `bash scripts/install.sh`、Windows 上 `python -m dsh_coderag install-deps` 都会预检并给指引 |
 
 更完整的安装实录与边界见 [`docs/m4-install-verification.md`](docs/m4-install-verification.md)。
 
