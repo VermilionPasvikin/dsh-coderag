@@ -253,17 +253,29 @@ export CODERAG_PYTHON="C:\Users\15349\AppData\Local\Temp\dsh-m6-t604\fresh-pytho
 
 ## 6. 两平台并列
 
-| 项 | **Windows**（本次实测） | **macOS** |
-|---|---|---|
-| (a) 默认安装路径零向量依赖 | **已核实**：全新解释器装完 `import numpy` 失败、`Requires` 无 numpy | **未执行**（本机无 macOS，归 `T6-03b`） |
-| (b) `plugin add` 无静默跳过 | **已核实**：exit 0、`+ dsh-coderag link:…`、pnpm v11.7.0、无 `ERR_PNPM` | **未执行**（归 `T6-03b`） |
-| (b) `--dump-config` 含 bundle 标记 | **已核实**：`# == dsh-coderag` | **未执行**（归 `T6-03b`） |
-| (c) `code_search` 命中目标文件 | **已核实**：`status: ready`、`src/auth/token.py:1-6` | **未执行**（归 `T6-03b`） |
-| (d) 终端形态 | 只有 PowerShell 5.1，`pwsh` 缺席 | **未执行**（归 `T6-03b`） |
-| DSH 版本 | `0.2.0-rc.2`（本机自带；项目钉的是 `0.1.5-rc.1`） | **未执行** |
+macOS 栏取自 **`T6-03b`** 的集中复核（2026-09-30 裁决：M6 的 macOS 复核集中做一次），
+完整原始输出与结论见 [`docs/m6-macos-verification.md`](m6-macos-verification.md)。
 
-**macOS 那一栏整体未执行**，因此本文件**不构成**「Windows 与 macOS 并列可查」的完成证据——
-那一栏要等 `T6-03b` 的集中 macOS 复核补齐。这是 2026-09-30 裁决时的既定安排，不是遗漏。
+| 项 | **Windows**（本文实测） | **macOS**（`T6-03b` 实测） |
+|---|---|---|
+| (a) 默认安装路径零向量依赖 | **已核实**：全新解释器装完 `import numpy` 失败、`Requires` 无 numpy | **不由 macOS 提供证据**——forBSH 里装着 numpy 2.2.6（跑向量用例的前提），不是「全新默认安装」的样本；该断言由 Windows 这一栏独立成立 |
+| (b) `plugin add` 无静默跳过 | **已核实**：exit 0、`+ dsh-coderag link:…`、pnpm v11.7.0、无 `ERR_PNPM` | **已核实**：exit 0、`+ dsh-coderag link:…`、pnpm v12.4.2、无 `ERR_PNPM`，且全新 `DSH_HOME` 下确实新建了 `profiles/m6mac/` |
+| (b) `--dump-config` 含 bundle 标记 | **已核实**：`# == dsh-coderag` | **已核实**：第 333 行 `# == dsh-coderag`，负面扫描 0 命中 |
+| (c) `code_search` 命中目标文件 | **已核实**：`status: ready`、`src/auth/token.py:1-6`、3 files / 7 chunks | **已核实**：同样 `status: ready`、`src/auth/token.py:1-6`、3 files / 7 chunks、`isError: False` |
+| (d) 终端形态 | 只有 PowerShell 5.1，`pwsh` 缺席 | 不适用（macOS 没有这两代 PowerShell） |
+| DSH 版本 | `0.2.0-rc.2`（本机自带；项目钉的 `0.1.5-rc.1` 本机无缓存） | `0.1.5-rc.1`（`./scripts/dsh` 走全局 `dsh`，**正是项目钉的版本**） |
+| 全量测试 | `570 passed, 2 skipped`（含 `T6-03b` 之后新增的 2 条） | `567 passed, 5 skipped` |
+
+**两栏的差异已逐条对上账**，不是「差不多就行」：两边**收集到的用例数相同**（572 条）。
+Windows 多通过 3 条、macOS 多跳过 3 条——正是 `tests/test_path_filter.py` 里
+`skipif(sys.platform != "win32")` 的那 3 条 Windows 风格路径用例；两边都另有 2 条 opt-in
+语料用例跳过（`CODERAG_L2_CORPUS` / `CODERAG_EVAL_CORPUS`）。`570 − 3 = 567`、`2 + 3 = 5`，
+**两边完全闭合**。
+
+> **一处不等价、必须并列声明的差异**：Windows 用的是本机自带的 `dsh` `0.2.0-rc.2`，
+> macOS 用的是项目钉的 `0.1.5-rc.1`。也就是说「插件登记 + `dump-config`」这一环在
+> **两个不同的 DSH 版本**上各自通过，而**没有任何一个版本被两平台都跑过**。
+> 这一栏不能读成「同一版本上两平台一致」。
 
 ---
 
@@ -315,8 +327,10 @@ export CODERAG_PYTHON="C:\Users\15349\AppData\Local\Temp\dsh-m6-t604\fresh-pytho
 
 | 项 | 原因 | 归属 |
 |---|---|---|
-| macOS 侧的全部五项 | 本机无 macOS 机器 | **`T6-03b`**（M6 的集中 macOS 复核） |
 | 「DSH 在 `CODERAG_PYTHON` 下真的用该解释器拉起 MCP 子进程」 | `--dump-config` 不求值 `!!js`；`dsh` 无「调用 MCP 工具」的命令 | 需一次带 model key 的会话，或 `T6-05` 如实措辞 |
 | 模型侧的工具采纳（`T1-15` 那一环） | 需要 model key | 不属于 M6 |
-| 在 **DSH `0.1.5-rc.1`**（项目钉的版本）下的同样结论 | 本机只有 `0.2.0-rc.2` | 如需，须在有该版本缓存的机器上复跑 |
+| 同一个 DSH 版本下的两平台结论 | Windows 只有本机自带的 `0.2.0-rc.2`，macOS 用项目钉的 `0.1.5-rc.1` | 如需，须在有 `0.1.5-rc.1` 缓存的机器上复跑 |
 | `pwsh` 与 PowerShell 5.1 的行为差异 | 本机无 `pwsh` | 无法在有 `pwsh` 的机器之外补 |
+
+**已补上的一项**：§6 的 macOS 栏由 `T6-03b` 的集中复核（`docs/m6-macos-verification.md`）提供，
+两平台结论**并列可查**，且差异已逐条对上账——本任务的期望结果因此全部成立。
