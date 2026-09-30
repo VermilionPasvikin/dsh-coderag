@@ -543,6 +543,20 @@ code: INDEX_READ_FAILED
 message: ...
 ```
 
+**工作区不可用时**（缺 `CODERAG_ROOT`、取值非法、或根落在 DSH 自己的 home 之内，`T6-25`）：
+
+```
+status: error
+code: WORKSPACE_INVALID
+message: CODERAG_ROOT points inside DSH's own home (...): ...
+hint: Point CODERAG_ROOT at the workspace you want to search.
+root: <引擎实际使用的工作区绝对路径>
+```
+
+> **`root:` 行**（`T6-25`）：`index_status` 与其他状态返回体都会带上引擎**实际解析到**的工作区绝对路径。
+> 没有它，「这个工作区还没有索引」与「你看的是另一个目录」在返回里**无法区分**——`2026-09-30` 就
+> 因此排查了一轮（子进程的根落在 `%USERPROFILE%\.dsh\profiles\desktop`，而用户的索引在游戏目录里）。
+
 #### 工具 2：`code_outline`
 
 ```jsonc
@@ -1085,6 +1099,7 @@ RRF 公式：`score(d) = Σ_r 1 / (k + rank_r(d))`，`k = 60`（Elasticsearch / 
 | code | 触发条件 |
 |---|---|
 | `INDEX_NOT_FOUND` | 工作区还没有索引 |
+| `WORKSPACE_INVALID` | 工作区或其设置不可用（缺 `CODERAG_ROOT`、取值非法、或根落在 **DSH 自己的 home 之内**，见 `T6-25`） |
 | `FTS5_UNAVAILABLE` | 本机 SQLite 未编译 FTS5（**必须给出可操作提示**，见 `TESTING.md` §4.2） |
 | `INDEX_RUNNING` | 已有索引任务在跑 |
 | `INDEX_TOO_MANY_FILES` | 超过 `maxFiles`（**必须带上实际数量**） |

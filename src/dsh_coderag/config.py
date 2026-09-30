@@ -20,6 +20,9 @@ ENV_BATCH_SIZE = "CODERAG_BATCH_SIZE"
 ENV_MAX_WORKERS = "CODERAG_MAX_WORKERS"
 ENV_MAX_FILE_BYTES = "CODERAG_MAX_FILE_BYTES"
 ENV_EXTRA_EXTENSIONS = "CODERAG_EXTRA_EXTENSIONS"
+ENV_DSH_HOME = "DSH_HOME"
+
+DSH_HOME_DIRNAME = ".dsh"
 
 EXTENSION_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_+-]*$")
 
@@ -136,6 +139,46 @@ class IndexConfig:
         return self.batch_size if self.batch_size is not None else DEFAULT_BATCH_SIZE
 
 
+def _dsh_home(environ: Mapping[str, str]) -> Path | None:
+    """The DSH home this process can see, or None when there is no such directory.
+
+    `DSH_HOME` is scrubbed from a stdio child's environment (E-02), so the default
+    location is checked too - that absent-variable case is exactly the one the
+    guard exists for.
+    """
+    configured = _read_optional_str(environ, ENV_DSH_HOME)
+    if configured is not None:
+        return Path(configured)
+    default = Path.home() / DSH_HOME_DIRNAME
+    return default if default.is_dir() else None
+
+
+def _refuse_dsh_home(root: Path, environ: Mapping[str, str]) -> None:
+    """Reject a workspace that points inside DSH's own home (T6-25).
+
+    The desktop app starts the engine in its profile directory, so a root that is
+    merely inherited from the working directory lands in DSH's own state. Indexing
+    that is never what the user meant, yet it used to succeed silently - and once
+    such an index existed, `index_status` reported it ready and the model could
+    answer from DSH's own files. A required setting must fail rather than be
+    guessed (AGENTS.md 3.2).
+    """
+    home = _dsh_home(environ)
+    if home is None:
+        return
+    try:
+        resolved_root = root.resolve()
+        resolved_home = home.resolve()
+    except OSError:
+        return
+    if resolved_root == resolved_home or resolved_home in resolved_root.parents:
+        raise ConfigError(
+            f"{ENV_ROOT} points inside DSH's own home ({resolved_home}): {resolved_root}. "
+            f"The desktop app starts the engine in its profile directory, so an unset "
+            f"{ENV_ROOT} lands there; set {ENV_ROOT} to the workspace you want to search."
+        )
+
+
 def load_config(environ: Mapping[str, str] | None = None) -> IndexConfig:
     """Build an IndexConfig from environment variables.
 
@@ -151,8 +194,10 @@ def load_config(environ: Mapping[str, str] | None = None) -> IndexConfig:
     root_value = env.get(ENV_ROOT)
     if root_value is None or not root_value.strip():
         raise ConfigError(f"{ENV_ROOT} is required and must be a non-empty path")
+    root = Path(root_value)
+    _refuse_dsh_home(root, env)
     return IndexConfig(
-        root=Path(root_value),
+        root=root,
         max_files=_read_positive_int(env, ENV_MAX_FILES, DEFAULT_MAX_FILES),
         max_tokens=_read_positive_int(env, ENV_MAX_TOKENS, DEFAULT_MAX_TOKENS),
         max_file_bytes=_read_positive_int(env, ENV_MAX_FILE_BYTES, DEFAULT_MAX_FILE_BYTES),

@@ -158,3 +158,36 @@ def test_load_config_for_lets_an_explicit_root_win(tmp_path: Path) -> None:
     other = tmp_path / "other"
     config = load_config_for(tmp_path, {"CODERAG_ROOT": str(other)})
     assert config.root == other
+
+
+def test_a_root_inside_dsh_home_is_refused(tmp_path: Path) -> None:
+    """T6-25: the desktop app inherits its profile directory as the root.
+
+    That directory is DSH's own state, never the user's workspace, and indexing it
+    used to succeed silently.
+    """
+    dsh_home = tmp_path / ".dsh"
+    profile = dsh_home / "profiles" / "desktop"
+    profile.mkdir(parents=True)
+
+    with pytest.raises(ConfigError, match="DSH"):
+        load_config({"CODERAG_ROOT": str(profile), "DSH_HOME": str(dsh_home)})
+
+
+def test_the_dsh_home_itself_is_refused(tmp_path: Path) -> None:
+    dsh_home = tmp_path / ".dsh"
+    dsh_home.mkdir()
+
+    with pytest.raises(ConfigError, match="DSH"):
+        load_config({"CODERAG_ROOT": str(dsh_home), "DSH_HOME": str(dsh_home)})
+
+
+def test_a_workspace_beside_dsh_home_is_accepted(tmp_path: Path) -> None:
+    dsh_home = tmp_path / ".dsh"
+    dsh_home.mkdir()
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    config = load_config({"CODERAG_ROOT": str(workspace), "DSH_HOME": str(dsh_home)})
+
+    assert config.root == workspace

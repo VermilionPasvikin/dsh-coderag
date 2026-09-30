@@ -244,3 +244,48 @@ async def test_code_search_honours_max_tokens_as_its_default_budget(
     assert omitted == snapshot(
         ["[1 more hit omitted by token budget; raise max_tokens to see it]"]
     )
+
+
+@pytest.mark.anyio
+async def test_index_status_reports_the_workspace_it_used(
+    client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T6-25: "no index" and "you are looking at the wrong directory" differ.
+
+    The report that prompted this could not tell the two apart.
+    """
+    monkeypatch.delenv("CODERAG_ROOT", raising=False)
+
+    text = (await client.call_tool("index_status", {})).content[0].text
+
+    assert "code: INDEX_NOT_FOUND" in text
+    assert f"root: {tmp_path.resolve()}" in text
+
+
+@pytest.mark.anyio
+async def test_a_workspace_inside_dsh_home_is_refused(
+    client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T6-25: the desktop app's inherited root is DSH's own state, not a workspace."""
+    monkeypatch.setenv("DSH_HOME", str(tmp_path))
+    monkeypatch.delenv("CODERAG_ROOT", raising=False)
+
+    text = (await client.call_tool("index_status", {})).content[0].text
+
+    assert "code: WORKSPACE_INVALID" in text
+    assert "DSH" in text
+    assert "CODERAG_ROOT" in text
+
+
+@pytest.mark.anyio
+async def test_code_index_refuses_a_workspace_inside_dsh_home(
+    client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Indexing DSH's own home is what created the stray index in the report."""
+    monkeypatch.setenv("DSH_HOME", str(tmp_path))
+    monkeypatch.delenv("CODERAG_ROOT", raising=False)
+
+    text = (await client.call_tool("code_index", {})).content[0].text
+
+    assert "code: WORKSPACE_INVALID" in text
+    assert not (tmp_path / ".coderag").exists(), "nothing may be created there"

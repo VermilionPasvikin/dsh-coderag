@@ -183,6 +183,7 @@ def _dispatch(
     name: str, arguments: dict[str, Any], root_provider: Callable[[], Path]
 ) -> str:
     """Run one tool, converting every expected failure into structured text."""
+    root: Path | None = None
     try:
         root = root_provider()
         if name == "code_search":
@@ -194,8 +195,14 @@ def _dispatch(
         if name == "index_status":
             return _index_status(arguments, root)
     except ConfigError as exc:
+        # The workspace or one of its settings is unusable. Reporting this as
+        # INDEX_NOT_FOUND hid the real reason behind "no index" (T6-25).
         return render_status(
-            SearchStatus.ERROR, message=str(exc), code=ErrorCode.INDEX_NOT_FOUND
+            SearchStatus.ERROR,
+            message=str(exc),
+            code=ErrorCode.WORKSPACE_INVALID,
+            hint="Point CODERAG_ROOT at the workspace you want to search.",
+            root=root,
         )
     except FileNotFoundError as exc:
         return render_status(
@@ -304,33 +311,39 @@ def _code_index(arguments: dict[str, Any], root: Path) -> str:
     relative = arguments.get("path")
     if isinstance(relative, str) and relative:
         target = (root / relative).resolve()
+    # Validate before creating anything: a refused workspace must not be left with
+    # a .coderag directory it never earned (T6-25).
+    config = workspace_config(root)
     db_path = target.resolve() / ".coderag" / "index.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    config = workspace_config(root)
     task_id = TaskManager(db_path).start(target, partial(index_sync, config=config))
     return json.dumps(
         {
             "taskId": task_id,
             "state": "pending",
+            # Which workspace this run targets (T6-25): the whole point of the
+            # field is that a wrong root is visible on the first call.
+            "root": str(target.resolve()),
             "hint": "Poll index_status with this taskId.",
         },
         ensure_ascii=False,
     )
 
 
-def _no_index_status() -> str:
+def _no_index_status(root: Path) -> str:
     """Return the shared "no index for this workspace" error payload."""
     return render_status(
         SearchStatus.ERROR,
         message="no index for this workspace",
         code=ErrorCode.INDEX_NOT_FOUND,
+        root=root,
     )
 
 
-def _index_task_status(db_path: Path, task_id: str) -> str:
+def _index_task_status(db_path: Path, task_id: str, root: Path) -> str:
     """Render one indexing task's persisted state (the task_id form)."""
     if not db_path.exists():
-        return _no_index_status()
+        return _no_index_status(root)
     run = TaskManager(db_path).status(task_id)
     return json.dumps(
         {
@@ -341,6 +354,7 @@ def _index_task_status(db_path: Path, task_id: str) -> str:
             "total_chunks": run.total_chunks,
             "done_chunks": run.done_chunks,
             "message": run.message,
+            "root": str(root.resolve()),
         },
         ensure_ascii=False,
     )
@@ -349,7 +363,7 @@ def _index_task_status(db_path: Path, task_id: str) -> str:
 def _workspace_index_status(root: Path, db_path: Path) -> str:
     """Render the workspace-wide index state (the no-task_id form)."""
     if not db_path.exists():
-        return _no_index_status()
+        return _no_index_status(root)
     connection = open_index(db_path)
     try:
         row = connection.execute(
@@ -359,7 +373,7 @@ def _workspace_index_status(root: Path, db_path: Path) -> str:
     finally:
         connection.close()
     if row is None:
-        return _no_index_status()
+        return _no_index_status(root)
     config = workspace_config(root)
     try:
         report = walk_with_report(
@@ -382,6 +396,9 @@ def _workspace_index_status(root: Path, db_path: Path) -> str:
         {
             "status": "ready" if row[0] else "indexing",
             "db_schema": row[1],
+            # The resolved workspace, so a wrong root cannot masquerade as a
+            # healthy empty index (T6-25).
+            "root": str(root.resolve()),
             "skipped": {"count": sum(skipped.values()), "reasons": skipped},
             # Not part of the skip report: an unlisted extension is not a skip.
             # Without this an empty index looks identical to a broken one (T6-16).
@@ -405,9 +422,13 @@ def _index_status(arguments: dict[str, Any], root: Path) -> str:
             hint=sqlite_caps.FTS5_HINT,
         )
     db_path = root.resolve() / ".coderag" / "index.sqlite3"
+    # Validate the workspace before answering, so a root that points inside DSH's
+    # own home is refused here as well instead of looking like a missing index
+    # (T6-25).
+    workspace_config(root)
     task_id = arguments.get("task_id")
     if isinstance(task_id, str) and task_id:
-        return _index_task_status(db_path, task_id)
+        return _index_task_status(db_path, task_id, root)
     return _workspace_index_status(root, db_path)
 
 

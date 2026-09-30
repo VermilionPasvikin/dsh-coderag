@@ -8,6 +8,7 @@ from dsh_coderag.types import Chunk, ErrorCode, Hit, IndexRun, SearchStatus
 def test_error_code_matches_the_documented_contract() -> None:
     assert [code.name for code in ErrorCode] == [
         "INDEX_NOT_FOUND",
+        "WORKSPACE_INVALID",
         "FTS5_UNAVAILABLE",
         "INDEX_RUNNING",
         "INDEX_TOO_MANY_FILES",

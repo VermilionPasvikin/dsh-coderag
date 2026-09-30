@@ -608,6 +608,7 @@ $env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
 | **只认白名单里的后缀** | 其余文件**根本不参与遍历结果**（不算 skip）；`Dockerfile` / `Makefile` 这类**没有扩展名**的文件任何配置都收不进来 | [① 扩展白名单](#-让引擎收录别的文件类型扩展白名单)、backlog |
 | **没有 grammar 的后缀是低置信度分块** | 按固定行数切块，`symbol_kind` 为 `None`；且 `Chunk.low_confidence` **只存在于内存**，不入库、不渲染，模型看不到 | backlog |
 | **MCP 子进程的工作区根在启动时就定死** | GUI 里打开别的文件夹**不会**改变它；一个 profile 只有一个根，换工作区要改 patch 并重启 | 上一小节 |
+| **根落在 DSH 自己的 home 之内会被拒绝** | 引擎返回 `WORKSPACE_INVALID`（不再静默索引 `%USERPROFILE%\.dsh`）；状态里会带上**实际使用的** `root` 绝对路径，便于一眼看出根错在哪 | 上一小节 |
 | **CLI 与 DSH 读不同的配置来源** | shell 里设的变量 CLI 认、DSH 会话不认；写进 patch 则反过来。两者写同一个索引文件，**谁最后跑 `index` 谁的内容生效** | 「谁读哪份配置」 |
 | **CLI 路径没有运行历史** | 中断后 `index_status` 只说「未就绪」，说不出「被中断、跑到多少」 | backlog |
 | **`searcher` 不读 `ready`** | 被中断的索引**仍可被搜到**（保留可用性的取舍）：命中可能来自不完整的数据，判断要靠 `index_status` | backlog |

@@ -7,6 +7,8 @@ search, rank or trim by token budget.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dsh_coderag.types import (
     ErrorCode,
     Hit,
@@ -88,11 +90,14 @@ def render_status(
     code: ErrorCode | None = None,
     hint: str | None = None,
     skipped: SkipReport | None = None,
+    root: Path | None = None,
 ) -> str:
     """Render a status or error payload as model-visible plain text.
 
     Fields appear in a fixed order and every dynamic value is collapsed onto
-    one line so it cannot forge an extra status field.
+    one line so it cannot forge an extra status field. `root` is the workspace
+    the engine actually resolved (T6-25): without it, "no index" and "you are
+    looking at the wrong directory" are indistinguishable.
     """
     lines = [f"status: {status.value}"]
     if code is not None:
@@ -103,6 +108,8 @@ def render_status(
         lines.append(f"hint: {_one_line(hint)}")
     if skipped is not None:
         lines.append(_format_skip_report("skipped", skipped))
+    if root is not None:
+        lines.append(f"root: {_one_line(str(root))}")
     return "\n".join(lines) + "\n"
 
 
