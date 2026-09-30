@@ -84,26 +84,47 @@ class WalkReport:
     other_extensions: int = 0
 
 
+def effective_extensions(extra: frozenset[str] | None = None) -> frozenset[str]:
+    """The built-in whitelist plus whatever the user added (T6-17).
+
+    Additive by design: CODERAG_EXTRA_EXTENSIONS can only widen the net, never
+    drop a built-in extension, and it has no say over the secret filter that runs
+    on every file the net catches.
+    """
+    return CODE_EXTENSIONS if not extra else CODE_EXTENSIONS | extra
+
+
 def walk(
     root: Path,
     max_files: int = DEFAULT_MAX_FILES,
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+    extra_extensions: frozenset[str] | None = None,
 ) -> list[tuple[Path, int, int]]:
     """Collect whitelisted, non-secret, non-ignored files below root."""
-    return walk_with_report(root, max_files=max_files, max_file_bytes=max_file_bytes).files
+    return walk_with_report(
+        root,
+        max_files=max_files,
+        max_file_bytes=max_file_bytes,
+        extra_extensions=extra_extensions,
+    ).files
 
 
 def walk_with_report(
     root: Path,
     max_files: int = DEFAULT_MAX_FILES,
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+    extra_extensions: frozenset[str] | None = None,
 ) -> WalkReport:
     """Collect code files under root and count why others were skipped.
 
     Returns (absolute path, size in bytes, mtime in nanoseconds) for every
-    regular file whose suffix is in CODE_EXTENSIONS, sorted by path, plus the
-    number of code files dropped per reason (secret_file, gitignored,
-    too_large). A file that is not a code extension at all is not a skip.
+    regular file whose suffix is in the effective whitelist (the built-in
+    extensions plus extra_extensions, T6-17), sorted by path, plus the number of
+    code files dropped per reason (secret_file, gitignored, too_large). A file
+    that is not a code extension at all is not a skip.
+
+    Widening the whitelist does not widen the security filter: layer 1 (the
+    built-in secret blacklist) runs on every file that passes the extension gate.
 
     Raises:
         TooManyFilesError: If more than max_files indexable files exist. The
@@ -111,6 +132,7 @@ def walk_with_report(
     """
     base = root.resolve()
     spec = load_ignore_spec(base)
+    extensions = effective_extensions(extra_extensions)
     report = WalkReport()
     for candidate in base.rglob("*"):
         if not candidate.is_file():
@@ -122,7 +144,7 @@ def walk_with_report(
             # workspace indexed nothing should not be told about our sqlite file.
             continue
         report.seen_files += 1
-        if candidate.suffix.lower() not in CODE_EXTENSIONS:
+        if candidate.suffix.lower() not in extensions:
             report.other_extensions += 1
             continue
         relative_posix = relative.as_posix()

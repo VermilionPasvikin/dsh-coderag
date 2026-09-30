@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dsh_coderag import __version__
+from dsh_coderag.config import ConfigError, load_config_for
 from dsh_coderag.sqlite_caps import FTS5_HINT, fts5_available
 from dsh_coderag.text import to_bigrams
 
@@ -456,32 +457,36 @@ def _run_index(args: argparse.Namespace) -> int:
             hint="换成实际存在的路径——索引只读工作区，不会凭空创建目录",
             exit_code=EXIT_FAILED,
         )
-    summary = index_sync(root)
+    config = load_config_for(root)
+    summary = index_sync(root, config)
     _emit(
         f"indexed {summary.files} files, {summary.chunks} chunks "
         f"into {summary.root}/.coderag/index.sqlite3"
     )
     if summary.files == 0:
-        _report_empty_index(summary)
+        _report_empty_index(summary, config.extra_extensions)
     return EXIT_OK
 
 
-def _report_empty_index(summary: IndexSummary) -> None:
+def _report_empty_index(summary: IndexSummary, extra_extensions: frozenset[str]) -> None:
     """Explain an index that succeeded over nothing (T6-16).
 
     A workspace of game assets is a legitimate zero: the walk saw the files and
     skipped none of them, because an unlisted extension is not a skip. Reporting
     only `indexed 0 files` leaves the user unable to tell that apart from a
-    broken workspace.
+    broken workspace — and the whitelist it names must be the effective one, or
+    a user who just added their extension is told it is not supported (T6-17).
     """
-    from dsh_coderag.walker import CODE_EXTENSIONS
+    from dsh_coderag.walker import effective_extensions
 
-    listed = " ".join(sorted(CODE_EXTENSIONS))
+    listed = " ".join(sorted(effective_extensions(extra_extensions)))
     _emit(
         f"注意：没有可索引的文件——遍历看到 {summary.seen_files} 个文件，其中 "
         f"{summary.other_extensions} 个的后缀不在白名单内（{listed}）。"
     )
     _emit("      索引本身是成功的，但检索不会有结果；按内容查找请改用 grep 之类的工具。")
+    if not extra_extensions:
+        _emit("      要收录别的后缀，设 CODERAG_EXTRA_EXTENSIONS（例如 '.mxml,.as'）后重跑。")
 
 
 def _run_search(args: argparse.Namespace) -> int:
@@ -691,6 +696,18 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
     try:
         return handler(args)
+    except ConfigError as error:
+        # A bad value is a configuration problem, not an unexpected failure: it
+        # belongs to the documented "environment unusable" exit code, and the
+        # message already names the variable (T6-17).
+        return report_error(
+            CliError(
+                "CONFIG_INVALID",
+                str(error),
+                hint="改正该环境变量的取值后重跑；doctor 会打印当前生效的设置。",
+                exit_code=EXIT_ENV_UNUSABLE,
+            )
+        )
     except CliError as error:
         return report_error(error)
     except Exception as error:  # noqa: BLE001 - RL-09: no traceback may escape the CLI

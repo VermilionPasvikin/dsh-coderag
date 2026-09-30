@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -21,7 +20,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from dsh_coderag import __version__, sqlite_caps
-from dsh_coderag.config import ENV_ROOT, ConfigError, IndexConfig, load_config
+from dsh_coderag.config import ConfigError, IndexConfig, load_config, load_config_for
 from dsh_coderag.indexer import index_sync, open_index
 from dsh_coderag.render import render_search_result, render_status
 from dsh_coderag.searcher import OutlineSymbol, outline, search
@@ -177,9 +176,7 @@ def workspace_config(root: Path) -> IndexConfig:
     explicitly set `CODERAG_ROOT` still wins, and a malformed value still raises
     `ConfigError` rather than being silently replaced.
     """
-    environ = dict(os.environ)
-    environ.setdefault(ENV_ROOT, str(root))
-    return load_config(environ)
+    return load_config_for(root)
 
 
 def _dispatch(
@@ -366,7 +363,10 @@ def _workspace_index_status(root: Path, db_path: Path) -> str:
     config = workspace_config(root)
     try:
         report = walk_with_report(
-            root, max_files=config.max_files, max_file_bytes=config.max_file_bytes
+            root,
+            max_files=config.max_files,
+            max_file_bytes=config.max_file_bytes,
+            extra_extensions=config.extra_extensions,
         )
     except TooManyFilesError as exc:
         # The walk cannot finish under the configured limit, so report the real

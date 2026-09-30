@@ -125,6 +125,35 @@ def test_index_stays_quiet_when_there_is_something_to_index(
     assert "没有可索引的文件" not in capsys.readouterr().out
 
 
+def test_index_uses_the_extensions_the_user_added(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CODERAG_EXTRA_EXTENSIONS must reach the index run, not just the parser."""
+    (tmp_path / "screen.MXML").write_text("<mx:Canvas/>", encoding="utf-8")
+    monkeypatch.setenv("CODERAG_EXTRA_EXTENSIONS", ".mxml")
+
+    code = cli.main(["index", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == cli.EXIT_OK
+    assert "indexed 1 files" in out, out
+    assert "没有可索引的文件" not in out
+
+
+def test_empty_index_notice_names_the_effective_whitelist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Telling a user their extension is unsupported right after adding it is worse than silence."""
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("CODERAG_EXTRA_EXTENSIONS", ".mxml")
+
+    assert cli.main(["index", str(tmp_path)]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert ".mxml" in out, "the notice must list the effective extensions"
+    assert "CODERAG_EXTRA_EXTENSIONS" not in out, "no point suggesting what is already set"
+
+
 def test_doctor_prints_a_ready_to_paste_profile_override() -> None:
     """The override is the only thing that fixes a desktop app's spawn failure."""
     result = run_module("doctor")

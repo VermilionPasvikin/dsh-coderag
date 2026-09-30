@@ -450,6 +450,7 @@ code_search(query, path, limit, mode)
 | 基础 | `CODERAG_ROOT` | **无默认，缺失即 `ConfigError`** | — |
 | 基础 | `CODERAG_MAX_FILES` / `CODERAG_MAX_TOKENS` / `CODERAG_MAX_FILE_BYTES` | `20000` / `4000` / `1048576` | — |
 | 基础 | `CODERAG_BATCH_SIZE` / `CODERAG_MAX_WORKERS` | 不设则按机器自适应（`RL-07` 禁止硬编码） | — |
+| 基础 | `CODERAG_EXTRA_EXTENSIONS` | 空 = 只用内置白名单 `{.py,.c,.h,.cpp,.hpp,.ts,.js}`；**只增不减**，非法 token 报 `ConfigError` | `T6-17`；扩展名闸门在第 1 层黑名单**之前**，故不放大 `RL-03` 的暴露面 |
 | 本地后端 | `CODERAG_SEMANTIC`（只有 `on` 启用）/ `_BACKEND=ollama` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS` | 关闭 / `ollama` / `http://127.0.0.1:11434` / `bge-m3` / `30` / `16` / `100000` | `ADR-16` §4 |
 | 云端后端 | `_BACKEND=openai` / `_URL`（必须显式给出）/ `_MODEL`（必须显式给出）/ `_API_KEY` / `_ALLOW_REMOTE` | 关闭 / 无 / 无 / 无（缺失 → `SEMANTIC_AUTH_MISSING`，**不发起请求**）/ 未设 = 不允许 | `ADR-17` §4 |
 | 安装侧 | `CODERAG_WITH_SEMANTIC`（只有 `1` 才装 extra） | 未设 = 不装 | `ADR-16` §3.2 |

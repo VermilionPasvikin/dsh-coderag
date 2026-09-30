@@ -159,7 +159,10 @@ def _walk_targets(
     max_file_bytes = (
         config.max_file_bytes if config is not None else DEFAULT_MAX_FILE_BYTES
     )
-    report = walk_with_report(base, max_files=max_files, max_file_bytes=max_file_bytes)
+    extra = config.extra_extensions if config is not None else None
+    report = walk_with_report(
+        base, max_files=max_files, max_file_bytes=max_file_bytes, extra_extensions=extra
+    )
     current_paths = {
         absolute.relative_to(base).as_posix() for absolute, _, _ in report.files
     }

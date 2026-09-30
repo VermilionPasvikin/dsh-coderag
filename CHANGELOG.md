@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **`CODERAG_EXTRA_EXTENSIONS`：让用户自行扩展可索引的文件后缀**（`T6-17`）。内置白名单
+  （`.py` / `.c` / `.h` / `.cpp` / `.hpp` / `.ts` / `.js`）保持不变，这个变量**只增不减**：
+  逗号或空格分隔、大小写不敏感、可省前导点，例如 `CODERAG_EXTRA_EXTENSIONS=.mxml,.as`。
+  含点号的 token、路径分隔符与通配符一律报 `ConfigError`——`Path.suffix` 只取最后一段，
+  静默接受会让用户以为生效了。**密钥过滤不受影响**：扩展名闸门在第 1 层黑名单**之前**，
+  `.env*` / `*.pem` / `credentials*` 即使把其后缀加进白名单也仍然不入库（`RL-03`）。
+  没有对应 tree-sitter grammar 的后缀走 L4 低置信度分块（`low_confidence: true`）。
+
+### 修复
+
+- **`dsh-coderag index`（CLI）此前完全没有读取可选配置**：`CODERAG_MAX_FILES` /
+  `CODERAG_MAX_TOKENS` / `CODERAG_MAX_FILE_BYTES` / `CODERAG_EXTRA_EXTENSIONS` 在 CLI 路径上
+  都被忽略（`T6-07` 当时只把配置接进了 MCP 那条路径）。现在 CLI 与 MCP 共用
+  `config.load_config_for(root)`，两条路径读同一份配置。
+
 ## [2.1.1] - 2026-09-30
 
 **只发布在 GitHub**（tag / release，`v2.1.1`）——**不发布到 PyPI，也不发布到 npm**。

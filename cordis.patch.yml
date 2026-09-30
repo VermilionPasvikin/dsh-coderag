@@ -73,6 +73,14 @@
           # ambient environment (see "Where to configure" above).
           CODERAG_MAX_TOKENS: !!js process.env.CODERAG_MAX_TOKENS ?? '4000'
 
+          # Extra file extensions to index, on top of the built-in whitelist
+          # (.py .c .h .cpp .hpp .ts .js). Comma or space separated, e.g.
+          # '.mxml,.as'. It only ADDS: a built-in extension cannot be removed,
+          # and the secret blacklist (.env*, *.pem, credentials*, ...) still runs
+          # on every file the wider net catches (RL-03). Extensions without a
+          # tree-sitter grammar fall back to low-confidence chunking.
+          CODERAG_EXTRA_EXTENSIONS: !!js process.env.CODERAG_EXTRA_EXTENSIONS ?? ''
+
           # ==================================================================
           #  OPTIONAL SEMANTIC BACKEND — OFF BY DEFAULT
           # ==================================================================

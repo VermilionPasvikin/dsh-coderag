@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from dsh_coderag.config import ConfigError, load_config, load_semantic_config
+from dsh_coderag.config import ConfigError, load_config, load_config_for, load_semantic_config
 
 
 def test_load_config_reads_root_and_numeric_overrides(tmp_path: Path) -> None:
@@ -121,3 +121,40 @@ def test_cloud_backend_stays_unvalidated_while_disabled() -> None:
     config = load_semantic_config({"CODERAG_SEMANTIC_BACKEND": "openai"})
     assert config.enabled is False
     assert config.url == "http://127.0.0.1:11434"
+
+
+def test_extra_extensions_are_normalised(tmp_path: Path) -> None:
+    """Users type `.MXML`, `mxml` and ` .mxml ` for the same thing (T6-17)."""
+    config = load_config(
+        {"CODERAG_ROOT": str(tmp_path), "CODERAG_EXTRA_EXTENSIONS": " .MXML, as ,mxml"}
+    )
+    assert config.extra_extensions == frozenset({".mxml", ".as"})
+
+
+@pytest.mark.parametrize("raw", ["", "   ", ",", ", ,"])
+def test_blank_extra_extensions_mean_none(tmp_path: Path, raw: str) -> None:
+    """The patch ships an empty default, so empty must not be an error."""
+    config = load_config({"CODERAG_ROOT": str(tmp_path), "CODERAG_EXTRA_EXTENSIONS": raw})
+    assert config.extra_extensions == frozenset()
+
+
+@pytest.mark.parametrize("raw", ["a.b", ".d.ts", "..\\evil", "sub/dir", "*", "-"])
+def test_extra_extensions_reject_entries_that_could_never_match(
+    tmp_path: Path, raw: str
+) -> None:
+    """A dotted token or a glob would silently match nothing (`Path.suffix`)."""
+    with pytest.raises(ConfigError, match="CODERAG_EXTRA_EXTENSIONS"):
+        load_config({"CODERAG_ROOT": str(tmp_path), "CODERAG_EXTRA_EXTENSIONS": raw})
+
+
+def test_load_config_for_supplies_the_root_the_caller_already_has(tmp_path: Path) -> None:
+    """The CLI and `build_server(root=...)` know the root but still need config."""
+    config = load_config_for(tmp_path, {"CODERAG_EXTRA_EXTENSIONS": ".mxml"})
+    assert config.root == tmp_path
+    assert config.extra_extensions == frozenset({".mxml"})
+
+
+def test_load_config_for_lets_an_explicit_root_win(tmp_path: Path) -> None:
+    other = tmp_path / "other"
+    config = load_config_for(tmp_path, {"CODERAG_ROOT": str(other)})
+    assert config.root == other

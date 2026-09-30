@@ -8,6 +8,7 @@ state, and does not depend on any other dsh_coderag module.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,9 @@ ENV_MAX_TOKENS = "CODERAG_MAX_TOKENS"
 ENV_BATCH_SIZE = "CODERAG_BATCH_SIZE"
 ENV_MAX_WORKERS = "CODERAG_MAX_WORKERS"
 ENV_MAX_FILE_BYTES = "CODERAG_MAX_FILE_BYTES"
+ENV_EXTRA_EXTENSIONS = "CODERAG_EXTRA_EXTENSIONS"
+
+EXTENSION_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_+-]*$")
 
 DEFAULT_MAX_FILES = 20000
 DEFAULT_MAX_TOKENS = 4000
@@ -117,6 +121,7 @@ class IndexConfig:
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES
     batch_size: int | None = None
     max_workers: int | None = None
+    extra_extensions: frozenset[str] = frozenset()
 
     @property
     def workers(self) -> int:
@@ -153,7 +158,22 @@ def load_config(environ: Mapping[str, str] | None = None) -> IndexConfig:
         max_file_bytes=_read_positive_int(env, ENV_MAX_FILE_BYTES, DEFAULT_MAX_FILE_BYTES),
         batch_size=_read_optional_positive_int(env, ENV_BATCH_SIZE),
         max_workers=_read_optional_positive_int(env, ENV_MAX_WORKERS),
+        extra_extensions=_read_extensions(env, ENV_EXTRA_EXTENSIONS),
     )
+
+
+def load_config_for(root: Path, environ: Mapping[str, str] | None = None) -> IndexConfig:
+    """Load the config for a workspace whose root the caller already knows.
+
+    `load_config` requires CODERAG_ROOT, but the CLI takes the workspace as an
+    argument and `build_server(root=...)` lets a caller supply it outright. Both
+    still need the optional settings (limits, extra extensions), so the known
+    root is filled in first; an explicitly set CODERAG_ROOT still wins, and a
+    malformed value still raises rather than being replaced.
+    """
+    env = dict(os.environ if environ is None else environ)
+    env.setdefault(ENV_ROOT, str(root))
+    return load_config(env)
 
 
 def adaptive_workers(
@@ -266,3 +286,31 @@ def _read_optional_str(environ: Mapping[str, str], name: str) -> str | None:
     if raw is None or not raw.strip():
         return None
     return raw.strip()
+
+
+def _read_extensions(environ: Mapping[str, str], name: str) -> frozenset[str]:
+    """Parse a comma/whitespace separated list of extra file extensions.
+
+    The list only ADDS to the built-in whitelist: it cannot remove an extension,
+    and it cannot widen the secret filter (that runs afterwards either way).
+
+    Tokens are normalised — case-insensitive, an optional leading dot — and an
+    entry that could never match is rejected instead of being accepted silently:
+    `Path.suffix` is a single trailing segment, so `a.d.ts` (a dotted token) or a
+    path separator or a glob would match nothing while looking like it worked.
+    """
+    raw = environ.get(name)
+    if raw is None or not raw.strip():
+        return frozenset()
+    extensions: set[str] = set()
+    for token in re.split(r"[,\s]+", raw.strip()):
+        if not token:
+            continue
+        candidate = token.lower().lstrip(".")
+        if not candidate or not EXTENSION_TOKEN.match(candidate):
+            raise ConfigError(
+                f"{name} takes simple extensions such as '.mxml,.as' — no dots inside "
+                f"a token, no path separators, no wildcards; got {token!r}"
+            )
+        extensions.add(f".{candidate}")
+    return frozenset(extensions)

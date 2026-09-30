@@ -499,3 +499,18 @@
   `subprocess.run` 没指定编码、子进程也没固定 UTF-8，cp936 控制台下 `UnicodeDecodeError` 让
   `r.stdout` 变成 `None`，随后 `None + str` 抛 `TypeError`。现在两侧都钉成 UTF-8（`T6-10`）。
   这是 `M6` 的「同一份逻辑跨平台」承诺里漏掉的一处：门禁本身是跨平台的，**证明门禁可信的那个脚本却不是**。
+
+## `Chunk.low_confidence` 只存在于内存，从不落库也不渲染（发现于 `T6-17`，2026-09-30，**未顺手修**）
+
+- **事实（实测）**：`chunker.py` 会在 L4（无解析器降级）等路径上把 `Chunk.low_confidence` 置真
+  （`chunker.py:83` / `130` / `132`），但 `chunks` 表只有
+  `id / file_id / seq / start_line / end_line / symbol_kind / symbol_name / text / content_hash`
+  ——**没有这一列**，而 `render.py` 里 `low_confidence` **一次都没出现**。
+  实测：把一个 `.MXML` 加进白名单并索引，得到的是 `symbol_kind = None` 的 chunk，
+  「这块是低置信度切出来的」这件事**对模型完全不可见**。
+- **影响**：`T2-04` 的行文是「无解析器降级（L4，带 `low_confidence: true`）」——字面成立
+  （`Chunk` 上确实带这个字段），但**没有任何下游消费者**：模型无从判断某个 chunk 是猜着切的，
+  也就无法据此降低信任。这与 `T6-17` 直接相关：**用户自行扩展的后缀全都走这条路**。
+- **建议修法**：给 `chunks` 加一列（`SCHEMA_VERSION` 要一起动）并在渲染的位置行上标出来，
+  例如 `── path:1-6  [low-confidence]  (chunk 0)`；补一条走 L4 的渲染快照测试。
+  属独立改动，需所有者立任务。

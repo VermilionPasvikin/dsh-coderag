@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dsh_coderag.walker import CODE_EXTENSIONS, walk, walk_with_report
+import pytest
+
+from dsh_coderag.walker import (
+    CODE_EXTENSIONS,
+    effective_extensions,
+    walk,
+    walk_with_report,
+)
 
 
 def _relative_paths(entries: list[tuple[Path, int, int]], base: Path) -> list[str]:
@@ -59,3 +66,41 @@ def test_walk_counts_files_whose_extension_is_not_code(tmp_path: Path) -> None:
     assert report.reasons == {}, "an unlisted extension is not a skip"
     assert report.seen_files == 4
     assert report.other_extensions == 3
+
+
+def test_walk_collects_user_added_extensions(tmp_path: Path) -> None:
+    """CODERAG_EXTRA_EXTENSIONS widens the net for whoever needs it (T6-17)."""
+    (tmp_path / "screen.MXML").write_text("<mx:Canvas/>", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+
+    report = walk_with_report(tmp_path, extra_extensions=frozenset({".mxml"}))
+
+    assert [path.name for path, _, _ in report.files] == ["screen.MXML"]
+    assert report.seen_files == 2
+    assert report.other_extensions == 1, "the added extension is no longer 'other'"
+
+
+@pytest.mark.parametrize(
+    ("name", "extra"),
+    [(".env.local", ".local"), ("server.pem", ".pem"), ("credentials.json", ".json")],
+)
+def test_added_extensions_cannot_reach_secret_files(
+    tmp_path: Path, name: str, extra: str
+) -> None:
+    """RL-03: widening the whitelist must not widen the secret filter.
+
+    The extension gate runs BEFORE layer 1, so a user can hand it exactly the
+    file names the blacklist exists to stop; layer 1 still has to drop them.
+    """
+    (tmp_path / name).write_text("SECRET=1\n", encoding="utf-8")
+
+    report = walk_with_report(tmp_path, extra_extensions=frozenset({extra}))
+
+    assert report.files == [], f"{name} must never become indexable"
+    assert report.reasons == {"secret_file": 1}
+
+
+def test_builtin_extensions_cannot_be_removed() -> None:
+    """The extra list only adds: a subset argument still yields the full set."""
+    assert effective_extensions(frozenset({".mxml"})) > CODE_EXTENSIONS
+    assert effective_extensions(frozenset()) == CODE_EXTENSIONS

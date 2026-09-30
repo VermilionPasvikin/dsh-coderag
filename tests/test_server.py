@@ -206,6 +206,23 @@ async def test_index_status_reports_what_the_walk_saw(
 
 
 @pytest.mark.anyio
+async def test_index_status_counts_files_the_user_whitelisted(
+    client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server's walk must use the effective whitelist too (T6-17)."""
+    (tmp_path / "screen.MXML").write_text("<mx:Canvas/>", encoding="utf-8")
+    monkeypatch.delenv("CODERAG_ROOT", raising=False)
+    monkeypatch.setenv("CODERAG_EXTRA_EXTENSIONS", ".mxml")
+
+    payload = json.loads((await client.call_tool("code_index", {})).content[0].text)
+    final = await _wait_for_ready(client, payload["taskId"])
+    status = json.loads((await client.call_tool("index_status", {})).content[0].text)
+
+    assert final["total_files"] == 1
+    assert status["files"] == snapshot({"indexable": 1, "seen": 1, "other_extensions": 0})
+
+
+@pytest.mark.anyio
 async def test_code_search_honours_max_tokens_as_its_default_budget(
     client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

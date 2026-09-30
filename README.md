@@ -315,10 +315,29 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 | `CODERAG_MAX_FILE_BYTES` | 单文件大小上限，超过则跳过并计入 `skipped.too_large` | `1048576`（1 MiB） | ✅ 建索引时生效，且 `index_status` 的 `skipped` 统计与它一致 |
 | `CODERAG_BATCH_SIZE` | 索引写库批大小（不设则自适应推导） | 自适应（1–512） | ✅ 建索引时生效 |
 | `CODERAG_MAX_WORKERS` | 索引并发度（不设则按 CPU/内存推导） | 自适应（上限 8） | ✅ 建索引时生效 |
+| `CODERAG_EXTRA_EXTENSIONS` | **追加**可索引的文件后缀（内置白名单**不可移除**） | 空（只有 `.py` `.c` `.h` `.cpp` `.hpp` `.ts` `.js`） | ✅ 建索引与 `index_status` 都生效；逗号或空格分隔，如 `.mxml,.as`；**密钥过滤不受影响** |
+
+**要收录别的格式**（游戏资产 `.mxml`、模板、`.as` 之类）——设 `CODERAG_EXTRA_EXTENSIONS` 即可，
+不用改代码：
+
+```powershell
+$env:CODERAG_EXTRA_EXTENSIONS = ".mxml,.as"      # 桌面版请写进 profile 的 cordis.patch.yml
+& $py -m dsh_coderag index $repo                 # 空索引时的那条提示会列出**生效的**白名单
+```
+
+- **只增不减**：内置的 7 个后缀去不掉；`CODERAG_EXTRA_EXTENSIONS` 写错（含点号的 token、路径分隔符、
+  通配符）会**报错**而不是被静默忽略——`Path.suffix` 只取最后一段，`a.d.ts` 这类写法永远匹配不上。
+- **没有 grammar 的后缀按固定行数切分**：tree-sitter 只认识有限的语言，`.mxml` 这类会走 L4 规则
+  按固定行数切块，`symbol_kind` 为 `None`（渲染出来没有 `[符号名]` 标注）——能检索、能命中，
+  但没有声明边界这一层信息。（`Chunk.low_confidence` 字段目前**只存在于内存**：不入库、也不渲染，
+  见 [`docs/backlog.md`](docs/backlog.md)。）
+- **不会绕过密钥过滤**：扩展名闸门在第 1 层黑名单**之前**，所以 `.env.local` / `*.pem` /
+  `credentials*` 即使把后缀加进白名单**也仍然不入库**（`RL-03`，有测试钉住）。
 
 > **这些变量曾经在 MCP 路径上全部不生效**（`config.py` 读了，但 `server.py` 建索引时没把配置传下去、
 > 检索预算还硬编码 4000），`v2.1.0` 发布时如实标注为 ⚠️。**已在 `T6-07` 修好接线并补了 3 条测试**——
 > 这 3 条测试在修复前会红（`assert 2 == 1`、命中数未被裁剪），因此这条路径不会再次静默失效。
+> `T6-17` 又把同一条配置通路接进了 **CLI**（此前 `dsh-coderag index` 完全不读这些变量）。
 
 ## 它是怎么工作的
 
