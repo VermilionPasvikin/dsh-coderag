@@ -15,6 +15,7 @@ from pathlib import Path
 import pathspec
 
 from dsh_coderag.config import DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_FILES
+from dsh_coderag.log import AUDIT_DIR
 from dsh_coderag.sanitize import is_secret_path
 from dsh_coderag.types import ErrorCode
 
@@ -67,10 +68,20 @@ class TooManyFilesError(Exception):
 
 @dataclass
 class WalkReport:
-    """One walk's collected files plus the per-reason skip counts."""
+    """One walk's collected files plus the per-reason skip counts.
+
+    `seen_files` and `other_extensions` are deliberately NOT part of `reasons`:
+    the skip report answers "why was this code file dropped" (secret file,
+    ignored, too large), and a file whose extension is not code at all is not a
+    skip. A workspace of 100k `.mxml` files therefore has zero skips and zero
+    indexable files at the same time — both true, and together useless to the
+    user unless the counts below explain the emptiness (T6-16).
+    """
 
     files: list[tuple[Path, int, int]] = field(default_factory=list)
     reasons: dict[str, int] = field(default_factory=dict)
+    seen_files: int = 0
+    other_extensions: int = 0
 
 
 def walk(
@@ -104,13 +115,21 @@ def walk_with_report(
     for candidate in base.rglob("*"):
         if not candidate.is_file():
             continue
-        if candidate.suffix.lower() not in CODE_EXTENSIONS:
+        relative = candidate.relative_to(base)
+        if relative.parts and relative.parts[0] == AUDIT_DIR:
+            # The engine's own state (S-03/S-04): it is not workspace content, so
+            # it must not inflate the counts below — a user asking why their
+            # workspace indexed nothing should not be told about our sqlite file.
             continue
-        relative = candidate.relative_to(base).as_posix()
-        if is_secret_path(Path(relative)):
+        report.seen_files += 1
+        if candidate.suffix.lower() not in CODE_EXTENSIONS:
+            report.other_extensions += 1
+            continue
+        relative_posix = relative.as_posix()
+        if is_secret_path(Path(relative_posix)):
             _count(report.reasons, "secret_file")
             continue
-        if spec.match_file(relative):
+        if spec.match_file(relative_posix):
             _count(report.reasons, "gitignored")
             continue
         stat = candidate.stat()

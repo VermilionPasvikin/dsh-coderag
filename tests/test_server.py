@@ -190,6 +190,22 @@ async def test_code_index_honours_max_file_bytes(
 
 
 @pytest.mark.anyio
+async def test_index_status_reports_what_the_walk_saw(
+    client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An index over nothing must say so, or the model reads it as "no results"."""
+    (tmp_path / "ship.MXML").write_text("<mx:Canvas/>", encoding="utf-8")
+    monkeypatch.delenv("CODERAG_ROOT", raising=False)
+
+    payload = json.loads((await client.call_tool("code_index", {})).content[0].text)
+    await _wait_for_ready(client, payload["taskId"])
+    status = json.loads((await client.call_tool("index_status", {})).content[0].text)
+
+    assert status["files"] == snapshot({"indexable": 0, "seen": 1, "other_extensions": 1})
+    assert status["skipped"] == snapshot({"count": 0, "reasons": {}})
+
+
+@pytest.mark.anyio
 async def test_code_search_honours_max_tokens_as_its_default_budget(
     client: ClientSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

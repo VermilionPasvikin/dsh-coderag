@@ -34,10 +34,14 @@ import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dsh_coderag import __version__
 from dsh_coderag.sqlite_caps import FTS5_HINT, fts5_available
 from dsh_coderag.text import to_bigrams
+
+if TYPE_CHECKING:
+    from dsh_coderag.indexer import IndexSummary
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -457,7 +461,27 @@ def _run_index(args: argparse.Namespace) -> int:
         f"indexed {summary.files} files, {summary.chunks} chunks "
         f"into {summary.root}/.coderag/index.sqlite3"
     )
+    if summary.files == 0:
+        _report_empty_index(summary)
     return EXIT_OK
+
+
+def _report_empty_index(summary: IndexSummary) -> None:
+    """Explain an index that succeeded over nothing (T6-16).
+
+    A workspace of game assets is a legitimate zero: the walk saw the files and
+    skipped none of them, because an unlisted extension is not a skip. Reporting
+    only `indexed 0 files` leaves the user unable to tell that apart from a
+    broken workspace.
+    """
+    from dsh_coderag.walker import CODE_EXTENSIONS
+
+    listed = " ".join(sorted(CODE_EXTENSIONS))
+    _emit(
+        f"注意：没有可索引的文件——遍历看到 {summary.seen_files} 个文件，其中 "
+        f"{summary.other_extensions} 个的后缀不在白名单内（{listed}）。"
+    )
+    _emit("      索引本身是成功的，但检索不会有结果；按内容查找请改用 grep 之类的工具。")
 
 
 def _run_search(args: argparse.Namespace) -> int:

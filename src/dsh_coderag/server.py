@@ -383,6 +383,13 @@ def _workspace_index_status(root: Path, db_path: Path) -> str:
             "status": "ready" if row[0] else "indexing",
             "db_schema": row[1],
             "skipped": {"count": sum(skipped.values()), "reasons": skipped},
+            # Not part of the skip report: an unlisted extension is not a skip.
+            # Without this an empty index looks identical to a broken one (T6-16).
+            "files": {
+                "indexable": len(report.files),
+                "seen": report.seen_files,
+                "other_extensions": report.other_extensions,
+            },
         },
         ensure_ascii=False,
     )

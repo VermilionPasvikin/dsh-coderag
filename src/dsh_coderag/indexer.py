@@ -104,11 +104,19 @@ CREATE TABLE IF NOT EXISTS workspace_index (
 
 @dataclass(frozen=True)
 class IndexSummary:
-    """Counts produced by one synchronous indexing run."""
+    """Counts produced by one synchronous indexing run.
+
+    `seen_files` / `other_extensions` describe what the walk looked at, so an
+    empty index can explain itself instead of just reporting zero (T6-16). They
+    are separate from the skip reasons: a file whose extension is not code is
+    not a skip (walker.WalkReport).
+    """
 
     root: Path
     files: int
     chunks: int
+    seen_files: int = 0
+    other_extensions: int = 0
 
 
 @dataclass(frozen=True)
@@ -233,7 +241,13 @@ def _report_index_done(
         skipped=sum(report.reasons.values()),
         redacted=redacted,
     )
-    return IndexSummary(root=base, files=len(report.files), chunks=total_chunks)
+    return IndexSummary(
+        root=base,
+        files=len(report.files),
+        chunks=total_chunks,
+        seen_files=report.seen_files,
+        other_extensions=report.other_extensions,
+    )
 
 
 def _run_options(

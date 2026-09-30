@@ -98,6 +98,33 @@ def test_doctor_reports_the_interpreter_and_a_copyable_assignment() -> None:
         assert f"$env:{cli.ENV_PYTHON}" not in result.stdout
 
 
+def test_index_explains_a_workspace_with_nothing_indexable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`indexed 0 files` alone cannot be told apart from a broken workspace."""
+    for name in ("ship.MXML", "ui.MXML"):
+        (tmp_path / name).write_text("<mx:Canvas/>", encoding="utf-8")
+
+    code = cli.main(["index", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == cli.EXIT_OK, "a workspace that holds no code is not an error"
+    assert "没有可索引的文件" in out
+    assert "看到 2 个文件" in out
+    assert "2 个的后缀不在白名单内" in out
+    assert ".py" in out and ".js" in out, "the notice must name the whitelist"
+
+
+def test_index_stays_quiet_when_there_is_something_to_index(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert cli.main(["index", str(tmp_path)]) == cli.EXIT_OK
+
+    assert "没有可索引的文件" not in capsys.readouterr().out
+
+
 def test_doctor_prints_a_ready_to_paste_profile_override() -> None:
     """The override is the only thing that fixes a desktop app's spawn failure."""
     result = run_module("doctor")
