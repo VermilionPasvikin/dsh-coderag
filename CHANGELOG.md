@@ -5,6 +5,57 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-30
+
+**只发布在 GitHub**（tag / release，`v2.1.0`）——**不发布到 PyPI，也不发布到 npm**；
+安装方式仍是「克隆 + 装 Python 包 + `--patch`」（见 [`README.md`](README.md) 的「安装」）。
+**默认路径的检索行为没有变化**：`dependencies` 仍是 `mcp` / `tree-sitter` /
+`tree-sitter-language-pack` / `pathspec` 四个，**不含 `numpy`**；本版本改的是**入口与平台支持**。
+
+### 新增：Python CLI 成为唯一的跨平台入口
+
+- `dsh-coderag doctor`（探测解释器、按 `pyproject.toml` 的 `requires-python` 校验版本、
+  预检 SQLite FTS5、打印可直接复制的 `CODERAG_PYTHON`）与 `dsh-coderag install-deps`
+  （`pip install` + 装后自检：FTS5 可用 + 中文 bigram 往返）把原先住在 `scripts/install.sh`
+  （239 行）里的安装逻辑收了进来。
+- `scripts/install.sh` 与 `scripts/dsh` **退化为薄包装**（38 / 31 行，只做「找到解释器 → 转发」），
+  三个平台因此走**同一条代码路径**，而这条路径能被 `pytest` 直接覆盖。
+- 包导入不再依赖第三方 wheel：`index_sync` / `search` 改为按需导入（PEP 562），
+  所以在**依赖尚未安装**的机器上也能先跑 `doctor` / `install-deps`。
+- 失败一律是**结构化 JSON + 退出码**（`0` 成功 / `1` 操作失败 / `2` 环境不可用），不吐 traceback。
+
+### 新增：macOS 与 Windows 的逐平台实测
+
+- **实测平台：macOS 26.4 与 Windows 10（26100，`win_amd64`）**。逐平台证据：
+  [`docs/m6-crossplatform-baseline.md`](docs/m6-crossplatform-baseline.md)（依赖 wheel 齐备、
+  FTS5、离线 grammar、MCP 子进程可拉起）、
+  [`docs/m6-macos-verification.md`](docs/m6-macos-verification.md)、
+  [`docs/m6-windows-smoke.md`](docs/m6-windows-smoke.md)。
+- 全量测试两平台都通过，且**收集到的用例数相同（572 条）**：Windows `570 passed, 2 skipped`、
+  macOS `567 passed, 5 skipped`，差值恰好是 Windows 专用的路径用例。
+- **Linux 尚未实测，因此不声称支持。**
+- 一处必须并列声明的差异：两平台实测用的 DSH 版本**不同**（macOS `0.1.5-rc.1`、
+  Windows `0.2.0-rc.2`），**没有任何一个版本被两平台都跑过**。
+
+### 变更
+
+- 版本号 `2.0.0` → `2.1.0`（`pyproject.toml`、`package.json`、`src/dsh_coderag/__init__.py`）。
+- **恢复可选 extra `semantic`（内容只有 `numpy`）**：`T5-15` 移出 2.0.0 范围后 numpy 一度失去声明住所，
+  向量测试只能靠手工装 numpy 才跑得动。恢复后的内容与
+  [`ADR-16`](docs/adr/ADR-16-optional-vector-backend.md) §3.2 冻结的逐字一致，而
+  `dependencies` / bundle tarball / `install.sh` 默认路径 / README 安装前置条件**一律不动**（`RL-10`）。
+  可选路径目前的安装入口是 `pip install -e ".[semantic]"`；`ADR-16` §3.2 的
+  `CODERAG_WITH_SEMANTIC` 安装开关**仍未实现**。
+- `wilson_interval` 在 `0/n` 与 `n/n` 两个精确端点改为显式钉住，不再报出 `2.8e-17` 这类浮点残差。
+
+### 修复
+
+- `scripts/dsh` / `scripts/install.sh` 的 `CONDA_PREFIX` 分支原先只检查可执行位，
+  一个**已激活但不可用**的 conda 环境会被导出成 `CODERAG_PYTHON`，MCP 子进程随之起不来；
+  现在每个候选都必须通过「真的能跑」校验（`-c ''`）。
+- Windows 上 `tests/test_walker.py` 的路径断言与 `tests/test_dsh_script.py` 的解释器断言
+  改为按**平台无关的规范化路径**比较（**不是**放宽断言）。
+
 ## [2.0.0] - 2026-09-25
 
 **只发布在 GitHub**（tag / release，`v2.0.0`）——**不发布到 PyPI，也不发布到 npm**，

@@ -89,7 +89,7 @@ dsh-coderag 是给 DeepSeek Harness（DSH）用的**代码库检索引擎**，�
 
 > **发布方式：只发布在 GitHub**（tag / release），**不发布到 PyPI、也不发布到 npm**。
 > 因此安装只能走下面这条「克隆」路径；`pip install dsh-coderag` 与 `npm i dsh-coderag` 都**不可用**。
-> **当前版本 `2.0.0` 同样只在 GitHub 上以 tag / release 发布**（`v2.0.0`），PyPI 与 npm 上没有任何版本。
+> **当前版本 `2.1.0` 同样只在 GitHub 上以 tag / release 发布**（`v2.1.0`），PyPI 与 npm 上没有任何版本。
 
 > **平台状态（实测，2026-09-30）**：**macOS 26.4** 与 **Windows 10（26100，`win_amd64`）** 已实测通过——
 > 安装、`dsh plugin add`、`--dump-config` 与一次真实 `code_search` 两边都跑通，两边的全量 `pytest` 也通过。

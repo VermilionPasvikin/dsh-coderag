@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 
 __all__ = ["SearchStatus", "__version__", "index_sync", "search"]
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 _LAZY_ATTRIBUTES: dict[str, str] = {
     "index_sync": "dsh_coderag.indexer",
