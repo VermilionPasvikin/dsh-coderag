@@ -491,6 +491,36 @@ def _copyable_assignment(interpreter: str) -> str:
     return f'export {ENV_PYTHON}="{interpreter}"'
 
 
+MCP_ROW_ID = "mcp-coderag"
+MCP_CLIENT_PACKAGE = "@deepseek-ai/dsh-mcp-client"
+
+
+def profile_override_block(interpreter: str) -> list[str]:
+    """The profile-layer override that pins DSH to this interpreter.
+
+    An id-targeted patch replaces the whole `config` object, so the block has to
+    restate every field worth keeping — otherwise `serverName` / `transport` /
+    `args` disappear and the row stops working. Only fields that differ from the
+    engine's own defaults are listed: the bundle set the rest to values the
+    engine already defaults to, so this block is equivalent to the bundle config
+    with `command` pinned to a real interpreter.
+
+    It exists because the failure it fixes is invisible: a plugin whose
+    `command` cannot be spawned still loads, it just never produces any tools.
+    """
+    return [
+        f"- id: {MCP_ROW_ID}",
+        f"  name: '{MCP_CLIENT_PACKAGE}'",
+        "  config:",
+        "    serverName: coderag",
+        "    transport: stdio",
+        f"    command: '{interpreter}'",
+        "    args: ['-c', 'import dsh_coderag.server as s; s.run()']",
+        "    env:",
+        "      CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()",
+    ]
+
+
 def _run_doctor(_: argparse.Namespace) -> int:
     """Report whether this interpreter can run the engine and how to point DSH at it."""
     _emit(f"== dsh-coderag doctor {__version__} ==")
@@ -500,9 +530,17 @@ def _run_doctor(_: argparse.Namespace) -> int:
     _emit()
     _emit(f"{ENV_PYTHON}={sys.executable}")
     _emit(_copyable_assignment(sys.executable))
-    _emit("把上面的值写进 cordis.patch.yml 的 config.env，")
-    _emit("或在启动 dsh 的同一个终端里设置它（E-02/E-06）——")
-    _emit("桌面版是从快捷方式启动的，继承不到终端里的变量，那种情况必须写进 patch。")
+    _emit("那一行只对从同一个终端启动的 dsh 有效；")
+    _emit("桌面版是从快捷方式启动的，继承不到终端变量，必须用下面这段。")
+    _emit()
+    _emit("把它放进你实际在跑的那个 profile 的 cordis.patch.yml：")
+    _emit("  $DSH_HOME/profiles/<profile>/cordis.patch.yml")
+    _emit("若文件里还有占位符 `[]`，用下面这段【替换】掉那一行；")
+    _emit("若已有条目（DSH 自己的设置也在里面），就【追加】到末尾——不要替换整个文件。")
+    _emit("id 定向 patch 会整体替换 config，所以下面把要保留的字段都写全了：")
+    _emit()
+    for line in profile_override_block(sys.executable):
+        _emit(line)
     configured = os.environ.get(ENV_PYTHON, "")
     if configured and not _same_directory(configured, Path(sys.executable)):
         _emit(f"注意：当前环境里的 {ENV_PYTHON}={configured}，与本次探测到的解释器不同。")

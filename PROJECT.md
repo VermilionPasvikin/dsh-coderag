@@ -453,7 +453,7 @@ code_search(query, path, limit, mode)
 | 本地后端 | `CODERAG_SEMANTIC`（只有 `on` 启用）/ `_BACKEND=ollama` / `_URL` / `_MODEL` / `_TIMEOUT` / `_BATCH` / `_MAX_CHUNKS` | 关闭 / `ollama` / `http://127.0.0.1:11434` / `bge-m3` / `30` / `16` / `100000` | `ADR-16` §4 |
 | 云端后端 | `_BACKEND=openai` / `_URL`（必须显式给出）/ `_MODEL`（必须显式给出）/ `_API_KEY` / `_ALLOW_REMOTE` | 关闭 / 无 / 无 / 无（缺失 → `SEMANTIC_AUTH_MISSING`，**不发起请求**）/ 未设 = 不允许 | `ADR-17` §4 |
 | 安装侧 | `CODERAG_WITH_SEMANTIC`（只有 `1` 才装 extra） | 未设 = 不装 | `ADR-16` §3.2 |
-| DSH 侧 | `CODERAG_PYTHON` | 作者机器路径（**请覆盖**） | `E-06`；由 `cordis.patch.yml` 的 `command:` 在宿主侧求值，不由 `config.py` 读 |
+| DSH 侧 | `CODERAG_PYTHON` | `python`（Windows）/ `python3`（其它平台），即走 `PATH`；桌面版必须覆盖成绝对路径 | `E-06`；由 `cordis.patch.yml` 的 `command:` 在宿主侧求值，不由 `config.py` 读 |
 
 **取值规则（三条，全部已冻结）**：
 

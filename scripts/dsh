@@ -2,8 +2,9 @@
 # dsh-coderag 的统一 dsh 调用入口（薄包装）。
 #
 # 它只做两件事：
-#   ① 找到 Python 解释器并导出 CODERAG_PYTHON——patch 里的默认值是作者机器的
-#      路径，必须被覆盖（E-06）；这里探测到的就是 MCP 子进程该用的那一个。
+#   ① 找到 Python 解释器并导出 CODERAG_PYTHON——patch 的兜底只是在 PATH 上
+#      找 `python` / `python3`，未必是你这个环境里的那一个，所以这里主动探测
+#      并覆盖（E-06）；探测到的就是 MCP 子进程该用的那个。
 #   ② 找到 dsh 并转发——干净终端里 dsh 不在 PATH 上（E-07），而裸 npx 会拉
 #      latest、版本漂移，所以要钉版本。
 # 其余逻辑一律在 Python CLI 里（src/dsh_coderag/__main__.py）。

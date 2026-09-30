@@ -207,9 +207,12 @@ $dsh = "<DeepSeek Harness 安装目录>\resources\runtime\cli\bin\dsh.cmd"   # �
 > 在包可导入之后随时可以重跑它。装了 Git for Windows 的话，也可以直接在 Git Bash 里跑
 > `bash scripts/install.sh`（实测可用）。
 
-> **`CODERAG_PYTHON` 不设会怎样**：patch 的内置默认值是
-> `/opt/anaconda3/envs/forBSH/bin/python`——那是**作者本机**的路径，在你的机器上多半不存在，
-> MCP 子进程会启动失败。所以第 4 步不是可选项。
+> **`CODERAG_PYTHON` 不设会怎样**：patch 的兜底是 `python`（Windows）/ `python3`（其它平台），
+> 也就是在 `PATH` 上找解释器——**桌面版从快捷方式启动，多半找不到你那个真 Python**
+> （Windows 上常见的是 Microsoft Store 占位符），MCP 子进程于是起不来。
+> **这个故障是静默的**：插件看起来装好了、`--dump-config` 里也有本插件，但会话里**没有**
+> `mcp__coderag__*` 工具。所以第 4 步不是可选项；`& $py -m dsh_coderag doctor` 会打印一段
+> **可直接粘贴**的 profile 覆盖块，把它**追加**到你实际在跑的那个 profile 的 `cordis.patch.yml`。
 
 > **`--patch` 的位置**：`--profile` / `--patch` 是**启动器**选项，必须写在 Web 应用自己的选项
 > （`--port` / `--no-open` / `--host`）**之前**，否则报 `error: unknown option '--patch'`。
@@ -272,7 +275,7 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 > **桌面版是从快捷方式启动的，读不到你在终端里设的变量**，所以桌面版用户请把解释器写进下面的 `env:`。
 
 **Windows 上写到一个持久位置**——打开 `%USERPROFILE%\.dsh\profiles\<你实际在跑的 profile>\cordis.patch.yml`
-（该文件由 `dsh plugin --profile <profile> add .` 生成），**在现有列表后面追加**一条：
+（该文件由 `dsh plugin --profile <profile> add .` 生成），把下面这段放进去：
 
 ```yaml
 - id: mcp-coderag
@@ -282,14 +285,19 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
     command: 'C:\Users\<你>\dsh-coderag-venv\Scripts\python.exe'
     args: ['-c', 'import dsh_coderag.server as s; s.run()']
     env:
-      CODERAG_ROOT: 'C:\path\to\your\workspace'
+      CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
 ```
 
-> **⚠️ 这个文件不是你一个人的，也不是只属于本插件。** 它是该 profile 的**用户层**，DSH 自己也会往里
-> 写东西——本机实测它里面本来就有 `ui-settings-general`（欢迎提示版本）与 `agent-preset-registry`
-> （agent preset）两条。所以：
-> **只能「追加」一条 `- id: mcp-coderag`，绝不能把整个文件替换成上面这段**——替换会连带删掉 DSH 的设置。
-> 本文件是**顶层 YAML 数组**，追加就是在这个数组末尾再加一个 `- id: ...` 元素。
+> **两种情形写法不同（都实测过）**：
+> ① 文件里**只有占位符 `[]`**（全新 profile 的初始内容）→ 用上面这段**替换掉那一行**；
+> ② 文件里**已有条目** → **追加**到末尾，**不要替换整个文件**。
+> `[]` 后面直接接列表项会变成**非法 YAML**，`--dump-config` 会报错——本机实测。
+> 而第 ② 种情形必须用追加，因为这个文件**不是你一个人的**：它是该 profile 的**用户层**，DSH 自己也会往里写
+> ——本机实测它里面本来就有 `ui-settings-general`（欢迎提示版本）与 `agent-preset-registry`（agent preset）。
+>
+> `& $py -m dsh_coderag doctor` 会把上面这段**按本机解释器生成好**并直接打印出来，照抄即可
+> （它也会提示这两种情形）。
+>
 > 改完用 `& $dsh --profile <profile> --dump-config` 确认组合结果里同时还有 `# == dsh-coderag`。
 
 > **覆盖 `mcp-coderag` 时注意：DSH 的 patch 是「整体替换」而不是深合并**——DSH schema 自己的说明就是
@@ -300,7 +308,7 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 
 | 变量 | 作用 | 默认 | **生效情况** |
 |---|---|---|---|
-| `CODERAG_PYTHON` | 运行 MCP 服务器的解释器路径 | 作者机器上的 `forBSH` 路径（**请覆盖**） | ✅ 由 DSH 读（patch 里的 `!!js`） |
+| `CODERAG_PYTHON` | 运行 MCP 服务器的解释器路径 | `python` / `python3`（走 `PATH`；**桌面版请覆盖成绝对路径**，见 `doctor` 打印的块） | ✅ 由 DSH 读（patch 里的 `!!js`） |
 | `CODERAG_ROOT` | 要索引的工作区根 | DSH 进程的工作目录 | ✅ MCP 服务器读它决定工作区 |
 | `CODERAG_MAX_TOKENS` | 单次检索返回的 token 预算 | `4000` | ✅ 作为 `code_search` 的**默认**预算；某一次调用传入 `max_tokens` 参数仍可覆盖它 |
 | `CODERAG_MAX_FILES` | 文件数上限，**超限显式失败**并报实际数量（不静默截断） | `20000` | ✅ 建索引时生效；`index_status` 在超限时返回 `INDEX_TOO_MANY_FILES` + 实际数量 |

@@ -46,10 +46,28 @@
       config:
         serverName: coderag
         transport: stdio
-        command: !!js process.env.CODERAG_PYTHON ?? '/opt/anaconda3/envs/forBSH/bin/python'
+        # Resolved on the HOST at DSH startup. There is deliberately no absolute
+        # path baked in: a machine-specific default spawns the wrong interpreter
+        # on every other machine, and the plugin still looks loaded — the only
+        # symptom is "the coderag tools are missing". A PATH name at least
+        # respects an activated environment, and when it is missing the error
+        # names Python instead of pointing at a stranger's directory.
+        #
+        # The desktop app is launched from a shortcut, so it does NOT inherit a
+        # variable you set in a terminal: desktop users must write the absolute
+        # path into their profile's cordis.patch.yml. `dsh-coderag doctor` prints
+        # that override ready to paste.
+        # The whole expression is quoted: in a plain (unquoted) YAML scalar a
+        # ": " sequence starts a nested mapping, so the ternary below would make
+        # this file unparseable and DSH would reject the bundle outright.
+        command: !!js "process.env.CODERAG_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')"
         args: ['-c', 'import dsh_coderag.server as s; s.run()']
         env:
           CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
+          # CODERAG_PYTHON is deliberately NOT repeated here. Only `command`
+          # above decides which executable DSH spawns, and the engine itself
+          # never reads this variable — a copy in `env` only made a broken
+          # `command` look correct.
 
           # Spelled out because "TOKEN" in the name gets scrubbed from the
           # ambient environment (see "Where to configure" above).

@@ -12,6 +12,7 @@ failing pip - are asserted here against the CLI instead.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -40,11 +41,18 @@ except ImportError:
 
 
 def run_module(*args: str) -> subprocess.CompletedProcess[str]:
-    """Run `python -m dsh_coderag ...` in a fresh interpreter."""
+    """Run `python -m dsh_coderag ...` in a fresh interpreter.
+
+    Both directions are pinned to UTF-8: the CLI prints Chinese, and a Windows
+    console default (cp936) cannot decode it — the assertions would fail on
+    mojibake rather than on the behaviour under test.
+    """
     return subprocess.run(
         [sys.executable, "-m", "dsh_coderag", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
     )
 
@@ -88,6 +96,22 @@ def test_doctor_reports_the_interpreter_and_a_copyable_assignment() -> None:
     else:
         assert f'export {cli.ENV_PYTHON}="{sys.executable}"' in result.stdout
         assert f"$env:{cli.ENV_PYTHON}" not in result.stdout
+
+
+def test_doctor_prints_a_ready_to_paste_profile_override() -> None:
+    """The override is the only thing that fixes a desktop app's spawn failure."""
+    result = run_module("doctor")
+    lines = result.stdout.splitlines()
+    start = lines.index(f"- id: {cli.MCP_ROW_ID}")
+    block = lines[start:]
+
+    assert block == cli.profile_override_block(sys.executable)
+    assert any(f"command: '{sys.executable}'" in line for line in block)
+    assert any(line.strip().startswith("args:") for line in block), (
+        "an id-targeted patch replaces the whole config, so args must be restated"
+    )
+    assert any("CODERAG_ROOT" in line for line in block)
+    assert "追加" in result.stdout and "不要替换整个文件" in result.stdout
 
 
 def test_index_rejects_a_workspace_that_does_not_exist(
