@@ -272,6 +272,12 @@ Windows 多通过 3 条、macOS 多跳过 3 条——正是 `tests/test_path_fil
 语料用例跳过（`CODERAG_L2_CORPUS` / `CODERAG_EVAL_CORPUS`）。`570 − 3 = 567`、`2 + 3 = 5`，
 **两边完全闭合**。
 
+> **Windows 那个读数有个前提**：`bash` 必须在 `PATH` 上。`tests/test_dsh_script.py`（7 条）与
+> `tests/test_install_script.py`（8 条）按既有的 `skipif(BASH is None)` 决定跑还是跳，所以把
+> Git for Windows 的 `usr/bin` 放进 `PATH` 时是 `570 passed, 2 skipped`，不放时同一个提交给出
+> **`555 passed, 17 skipped`**——**两次收集到的用例总数都是 572**，不是回归。
+> macOS 侧天然有 `bash`，两栏要在同一前提下比。
+
 > **一处不等价、必须并列声明的差异**：Windows 用的是本机自带的 `dsh` `0.2.0-rc.2`，
 > macOS 用的是项目钉的 `0.1.5-rc.1`。也就是说「插件登记 + `dump-config`」这一环在
 > **两个不同的 DSH 版本**上各自通过，而**没有任何一个版本被两平台都跑过**。
