@@ -21,16 +21,17 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 
-from dsh_coderag.config import ENV_SEMANTIC, SemanticConfig
+from dsh_coderag.config import ENV_SEMANTIC, ENV_SEMANTIC_API_KEY, SemanticConfig
 from dsh_coderag.log import log_event
 from dsh_coderag.types import ErrorCode
 
 RETRY_LIMIT = 2
 """Extra attempts after the first one; retries are always bounded (ADR-16 6)."""
 
-_ENDPOINT_PATHS: dict[str, str] = {"ollama": "/api/embed"}
-"""Request path per backend. T5-20 adds the `openai` entry (`/embeddings`)."""
+_ENDPOINT_PATHS: dict[str, str] = {"ollama": "/api/embed", "openai": "/embeddings"}
+"""Request path per backend, appended to the configured URL."""
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -129,25 +130,75 @@ def validate_local_backend(config: SemanticConfig) -> None:
         )
 
 
+def _require_credentials(config: SemanticConfig) -> None:
+    """Refuse a remote OpenAI-compatible endpoint that has no key (T6-27).
+
+    A loopback endpoint is deliberately exempt: local OpenAI-compatible servers
+    (LM Studio, vLLM, llama.cpp) usually need no credential, and demanding one
+    would break the offline case (S-01).
+
+    Raises:
+        SemanticError: SEMANTIC_AUTH_MISSING, raised before any request is made.
+    """
+    if config.backend != "openai" or config.api_key is not None:
+        return
+    if _host_of(config.url) in _LOOPBACK_HOSTS:
+        return
+    raise SemanticError(
+        ErrorCode.SEMANTIC_AUTH_MISSING,
+        f"the {config.backend} backend at {config.url} needs an API key and none is set",
+        f"set {ENV_SEMANTIC_API_KEY} (in the environment, or in the profile's "
+        f"cordis.patch.yml for the desktop app) and retry",
+    )
+
+
+def _auth_rejected(url: str) -> SemanticError:
+    """Build the non-retryable rejection error for an HTTP 401/403 (T6-27).
+
+    The message names the URL only: a rejected credential is never echoed back
+    into a message, a log line or a status payload (S-05, RL-02).
+    """
+    return SemanticError(
+        ErrorCode.SEMANTIC_AUTH_REJECTED,
+        f"the embedding backend at {url} rejected the credential (HTTP 401/403)",
+        f"check {ENV_SEMANTIC_API_KEY}; a rejected key is not retried",
+    )
+
+
 def _http_transport(
-    url: str, model: str, texts: Sequence[str], timeout: float
+    url: str,
+    model: str,
+    texts: Sequence[str],
+    timeout: float,
+    *,
+    api_key: str | None = None,
 ) -> list[list[float]]:
     """POST one batch and parse the returned vectors.
 
     Only `embeddings` is read. A response whose length differs from the request
     cannot be trusted, so it fails loudly instead of silently truncating
-    (RL-08).
+    (RL-08). The credential, when there is one, travels in an
+    `Authorization: Bearer` header — the one place it is used, never logged.
 
     Raises:
+        SemanticError: SEMANTIC_AUTH_REJECTED on HTTP 401/403. It is raised as a
+            SemanticError rather than an HTTPError so the retry loop lets it
+            through instead of retrying a credential that will keep failing.
         ValueError: If the response is not JSON, is not an object, or does not
             carry exactly one vector per input.
     """
     body = json.dumps({"model": model, "input": list(texts)}).encode("utf-8")
-    request = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read())
+    headers = {"Content-Type": "application/json"}
+    if api_key is not None:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(url, data=body, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        if error.code in (401, 403):
+            raise _auth_rejected(url) from error
+        raise
     embeddings = payload.get("embeddings") if isinstance(payload, dict) else None
     if not isinstance(embeddings, list) or len(embeddings) != len(texts):
         actual = len(embeddings) if isinstance(embeddings, list) else None
@@ -230,8 +281,13 @@ def embed_texts(
             "enable the optional backend explicitly, or keep using BM25",
         )
     validate_local_backend(config)
+    _require_credentials(config)
     url = endpoint_for(config)
-    post = transport if transport is not None else _http_transport
+    post = (
+        transport
+        if transport is not None
+        else partial(_http_transport, api_key=config.api_key)
+    )
 
     vectors: list[list[float] | None] = [None] * len(texts)
     pending: dict[str, list[int]] = {}

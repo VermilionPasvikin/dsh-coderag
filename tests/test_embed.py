@@ -11,6 +11,8 @@ import json
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -255,3 +257,108 @@ def test_real_transport_reports_a_closed_port_as_embed_failed() -> None:
     with pytest.raises(SemanticError) as caught:
         embed_texts(_config(url=f"http://127.0.0.1:{port}"), ["a"])
     assert caught.value.code is ErrorCode.SEMANTIC_EMBED_FAILED
+
+
+class _CapturingResponse:
+    """The minimum of an HTTP response the transport reads."""
+
+    def __init__(self, payload: object) -> None:
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self) -> _CapturingResponse:
+        return self
+
+    def __exit__(self, *_: object) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def test_the_openai_backend_posts_to_embeddings_with_a_bearer_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T6-27: the cloud route exists, and the key travels in the header.
+
+    Until this task `openai` had no entry in the endpoint table at all, so an
+    enabled cloud backend failed with SEMANTIC_BACKEND_UNSUPPORTED before it
+    could even try to authenticate.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(
+        request: urllib.request.Request, timeout: float | None = None
+    ) -> _CapturingResponse:
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["body"] = json.loads(request.data or b"{}")
+        return _CapturingResponse({"embeddings": [[1.0, 0.0]]})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    config = _config(
+        backend="openai",
+        url="https://api.example.invalid/v1",
+        model="text-embedding-3-small",
+        api_key="sk-not-a-real-key",
+    )
+
+    assert embed_texts(config, ["hello"]) == [[1.0, 0.0]]
+    assert captured["url"] == "https://api.example.invalid/v1/embeddings"
+    assert captured["headers"]["Authorization"] == "Bearer sk-not-a-real-key"
+    assert captured["body"] == {"model": "text-embedding-3-small", "input": ["hello"]}
+
+
+def test_a_remote_openai_backend_without_a_key_fails_before_any_request() -> None:
+    """A missing credential is reported as its own code, not as an embed failure."""
+    recorder = _Recorder()
+    config = _config(
+        backend="openai",
+        url="https://api.example.invalid/v1",
+        model="text-embedding-3-small",
+        api_key=None,
+    )
+
+    with pytest.raises(SemanticError) as caught:
+        embed_texts(config, ["hello"], transport=recorder)
+
+    assert caught.value.code is ErrorCode.SEMANTIC_AUTH_MISSING
+    assert recorder.calls == [], "nothing may be sent without a credential"
+
+
+def test_a_loopback_openai_backend_needs_no_key() -> None:
+    """Local OpenAI-compatible servers are a supported offline case (S-01)."""
+    recorder = _Recorder()
+    config = _config(
+        backend="openai", url="http://127.0.0.1:8080/v1", model="local", api_key=None
+    )
+
+    assert embed_texts(config, ["hello"], transport=recorder) == [[5.0, 0.0]]
+
+
+def test_a_rejected_credential_is_not_retried_and_is_not_echoed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 401/403 is deterministic: retrying wastes the budget, and the key stays out."""
+    attempts = {"count": 0}
+
+    def fake_urlopen(
+        request: urllib.request.Request, timeout: float | None = None
+    ) -> _CapturingResponse:
+        attempts["count"] += 1
+        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    config = _config(
+        backend="openai",
+        url="https://api.example.invalid/v1",
+        model="text-embedding-3-small",
+        api_key="sk-secret-value",
+    )
+
+    with pytest.raises(SemanticError) as caught:
+        embed_texts(config, ["hello"])
+
+    assert caught.value.code is ErrorCode.SEMANTIC_AUTH_REJECTED
+    assert attempts["count"] == 1, "a rejected credential must not be retried"
+    assert "sk-secret-value" not in str(caught.value)
+    assert "sk-secret-value" not in (caught.value.hint or "")
