@@ -542,7 +542,7 @@
   传给 `search(...)`（`--max-tokens` 之类的显式参数若存在应优先），
   再补一条测试断言「设了变量时命中被裁剪、不设时不被裁剪」。属独立小改动，需所有者立任务。
 
-## `TooManyFilesError` 在 CLI 里被误报成 `CLI_UNEXPECTED_ERROR`（发现于 `T6-22`，2026-09-30，**待修**）
+## ✅ 已解决：`TooManyFilesError` 在 CLI 里被误报成 `CLI_UNEXPECTED_ERROR`（发现于 `T6-22`，2026-09-30，由 **T6-22** 修复）
 
 - **来源**：所有者实际报错（在 PowerShell 里设 `$CODERAG_MAX_FILES = 110000` 后跑 `index`）：
   `{"status": "error", "code": "CLI_UNEXPECTED_ERROR", "message": "TooManyFilesError: workspace has
@@ -563,7 +563,7 @@
   `把 CODERAG_MAX_FILES 提到 103973 以上再重跑（PowerShell：$env:CODERAG_MAX_FILES = '110000'），
   或只索引子目录`；补一条测试断言 `code == index_too_many_files` 且消息里**不含** `TooManyFilesError`。
 
-## 中断的索引对外自称 `ready`，形成静默的部分索引（发现于 `T6-23`，2026-09-30，**待修**）
+## ✅ 已解决：中断的索引对外自称 `ready`，形成静默的部分索引（发现于 `T6-23`，2026-09-30，由 **T6-23** 修复）
 
 - **来源**：所有者在真实工作区（`EXTRACTED_READABLE`，103,002 个可索引 `.mxml`）上跑首次索引，
   跑到约 78% 时**被用户用 `Ctrl+C` 主动中断**（已向所有者确认；**不是崩溃**，无 traceback）。**只读检查**该库得到：
@@ -607,7 +607,7 @@
   （例如 `partial`）而不是把 `ready = 0` 当成拒绝条件，并在 `code_search` 的返回体里带上
   「索引未完成」的提示。
 
-## 云端 embedding 后端从不发送 API key（发现于 `T6-27`，2026-09-30，**待修**）
+## ✅ 已解决：云端 embedding 后端从不发送 API key（发现于 `T6-27`，2026-09-30，由 **T6-27** 修复，实际修了四处：路由、认证头、key 转发、响应形状 `T6-28`）
 
 - **事实**：`config.load_semantic_config` 把 `CODERAG_SEMANTIC_API_KEY` 读进 `SemanticConfig.api_key`，
   但**全仓库没有任何代码使用它**（`grep api_key|Authorization|Bearer src/dsh_coderag/*.py` 只命中
@@ -624,7 +624,7 @@
   **绝不**进日志/状态/异常文本，`S-05`/`RL-02`）；`on` + `openai` 而无 key → `SEMANTIC_AUTH_MISSING`
   且**不发起请求**；响应 401/403 → `SEMANTIC_AUTH_REJECTED`；补一条记录请求头的 transport 测试。
 
-## 本地后端会静默截断超长 chunk（发现于 `T6-29`，2026-10-01，**待修**）
+## ✅ 已解决：本地后端会静默截断超长 chunk（发现于 `T6-29`，2026-10-01，由 **T6-29** 修复）
 
 - **事实（本机实测）**：Ollama 0.5.7 + `nomic-embed-text`，直接调 `/api/embed` 单条输入——
   1,972 字符 → `prompt_eval_count = 870`；**7,990 / 19,992 / 79,968 字符 → 一律 2,048**，
