@@ -623,3 +623,21 @@
 - **建议修法**：`_http_transport` 增加 `Authorization: Bearer <key>`（key 只在内存中，
   **绝不**进日志/状态/异常文本，`S-05`/`RL-02`）；`on` + `openai` 而无 key → `SEMANTIC_AUTH_MISSING`
   且**不发起请求**；响应 401/403 → `SEMANTIC_AUTH_REJECTED`；补一条记录请求头的 transport 测试。
+
+## 本地后端会静默截断超长 chunk（发现于 `T6-29`，2026-10-01，**待修**）
+
+- **事实（本机实测）**：Ollama 0.5.7 + `nomic-embed-text`，直接调 `/api/embed` 单条输入——
+  1,972 字符 → `prompt_eval_count = 870`；**7,990 / 19,992 / 79,968 字符 → 一律 2,048**，
+  全部 HTTP 200、**没有任何错误或字段**说明发生了截断。
+- **引擎侧**：`embed._http_transport` 对 `ollama` 只发 `{"model", "input"}`，
+  既不设置 `truncate` 也不设置 `options.num_ctx`，因此完全落在服务端默认行为上；
+  而 `vectors.py`/`indexer.py` 也不会事后核对「送进去的 token 数」与「服务端实际处理的 token 数」
+  （`prompt_eval_count` 就在响应里，却没被读取）。
+- **影响**：按游戏索引的真实分布（**79.3% 的 chunk 超过 8,000 字符**、均值约 8,711 字符），
+  **近八成 chunk 的向量只代表文本前 2,048 token**。这违反本项目「不静默截断」（`RL-08` 的同一精神），
+  而且模型与用户都无法从返回里察觉——检索质量会以「莫名其妙搜不到」的形式表现出来。
+- **建议修法**：① 读取响应里的 `prompt_eval_count`，与本地估算的输入 token 数比对，
+  不一致就在 `semantic` notice 与 `index_status` 里**如实上报「N 个 chunk 被截断」**（最小改动、立刻可见）；
+  ② 更进一步：新增 `CODERAG_SEMANTIC_MAX_TOKENS_PER_CHUNK`，由**引擎**先按 token 切分/截断并显式告知，
+  不再把决定权留给服务端（需立 ADR）。**注意**：这不是 Ollama 的缺陷，是它的默认行为；
+  换 `bge-m3`（上下文 8,192）能显著缓解，但仍不能消除（>32k 字符的块仍会被截）。
