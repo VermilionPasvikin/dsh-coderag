@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from dsh_coderag import embed
 from dsh_coderag.config import SemanticConfig, load_semantic_config
 from dsh_coderag.embed import (
     RETRY_LIMIT,
@@ -436,3 +437,59 @@ def test_a_response_with_no_vectors_is_reported_as_embed_failed(
         embed_texts(config, ["hello"])
 
     assert caught.value.code is ErrorCode.SEMANTIC_EMBED_FAILED
+
+
+def test_a_long_chunk_is_shortened_for_the_local_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T6-29: Ollama cuts silently at its context, so the engine cuts and counts.
+
+    Measured on this machine: `nomic-embed-text` reported exactly 2,048 tokens for
+    7,990, 19,992 and 79,968 characters alike, with no error and nothing in the
+    response to say so.
+    """
+    monkeypatch.setattr(embed, "_local_context_tokens", lambda config: 10)
+    recorder = _Recorder()
+    long_text = "x" * 500
+
+    embed_texts(_config(model="m", batch=4), [long_text], transport=recorder)
+
+    sent = recorder.embedded_texts[0]
+    assert len(sent) == 10 * embed.CHARS_PER_TOKEN_BUDGET
+    assert sent == "x" * (10 * embed.CHARS_PER_TOKEN_BUDGET)
+
+
+def test_a_long_chunk_is_not_shortened_for_the_cloud_backend() -> None:
+    """The cloud path is left alone: its providers take far larger inputs."""
+    recorder = _Recorder()
+    long_text = "y" * 500
+    config = _config(
+        backend="openai",
+        url="https://api.example.invalid/v1",
+        model="m",
+        api_key="sk-not-a-real-key",
+    )
+
+    embed_texts(config, [long_text], transport=recorder)
+
+    assert recorder.embedded_texts == [long_text]
+
+
+def test_shortening_is_reported_in_a_log_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The count is the whole point: a silent cut is what this task fixes."""
+    monkeypatch.setattr(embed, "_local_context_tokens", lambda config: 1)
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        embed, "log_event", lambda name, **fields: events.append((name, fields))
+    )
+
+    embed_texts(_config(model="m"), ["z" * 40], transport=_Recorder())
+
+    names = [name for name, _ in events]
+    assert "semantic_chunk_shortened" in names
+    summary = dict(events)["semantic_shortened_summary"]
+    assert summary["chunks"] == 1
+    assert summary["of"] == 1
+    assert summary["context_tokens"] == 1

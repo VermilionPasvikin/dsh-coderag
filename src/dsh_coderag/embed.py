@@ -35,6 +35,24 @@ _ENDPOINT_PATHS: dict[str, str] = {"ollama": "/api/embed", "openai": "/embedding
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
+DEFAULT_CONTEXT_TOKENS = 2048
+"""Context assumed for the local backend until `/api/show` answers (T6-29)."""
+
+CHARS_PER_TOKEN_BUDGET = 2
+"""Characters per token assumed when deciding how much of a chunk to send.
+
+Measured on this corpus: 2.05 (Qwen tokenizer) to 4.46 (BERT-ish) characters per
+token, and 2.0 for the densest XML tested. Two is therefore the conservative end,
+so what this engine sends normally fits the model's context; content denser than
+that is still cut by the server, which is exactly why the count below exists — the
+loss is ours, counted and logged, instead of silent. With a 2,048-token model that
+means 4,096 characters per chunk; `bge-m3` (8,192) would allow 16,384 and cut
+essentially nothing in this corpus.
+"""
+
+_CONTEXT_CACHE: dict[str, int] = {}
+"""Model name to context length, remembered for the process (one probe per model)."""
+
 _SUPPORTED_BACKENDS = frozenset(_ENDPOINT_PATHS)
 
 
@@ -282,6 +300,63 @@ def _post_with_retry(
     ) from last
 
 
+def _local_context_tokens(config: SemanticConfig) -> int:
+    """Ask the local backend how many tokens its model accepts (T6-29).
+
+    `/api/show` reports the model's own `*.context_length`; on this machine that is
+    2,048 for `nomic-embed-text`, which is exactly where Ollama silently cut every
+    longer input. The probe is cached per model, never raises, and falls back to
+    DEFAULT_CONTEXT_TOKENS so a missing or older server cannot break a build.
+    """
+    if config.model in _CONTEXT_CACHE:
+        return _CONTEXT_CACHE[config.model]
+    context = DEFAULT_CONTEXT_TOKENS
+    try:
+        body = json.dumps({"model": config.model}).encode("utf-8")
+        request = urllib.request.Request(
+            config.url.rstrip("/") + "/api/show",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read())
+        info = payload.get("model_info") if isinstance(payload, dict) else None
+        if isinstance(info, dict):
+            for key, value in info.items():
+                if key.endswith("context_length") and isinstance(value, int) and value > 0:
+                    context = value
+                    break
+    except (urllib.error.URLError, OSError, ValueError):
+        context = DEFAULT_CONTEXT_TOKENS
+    _CONTEXT_CACHE[config.model] = context
+    return context
+
+
+def _cap_for_local(
+    texts: Sequence[str], config: SemanticConfig
+) -> tuple[list[str], int]:
+    """Shorten texts to what the local model will actually read, and count them.
+
+    Ollama truncates to the model's context without saying so (measured: 2,048
+    tokens for 7,990, 19,992 and 79,968 characters alike). The engine now decides
+    the cut itself so the loss can be reported: at most `context * 2` characters
+    per chunk, with the number of shortened chunks returned for logging. The cloud
+    backend is untouched - its inputs are not capped here at all.
+    """
+    if config.backend != "ollama":
+        return list(texts), 0
+    limit = _local_context_tokens(config) * CHARS_PER_TOKEN_BUDGET
+    capped: list[str] = []
+    shortened = 0
+    for text in texts:
+        if len(text) > limit:
+            capped.append(text[:limit])
+            shortened += 1
+        else:
+            capped.append(text)
+    return capped, shortened
+
+
 def embed_texts(
     config: SemanticConfig,
     texts: Sequence[str],
@@ -367,10 +442,22 @@ def _embed_pending(
     """
     unique = list(pending)
     embedded: dict[str, list[float]] = {}
+    shortened_total = 0
     for start in range(0, len(unique), config.batch):
         batch_texts = unique[start : start + config.batch]
+        capped, shortened = _cap_for_local(batch_texts, config)
+        if shortened:
+            shortened_total += shortened
+            log_event(
+                "semantic_chunk_shortened",
+                level="warning",
+                model=config.model,
+                chunks=shortened,
+                running_total=shortened_total,
+                context_tokens=_local_context_tokens(config),
+            )
         batch = _post_with_retry(
-            post, url, config.model, batch_texts, float(config.timeout_s)
+            post, url, config.model, capped, float(config.timeout_s)
         )
         if len(batch) != len(batch_texts):
             raise SemanticError(
@@ -381,6 +468,15 @@ def _embed_pending(
             if cache is not None:
                 cache.put(config.model, text, vector)
             embedded[text] = vector
+    if shortened_total:
+        log_event(
+            "semantic_shortened_summary",
+            level="warning",
+            model=config.model,
+            chunks=shortened_total,
+            of=len(unique),
+            context_tokens=_local_context_tokens(config),
+        )
     return embedded
 
 
