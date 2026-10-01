@@ -362,3 +362,77 @@ def test_a_rejected_credential_is_not_retried_and_is_not_echoed(
     assert attempts["count"] == 1, "a rejected credential must not be retried"
     assert "sk-secret-value" not in str(caught.value)
     assert "sk-secret-value" not in (caught.value.hint or "")
+
+
+def test_an_openai_shaped_response_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T6-28: a compatible endpoint answers `data`, not `embeddings`.
+
+    Verified against a live OpenAI-compatible endpoint (2026-09-30): the payload
+    was `{"data": [{"embedding": [...], "index": n}], "usage": {...}}` with no
+    `embeddings` key at all, so parsing only Ollama's shape rejected every answer.
+    Rows are ordered by `index`, because the specification does not promise order.
+    """
+    payload = {
+        "object": "list",
+        "model": "qwen3.7-text-embedding",
+        "data": [
+            {"object": "embedding", "index": 1, "embedding": [0.0, 2.0]},
+            {"object": "embedding", "index": 0, "embedding": [1.0, 0.0]},
+        ],
+        "usage": {"prompt_tokens": 17, "total_tokens": 17},
+    }
+
+    def fake_urlopen(
+        request: urllib.request.Request, timeout: float | None = None
+    ) -> _CapturingResponse:
+        return _CapturingResponse(payload)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    config = _config(
+        backend="openai",
+        url="https://api.example.invalid/v1",
+        model="qwen3.7-text-embedding",
+        api_key="sk-not-a-real-key",
+    )
+
+    assert embed_texts(config, ["first", "second"]) == [[1.0, 0.0], [0.0, 2.0]]
+
+
+def test_ollama_shaped_response_still_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The local backend's `embeddings` shape keeps working alongside `data`."""
+
+    def fake_urlopen(
+        request: urllib.request.Request, timeout: float | None = None
+    ) -> _CapturingResponse:
+        return _CapturingResponse({"embeddings": [[1.0, 1.0]]})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    config = _config(url="http://127.0.0.1:11434", model="bge-m3")
+
+    assert embed_texts(config, ["hello"]) == [[1.0, 1.0]]
+
+
+def test_a_response_with_no_vectors_is_reported_as_embed_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A payload with neither shape must fail loudly, not silently produce nothing."""
+
+    def fake_urlopen(
+        request: urllib.request.Request, timeout: float | None = None
+    ) -> _CapturingResponse:
+        return _CapturingResponse({"result": []})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    config = _config(
+        backend="openai",
+        url="https://api.example.invalid/v1",
+        model="m",
+        api_key="sk-not-a-real-key",
+    )
+
+    with pytest.raises(SemanticError) as caught:
+        embed_texts(config, ["hello"])
+
+    assert caught.value.code is ErrorCode.SEMANTIC_EMBED_FAILED

@@ -199,13 +199,49 @@ def _http_transport(
         if error.code in (401, 403):
             raise _auth_rejected(url) from error
         raise
-    embeddings = payload.get("embeddings") if isinstance(payload, dict) else None
-    if not isinstance(embeddings, list) or len(embeddings) != len(texts):
-        actual = len(embeddings) if isinstance(embeddings, list) else None
-        raise ValueError(
-            f"embedding response carried {actual} vectors for {len(texts)} inputs"
+    return _vectors_from(payload, len(texts))
+
+
+def _vectors_from(payload: object, expected: int) -> list[list[float]]:
+    """Read the vectors out of either documented response shape (T6-28).
+
+    An OpenAI-compatible endpoint answers
+    `{"data": [{"embedding": [...], "index": 0}, ...], "usage": {...}}`, while
+    Ollama's `/api/embed` answers `{"embeddings": [[...], ...]}`. Both are
+    accepted — verified against a live compatible endpoint on 2026-09-30, which
+    returned `data` and no `embeddings` at all — and the row count is still
+    enforced, so a truncated or reordered response cannot pass silently (RL-08).
+
+    Raises:
+        ValueError: If neither shape is present, a row is not a vector, or the
+            count differs from the number of inputs.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError(f"embedding response was {type(payload).__name__}, not an object")
+    rows = payload.get("embeddings")
+    if isinstance(rows, list):
+        vectors: list[object] = list(rows)
+    else:
+        data = payload.get("data")
+        if not isinstance(data, list):
+            raise ValueError(
+                "embedding response carried neither 'embeddings' nor 'data'"
+            )
+        ordered = sorted(
+            (row for row in data if isinstance(row, dict)),
+            key=lambda row: row.get("index", 0),
         )
-    return [[float(value) for value in vector] for vector in embeddings]
+        vectors = [row.get("embedding") for row in ordered]
+    if len(vectors) != expected:
+        raise ValueError(
+            f"embedding response carried {len(vectors)} vectors for {expected} inputs"
+        )
+    result: list[list[float]] = []
+    for vector in vectors:
+        if not isinstance(vector, list):
+            raise ValueError("embedding response carried a row that is not a vector")
+        result.append([float(value) for value in vector])
+    return result
 
 
 def _post_with_retry(
