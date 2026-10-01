@@ -507,6 +507,11 @@ export CODERAG_SEMANTIC=on CODERAG_SEMANTIC_MODEL=bge-m3
   本地后端的全部意义就是"代码不出机器"，所以这条不做成可选项。
 - 其它可调项：`_TIMEOUT`（秒，默认 `30`）、`_BATCH`（默认 `16`）、`_MAX_CHUNKS`（默认 `100000`）。
 - 本机要先有 Ollama 并拉好模型：`ollama pull bge-m3`。
+- ⚠️ **模型上下文决定你能嵌多长的 chunk**：Ollama 会把超长输入**静默截断**到模型的上下文
+  （实测 `nomic-embed-text` 为 2,048 token：8,000 / 20,000 / 80,000 字符的输入一律只处理 2,048）。
+  引擎现在**自己**按「上下文 × 2 字符」截断并在日志里报数（`semantic_chunk_shortened` /
+  `semantic_shortened_summary`），因此损失可见、可决策。选模型时优先看上下文：
+  `bge-m3` = 8,192（约 16,384 字符，覆盖常见文件）；`nomic-embed-text` = 2,048（约 4,096 字符，快但会截）。
 - **不声称检索质量**：按 `ADR-14` §10.4 的 `V4`，`natural` 桶 `S@5 = 0.300 < 0.40`，所以这条路径
   默认关闭、也没有随任何版本对外发布。
 
