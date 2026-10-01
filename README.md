@@ -512,6 +512,11 @@ export CODERAG_SEMANTIC=on CODERAG_SEMANTIC_MODEL=bge-m3
   引擎现在**自己**按「上下文 × 2 字符」截断并在日志里报数（`semantic_chunk_shortened` /
   `semantic_shortened_summary`），因此损失可见、可决策。选模型时优先看上下文：
   `bge-m3` = 8,192（约 16,384 字符，覆盖常见文件）；`nomic-embed-text` = 2,048（约 4,096 字符，快但会截）。
+- **长跑可中断**（`T6-31`）：向量构建每完成一批就把向量**追加**到
+  `<root>/.coderag/vectors/cache/<模型>/embed-cache.bin` 并在批末 `fsync`，因此**中断后重跑只补缺失的部分**，
+  不再从头再来。检查点按模型分目录、以文本 sha256 为键；换模型不会混用旧向量；被写坏的最后一条记录会被丢弃并把文件截断。
+  代价是磁盘上多一份与 `embeddings.npy` 等量的数据（1024 维、41.6 万 chunk 约 1.6 GiB）——不需要时可整目录删除，
+  下次构建会重新生成。
 - **不声称检索质量**：按 `ADR-14` §10.4 的 `V4`，`natural` 桶 `S@5 = 0.300 < 0.40`，所以这条路径
   默认关闭、也没有随任何版本对外发布。
 
