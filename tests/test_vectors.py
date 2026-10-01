@@ -23,6 +23,8 @@ from dsh_coderag.vectors import (
     VectorIndex,
     build_index,
     check_chunk_budget,
+    checkpoint_cache,
+    checkpoint_slug,
     content_hash,
     load_index,
     save_index,
@@ -216,13 +218,24 @@ def test_rebuild_after_a_model_change_embeds_every_chunk(tmp_path: Path) -> None
     assert sorted(counter.texts) == ["alpha", "beta"]
 
 
-def test_rebuild_after_a_corrupt_manifest_embeds_every_chunk(tmp_path: Path) -> None:
+def test_rebuild_after_a_corrupt_manifest_recovers_from_the_checkpoint(
+    tmp_path: Path,
+) -> None:
+    """A corrupt manifest costs a rebuild of the manifest, not of the vectors.
+
+    Before T6-31 the only copy of an embedding was the in-memory cache, so this
+    case had to re-embed; the checkpoint is keyed by text digest, so the vectors
+    are still valid and are recovered instead.
+    """
     counter = _Counting()
-    build_index(tmp_path, _config(), [(1, "alpha")], transport=counter)
+    first = build_index(tmp_path, _config(), [(1, "alpha")], transport=counter)
     (vectors_dir(tmp_path) / MANIFEST_FILENAME).write_text("{broken", encoding="utf-8")
     counter.texts.clear()
-    build_index(tmp_path, _config(), [(1, "alpha")], transport=counter)
-    assert counter.texts == ["alpha"]
+
+    rebuilt = build_index(tmp_path, _config(), [(1, "alpha")], transport=counter)
+
+    assert counter.texts == []
+    np.testing.assert_allclose(rebuilt.matrix, first.matrix)
 
 
 def test_rebuild_drops_removed_chunks_and_keeps_the_rest(tmp_path: Path) -> None:
@@ -237,3 +250,95 @@ def test_rebuild_drops_removed_chunks_and_keeps_the_rest(tmp_path: Path) -> None
     assert rebuilt.chunk_ids == (1, 3)
     np.testing.assert_allclose(rebuilt.matrix[0], original.matrix[0])
     np.testing.assert_allclose(rebuilt.matrix[1], original.matrix[2])
+
+
+def test_a_killed_build_resumes_from_its_checkpoint(tmp_path: Path) -> None:
+    """T6-31: work already done survives the process, not only a finished run.
+
+    Before this, every vector lived in an in-process cache and `save_index` ran once
+    at the very end, so a build killed after five hours had nothing to resume from.
+    """
+    chunks = [(n, f"text {n}") for n in range(1, 25)]
+    config = _config(batch=8)
+    sent_first: list[str] = []
+    calls = {"count": 0}
+
+    def failing(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        calls["count"] += 1
+        if calls["count"] > 1:  # the first batch lands in the checkpoint, then it dies
+            raise OSError("the process was killed")
+        sent_first.extend(texts)
+        return _transport(url, model, texts, timeout)
+
+    with pytest.raises(SemanticError):
+        build_index(tmp_path, config, chunks, transport=failing)
+    assert sent_first, "the first batch must have been embedded and checkpointed"
+    assert not (tmp_path / ".coderag" / "vectors" / EMBEDDINGS_FILENAME).is_file()
+
+    sent_second: list[str] = []
+
+    def recording(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        sent_second.extend(texts)
+        return _transport(url, model, texts, timeout)
+
+    index = build_index(tmp_path, config, chunks, transport=recording)
+
+    assert sent_second == [text for _, text in chunks if text not in sent_first]
+    assert index.matrix.shape == (len(chunks), DIM)
+
+
+def test_the_checkpoint_does_not_mix_models(tmp_path: Path) -> None:
+    chunks = [(1, "alpha"), (2, "beta")]
+    build_index(tmp_path, _config(model="bge-m3"), chunks, transport=_transport)
+
+    sent: list[str] = []
+
+    def recording(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        sent.extend(texts)
+        return _transport(url, model, texts, timeout)
+
+    build_index(tmp_path, _config(model="other-model"), chunks, transport=recording)
+
+    assert sent == ["alpha", "beta"], "another model must not reuse these vectors"
+
+
+def test_a_torn_checkpoint_record_is_dropped_and_truncated(tmp_path: Path) -> None:
+    """A kill can land mid-record; a checkpoint that cannot be read is worse than none."""
+    config = _config()
+    chunks = [(1, "alpha"), (2, "beta")]
+    build_index(tmp_path, config, chunks, transport=_transport)
+    path = (
+        tmp_path / ".coderag" / "vectors" / "cache" / "bge-m3" / "embed-cache.bin"
+    )
+    assert path.is_file()
+    good_size = path.stat().st_size
+    path.write_bytes(path.read_bytes() + b"\x04\x00\x00\x00short")
+    assert path.stat().st_size > good_size
+
+    recovered = checkpoint_cache(tmp_path, config).load()
+
+    assert recovered == len(chunks)
+    assert path.stat().st_size == good_size
+
+
+def test_the_checkpoint_stays_inside_the_workspace(tmp_path: Path) -> None:
+    cache = checkpoint_cache(tmp_path, _config())
+    cache.put("bge-m3", "alpha", [1.0, 0.0, 0.0, 0.0])
+    cache.close()
+
+    directory = tmp_path / ".coderag" / "vectors" / "cache"
+    assert directory.is_dir()
+    assert (directory / "bge-m3" / "embed-cache.bin").is_file()
+
+
+def test_a_model_name_cannot_escape_the_cache_directory() -> None:
+    assert checkpoint_slug("../../etc") == "______etc"
+    assert "/" not in checkpoint_slug("org/model")
+    assert "\\" not in checkpoint_slug("org\\model")
+    assert checkpoint_slug("") == "model"

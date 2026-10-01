@@ -23,7 +23,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from dsh_coderag.config import SemanticConfig
-from dsh_coderag.embed import EmbeddingCache, SemanticError, Transport, embed_texts
+from dsh_coderag.embed import (
+    DiskEmbeddingCache,
+    EmbeddingCache,
+    SemanticError,
+    Transport,
+    embed_texts,
+)
 from dsh_coderag.log import log_event
 from dsh_coderag.types import ErrorCode
 
@@ -34,6 +40,8 @@ VECTORS_SUBDIR = Path(".coderag") / "vectors"
 EMBEDDINGS_FILENAME = "embeddings.npy"
 MANIFEST_FILENAME = "manifest.json"
 MANIFEST_FORMAT_VERSION = 1
+CHECKPOINT_SUBDIR = Path("cache")
+"""Checkpoint directory inside the vectors directory, one subdirectory per model (T6-31)."""
 
 
 @dataclass(frozen=True)
@@ -90,6 +98,36 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def checkpoint_slug(model: str) -> str:
+    """Return a filesystem-safe directory name for one model name.
+
+    Dots are not passed through, so a model called `..` cannot escape the vectors
+    directory (S-03).
+    """
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in model)
+    return safe or "model"
+
+
+def checkpoint_cache(root: Path, config: SemanticConfig) -> DiskEmbeddingCache:
+    """Open this workspace's resumable checkpoint for one model (T6-31).
+
+    The directory is per model, and every record names its model, so changing the
+    embedding model starts a fresh checkpoint instead of mixing dimensions.
+    """
+    cache = DiskEmbeddingCache(
+        vectors_dir(root) / CHECKPOINT_SUBDIR / checkpoint_slug(config.model),
+        config.model,
+    )
+    recovered = cache.load()
+    if recovered:
+        log_event(
+            "semantic_checkpoint_recovered",
+            model=config.model,
+            vectors=recovered,
+        )
+    return cache
+
+
 def check_chunk_budget(config: SemanticConfig, chunk_count: int) -> None:
     """Refuse to vectorize more chunks than the configured ceiling.
 
@@ -133,13 +171,20 @@ def build_index(
     hashes = [content_hash(text) for text in texts]
     previous = _load_previous(root, config)
     matrix, pending = _seed_from_previous(numpy, previous, ids, hashes)
-    matrix = _fill_pending(numpy, matrix, config, texts, pending, cache, transport)
+    checkpoint = cache if cache is not None else checkpoint_cache(root, config)
+    try:
+        matrix = _fill_pending(
+            numpy, matrix, config, texts, pending, checkpoint, transport
+        )
+    finally:
+        checkpoint.close()
     log_event(
         "semantic_index_built",
         model=config.model,
         chunks=len(ids),
         reused=len(ids) - len(pending),
-        embedded=len(pending),
+        embedded=len(pending) - checkpoint.hits,
+        from_checkpoint=checkpoint.hits,
     )
     index = VectorIndex(
         model=config.model,

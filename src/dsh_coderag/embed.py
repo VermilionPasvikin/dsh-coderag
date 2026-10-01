@@ -16,12 +16,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import struct
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
+from typing import IO
 
 from dsh_coderag.config import ENV_SEMANTIC, ENV_SEMANTIC_API_KEY, SemanticConfig
 from dsh_coderag.log import log_event
@@ -52,6 +56,15 @@ essentially nothing in this corpus.
 
 _CONTEXT_CACHE: dict[str, int] = {}
 """Model name to context length, remembered for the process (one probe per model)."""
+
+CHECKPOINT_FILENAME = "embed-cache.bin"
+"""Name of the resumable checkpoint file inside one model's cache directory (T6-31)."""
+
+_RECORD_HEADER = 36
+"""Bytes per checkpoint record header: a little-endian dimension and a sha256."""
+
+_FLOAT_BYTES = 4
+"""One vector component on disk, matching the float32 matrix the index stores."""
 
 _SUPPORTED_BACKENDS = frozenset(_ENDPOINT_PATHS)
 
@@ -102,6 +115,104 @@ class EmbeddingCache:
     def put(self, model: str, text: str, vector: list[float]) -> None:
         """Store one vector for text under model."""
         self._vectors[(model, _text_key(text))] = vector
+
+    def flush(self) -> None:
+        """Persist whatever this cache buffers; the in-memory one buffers nothing."""
+
+    def close(self) -> None:
+        """Release whatever this cache holds; the in-memory one holds no handle."""
+
+
+CHECKPOINT_MAGIC = b"coderag-embed-cache-1\n"
+"""Header of a checkpoint file, so a foreign or older file is ignored, not read."""
+
+
+class DiskEmbeddingCache(EmbeddingCache):
+    """An EmbeddingCache that also appends every vector to disk (T6-31).
+
+    A long vector build used to keep all of its work in memory and write once at
+    the end (`vectors.save_index`), so a run that was killed after five minutes or
+    five hours had nothing to resume from. This cache appends each vector as the
+    batch it belongs to comes back, and `load` reads them in again, so a restarted
+    build only pays for what is still missing.
+
+    The directory is scoped to one model by the caller, and every record repeats
+    the model's digest and dimension, so vectors from another model can never be
+    mixed in. A record torn by a kill is dropped and the file is truncated to the
+    last complete one: a checkpoint that cannot be read back would be worse than
+    no checkpoint at all.
+    """
+
+    def __init__(self, directory: Path, model: str) -> None:
+        super().__init__()
+        self._directory = directory
+        self._model = model
+        self._path = directory / CHECKPOINT_FILENAME
+        self._handle: IO[bytes] | None = None
+
+    @property
+    def records(self) -> int:
+        """How many vectors this cache holds, recovered and freshly added."""
+        return len(self._vectors)
+
+    def load(self) -> int:
+        """Read the checkpoint back; return how many vectors were recovered."""
+        if not self._path.is_file():
+            return 0
+        recovered = 0
+        good_end = 0
+        with self._path.open("rb") as handle:
+            if handle.read(len(CHECKPOINT_MAGIC)) != CHECKPOINT_MAGIC:
+                return 0
+            good_end = len(CHECKPOINT_MAGIC)
+            while True:
+                header = handle.read(_RECORD_HEADER)
+                if len(header) < _RECORD_HEADER:
+                    break
+                dim, digest = struct.unpack("<I32s", header)
+                raw = handle.read(dim * _FLOAT_BYTES)
+                if dim <= 0 or len(raw) < dim * _FLOAT_BYTES:
+                    break
+                self._vectors[(self._model, digest.hex())] = list(
+                    struct.unpack(f"<{dim}f", raw)
+                )
+                good_end = handle.tell()
+                recovered += 1
+        if good_end < self._path.stat().st_size:
+            with self._path.open("r+b") as handle:
+                handle.truncate(good_end)
+        return recovered
+
+    def put(self, model: str, text: str, vector: list[float]) -> None:
+        """Store one vector and append it to the checkpoint immediately."""
+        super().put(model, text, vector)
+        handle = self._handle_for_writing()
+        digest = bytes.fromhex(_text_key(text))
+        handle.write(struct.pack("<I32s", len(vector), digest))
+        handle.write(struct.pack(f"<{len(vector)}f", *vector))
+
+    def flush(self) -> None:
+        """Push buffered records to the device, so a kill cannot lose them."""
+        if self._handle is not None:
+            self._handle.flush()
+            os.fsync(self._handle.fileno())
+
+    def close(self) -> None:
+        """Flush and close the checkpoint file, if it was opened."""
+        if self._handle is not None:
+            self.flush()
+            self._handle.close()
+            self._handle = None
+
+    def _handle_for_writing(self) -> IO[bytes]:
+        """Open the checkpoint for appending on first use, writing the header."""
+        if self._handle is None:
+            self._directory.mkdir(parents=True, exist_ok=True)
+            fresh = not self._path.is_file() or self._path.stat().st_size == 0
+            self._handle = self._path.open("ab")
+            if fresh:
+                self._handle.write(CHECKPOINT_MAGIC)
+        return self._handle
 
 
 def _text_key(text: str) -> str:
@@ -468,6 +579,8 @@ def _embed_pending(
             if cache is not None:
                 cache.put(config.model, text, vector)
             embedded[text] = vector
+        if cache is not None:
+            cache.flush()
     if shortened_total:
         log_event(
             "semantic_shortened_summary",
