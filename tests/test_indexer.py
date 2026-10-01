@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
+from dsh_coderag import indexer
 from dsh_coderag.indexer import SCHEMA_VERSION, index_sync, open_index
 
 
@@ -137,3 +139,68 @@ def test_the_vector_build_forwards_the_api_key(
 
     assert transport("http://127.0.0.1:1/v1/embeddings", "m", ["a"], 1.0) == [[1.0]]
     assert seen["api_key"] == "k-123"
+
+
+def test_pruning_many_stale_files_is_set_based(tmp_path: Path) -> None:
+    """T6-30: one statement per table, not one per stale file.
+
+    Deleting file rows one at a time made every `chunks_fts` delete a full scan of
+    that table, because `file_id` is an UNINDEXED FTS column: removing 478,263 of
+    894,964 chunks that way ran for over twenty minutes, read 288 GB and had
+    written 1.9 MB when it was stopped. This asserts the shape of the fix - a
+    constant number of statements however many files go - and that the FTS rows
+    stay in step with `chunks`.
+    """
+    stale_count = 20_000
+    db_path = tmp_path / "index.sqlite3"
+    connection = open_index(db_path)
+    statements: list[str] = []
+    try:
+        now = int(time.time())
+        connection.executemany(
+            "INSERT INTO files (id, path, size, mtime_ns, content_hash, lang, indexed_at)"
+            " VALUES (?, ?, 1, 1, 'h', NULL, ?)",
+            ((n, f"gone/f{n}.py", now) for n in range(1, stale_count + 1)),
+        )
+        connection.execute(
+            "INSERT INTO files (id, path, size, mtime_ns, content_hash, lang, indexed_at)"
+            " VALUES (?, ?, 1, 1, 'h', NULL, ?)",
+            (stale_count + 1, "kept/one.py", now),
+        )
+        connection.executemany(
+            "INSERT INTO chunks (id, file_id, seq, start_line, end_line, text, content_hash)"
+            " VALUES (?, ?, 1, 1, 1, ?, 'h')",
+            ((n, n, f"body {n}") for n in range(1, stale_count + 2)),
+        )
+        connection.executemany(
+            "INSERT INTO chunks_fts (text_bigram, symbol, path, chunk_id, file_id)"
+            " VALUES (?, '', '', ?, ?)",
+            ((f"body {n}", n, n) for n in range(1, stale_count + 2)),
+        )
+        connection.set_trace_callback(statements.append)
+        started = time.monotonic()
+        removed = indexer._remove_missing_files(connection, {"kept/one.py"})
+        elapsed = time.monotonic() - started
+        connection.set_trace_callback(None)
+    finally:
+        connection.close()
+
+    assert removed == stale_count
+    assert elapsed < 20, f"pruning {stale_count} files took {elapsed:.1f}s"
+    # Exactly one statement touches chunks_fts, however many files go: that table
+    # has no index on file_id, so a per-file delete meant a full scan per file.
+    # `DELETE FROM files` is traced once per cascaded row instead, which is simply
+    # what SQLite's ON DELETE CASCADE does and is cheap through idx_chunks_order.
+    fts_deletes = [s for s in statements if s.startswith("DELETE FROM chunks_fts")]
+    assert len(fts_deletes) == 1, f"{len(fts_deletes)} of {len(statements)} statements"
+
+    reopened = open_index(db_path)
+    try:
+        counts = (
+            reopened.execute("SELECT COUNT(*) FROM files").fetchone()[0],
+            reopened.execute("SELECT COUNT(*) FROM chunks").fetchone()[0],
+            reopened.execute("SELECT COUNT(*) FROM chunks_fts").fetchone()[0],
+        )
+    finally:
+        reopened.close()
+    assert counts == (1, 1, 1)

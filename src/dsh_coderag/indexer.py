@@ -595,18 +595,44 @@ def _write_chunk(
 
 def _remove_missing_files(
     connection: sqlite3.Connection, current_paths: set[str]
-) -> None:
-    """Cascade-delete rows for files that no longer exist in the workspace."""
+) -> int:
+    """Cascade-delete rows for files that no longer exist in the workspace.
+
+    Set-based on purpose (T6-30). Deleting one file at a time made every
+    `chunks_fts` delete a full scan of that table, because `file_id` is an
+    UNINDEXED FTS column: removing 478,263 of 894,964 chunks that way ran for over
+    twenty minutes, read 288 GB and had written 1.9 MB when it was stopped. The
+    same work as one statement per table - one scan per statement - takes seconds.
+    `chunks` rows follow their `files` row through ON DELETE CASCADE.
+
+    Returns:
+        How many file rows were dropped.
+    """
     stale = [
         file_id
-        for file_id, path in connection.execute("SELECT id, path FROM files").fetchall()
+        for file_id, path in connection.execute("SELECT id, path FROM files")
         if path not in current_paths
     ]
     if not stale:
-        return
+        return 0
     with connection:
-        for deleted_id in stale:
-            _delete_file_rows(connection, deleted_id)
+        connection.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS _stale_file (id INTEGER PRIMARY KEY)"
+        )
+        connection.execute("DELETE FROM _stale_file")
+        connection.executemany(
+            "INSERT OR IGNORE INTO _stale_file (id) VALUES (?)",
+            ((file_id,) for file_id in stale),
+        )
+        dropped = connection.execute(
+            "SELECT COUNT(*) FROM chunks WHERE file_id IN (SELECT id FROM _stale_file)"
+        ).fetchone()[0]
+        connection.execute(
+            "DELETE FROM chunks_fts WHERE file_id IN (SELECT id FROM _stale_file)"
+        )
+        connection.execute("DELETE FROM files WHERE id IN (SELECT id FROM _stale_file)")
+    log_event("index_pruned", files=len(stale), chunks=dropped)
+    return len(stale)
 
 
 def _delete_file_rows(connection: sqlite3.Connection, file_id: int) -> None:
