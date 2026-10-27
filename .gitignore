@@ -37,12 +37,15 @@ dist/
 venv/
 
 # ── 3. Node / npm bundle ────────────────────────────────────
-# 仓库根同时是 npm 包（PROJECT.md §1.6.1）。
-# 但它是零依赖、零构建脚本的，所以这里只需要挡掉安装与打包产物。
+# 仓库根同时是 npm 包（PROJECT.md §1.6.1），T5 起还带一个 JS 双端插件：
+# node_modules 只用于构建（esbuild 与内联进 host bundle 的 schemastery），
+# 分发内容只有 lib/ 里已构建好的两个文件。
 node_modules/
 *.tgz
 npm-debug.log*
 pnpm-debug.log*
+.npm-cache/
+.tmp-*/
 
 # ── 4. 测试 / 类型检查 / 覆盖率缓存 ─────────────────────────
 .pytest_cache/
