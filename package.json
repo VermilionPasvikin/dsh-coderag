@@ -1,14 +1,53 @@
 {
   "name": "dsh-coderag",
   "version": "2.1.1",
-  "description": "Codebase retrieval engine for DeepSeek Harness, exposed over MCP",
+  "description": "Codebase retrieval engine for DeepSeek Harness, exposed over MCP, with a native settings page",
   "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
   "files": [
-    "cordis.patch.yml"
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
+  "scripts": {
+    "build": "node scripts/build-plugin.mjs",
+    "test:plugin": "node --test tests/plugin/*.test.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
     }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.1.7-rc.1",
+    "react": "^18.2.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-ui-plugin-manager": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "3.18.5",
+    "esbuild": "0.28.2"
   }
 }
