@@ -147,11 +147,13 @@ DeepSeek Harness（下称 DSH）是一个"一切皆插件"的 Agent 框架，但
 
 ```
 dsh-coderag/                      ← 仓库根
-├── package.json                  ← npm bundle 清单（dsh.bundle → ./cordis.patch.yml）
-├── cordis.patch.yml              ← DSH 补丁层：既是 dev overlay，也是分发内容
+├── package.json                  ← npm bundle 清单（dsh.bundle → ./cordis.patch.yml；dsh.client → lib/client.js）
+├── cordis.patch.yml              ← DSH 补丁层：既是 dev overlay，也是分发内容（coderag 设置行 + mcp 执行器行）
 ├── pyproject.toml                ← Python 包配置
 ├── src/dsh_coderag/              ← Python 引擎
-├── tests/  eval/  scripts/  docs/
+├── src/plugin/                   ← JS 双端插件源码（host / client / shared）
+├── lib/                          ← 已构建的 JS 产物（分发内容）
+├── tests/  eval/  scripts/  docs/  （tests/plugin/ 为 Node 测试）
 ├── AGENTS.md  PROJECT.md         ← 约束与项目文档
 ├── EVAL.md  TESTING.md           ← 评测方案与测试方案
 ├── README.md  LICENSE  CHANGELOG.md
@@ -166,9 +168,13 @@ dsh-coderag/                      ← 仓库根
 | 从 GitHub 直装（最终目标） | `dsh plugin --profile <p> add github:<你>/dsh-coderag` | npm 包必须在仓库根，pnpm 才能识别 |
 | Python 引擎 | `pip install .` 或 `pip install dsh-coderag` | `pyproject.toml` 在仓库根 |
 
-**bundle 里没有任何 JavaScript**：`cordis.patch.yml` 插入的行引用的是 DSH **内置**包 `@deepseek-ai/dsh-mcp-client`，内置包名始终从 dsh 安装目录解析。仓库自己的示例（`apps/cli/config/examples/schedule/cordis.yml`）就是这么做的。
-
-**这顺带彻底绕开了约束 C11（pnpm 拒绝 install script）**——没有 JS 就没有构建脚本，没有 `allowBuilds` 问题。
+**bundle 的 JS 形态（v2.2 / DeepForge M5 起）**：从 1.0 到 2.1，`cordis.patch.yml` 只插入
+引用 DSH **内置**包 `@deepseek-ai/dsh-mcp-client` 的行，bundle 本身不含 JavaScript。M5 支线新增
+**原生设置页**后，bundle 多了两个已构建的 JS 产物（`lib/index.js` 的 Host 半侧、`lib/client.js`
+的浏览器半侧）与一个 `coderag` 设置行；MCP 执行器行与解释器解析方式不变。Host 产物把
+`@deepseek-ai/schemastery` 内联，`package.json` 仍**没有任何运行时 npm 依赖**、没有 install script，
+因此约束 C11（pnpm 拒绝 install script）依旧不适用。方案与实测见
+[`docs/settings-ui-plan.md`](docs/settings-ui-plan.md)。
 
 #### 1.6.2 分发路线：**三阶段，先跑通再上架**
 
@@ -1654,6 +1660,10 @@ T6-31  ← T6-29
 > 每个任务开工前把状态改为 `进行中`；通过验收后改为 `已完成`，**填上验收命令的实际输出**，并在「提交」列填上 commit 短 SHA。**缺任何一项都视为未完成**（`AGENTS.md` §5.1 的 DoD 七条）。
 >
 > 提交规范见 `AGENTS.md` §7.0–§7.2：**开工前 `git status --short` 必须为空**，一个任务至少一个提交，主题行 ≤72 字符并带 `Refs: <任务ID>`。
+>
+> **DeepForge M5 支线（`T5-01`…`T5-06`）不在本表**：那是根仓库 `docs/03-milestones.md` 的任务编号，
+> 与本仓库自己的 `T5-xx`（向量后端）不是同一套编号。支线的命令、原始输出、提交列表与未验证事项见
+> [`docs/settings-ui-plan.md`](docs/settings-ui-plan.md) §7。
 
 | ID | 状态 | 验收输出（粘贴实际结果） | 提交（短 SHA） | 备注 |
 |---|---|---|---|---|

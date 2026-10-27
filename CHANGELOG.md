@@ -7,6 +7,26 @@
 
 ### 新增
 
+- **DSH 原生设置页（`plugins.row.config`）**：bundle 新增一个 JS 双端插件。
+  - Host 半侧（`lib/index.js`，ESM）持有 `coderag` 行的 schemastery Config，**10 个字段全部
+    `.volatile()`**：`root` / `maxFiles` / `maxFileBytes` / `extraExtensions` / `semantic` /
+    `semanticBackend` / `semanticUrl` / `semanticModel` / `semanticTimeout` / `semanticBatch`。
+    保存时 Loader 只提交 volatile 值、**不重挂载设置行**；Host 再把它们映射成 `CODERAG_*`
+    合并进既有 `mcp-coderag` 行的 `config.env`。`env` 是 MCP 行的普通字段，因此该行会重挂载、
+    Python 子进程以新环境重启。
+  - Client 半侧（`lib/client.js`，lazy-CJS ModuleLoader factory，只 external `react` 与
+    `react/jsx-runtime`）注册 `plugins.row.config`（key `dsh-coderag#coderag`），用 React
+    渲染分组表单，显示保存/重置/加载/只读/错误状态，调用 `form.state` 与 `form.mutate`。
+  - 同步只碰上述 10 个变量；`CODERAG_MAX_TOKENS` / `CODERAG_SEMANTIC_MAX_CHUNKS` /
+    `CODERAG_SEMANTIC_ALLOW_REMOTE` / `CODERAG_SEMANTIC_API_KEY` 原样保留，设置页没有 key 字段。
+  - 首次保存前，profile 里已有的 `mcp-coderag` env 不会被启动同步清掉（全空设置不同步）。
+- **`@deepseek-ai/schemastery` 被内联进 Host bundle**：安装后**零运行时 npm 依赖**，
+  不触发 pnpm 的 install-script 限制（`E-05`）。
+- **`scripts/experiments/` 下的两个可复现探针**：`loader-volatile-probe.mjs`（对 `app.asar`
+  实测 Loader 单行更新 / volatile 语义）与 `host-settings-sync-probe.mjs`（用真实 Loader
+  跑构建后的 Host 插件、验证设置 → env → 重挂载）。
+- **Node 测试**：`tests/plugin/*.test.mjs`（settings 映射、MCP 行同步、表单纯逻辑、
+  client 产物与 slot 注册的 server-render 测试、bundle 清单/产物契约）。
 - **`CODERAG_EXTRA_EXTENSIONS`：让用户自行扩展可索引的文件后缀**（`T6-17`）。内置白名单
   （`.py` / `.c` / `.h` / `.cpp` / `.hpp` / `.ts` / `.js`）保持不变，这个变量**只增不减**：
   逗号或空格分隔、大小写不敏感、可省前导点，例如 `CODERAG_EXTRA_EXTENSIONS=.mxml,.as`。
@@ -14,6 +34,13 @@
   静默接受会让用户以为生效了。**密钥过滤不受影响**：扩展名闸门在第 1 层黑名单**之前**，
   `.env*` / `*.pem` / `credentials*` 即使把其后缀加进白名单也仍然不入库（`RL-03`）。
   没有对应 tree-sitter grammar 的后缀走 L4 低置信度分块（`low_confidence: true`）。
+
+### 变更
+
+- **`cordis.patch.yml`**：新增 `coderag` 设置行；`mcp-coderag` 行只保留解释器、
+  `CODERAG_MAX_TOKENS` 与 3 个不被设置页管理的语义变量。原先 9 个管理型 env 改由设置行
+  （`!!js` 读同名 shell 变量作默认值）→ Host 同步提供，避免两份真相互相覆盖。
+- **README**：新增「原生设置页」章节、更新配置入口表与已知限制。
 
 ### 修复
 

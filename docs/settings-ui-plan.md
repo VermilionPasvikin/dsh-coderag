@@ -265,3 +265,146 @@ return module.exports; } });
 2. 保存后 `cordis.patch.yml` 里 `coderag` 行的实际落盘内容与 mcp 子进程重启。
 3. 重启 DSH 后设置是否仍生效（持久化闭环）。
 4. 非法值（负数、`a.b` 扩展名、cloud 缺 URL）在 UI 上被拒绝的提示文案。
+
+---
+
+## 7. 实现与证据（T5-02 … T5-06）
+
+### 7.1 提交列表
+
+| 任务 | 提交 | 主题 |
+|---|---|---|
+| T5-01 | `32f5a97` | `docs(plan): design the native settings page` |
+| T5-02 | `24b2911` | `build(bundle): add the client plugin build` |
+| T5-03 | `316675d` | `feat(plugin): own coderag settings and sync the mcp row` |
+| T5-04 | `fa37c51` | `feat(ui): render the coderag settings form` |
+| T5-05 | `38ba0c7` | `test(plugin): cover settings mapping and form behavior` |
+| T5-06 | 本次提交 | `docs(readme): document the native settings page` |
+
+每次提交前 `pytest` 全绿、提交后 `git status --short` 为空。
+
+### 7.2 T5-02 构建管线
+
+```text
+$ node scripts/build-plugin.mjs
+esbuild path: cli
+built lib/index.js (46.2 KiB) and lib/client.js (18.1 KiB)
+
+$ head -1 lib/client.js
+window.__ModuleLoader__.load({ id: "dsh-coderag", factory: (require) => {
+
+$ tail -1 lib/client.js
+return module.exports; } });
+```
+
+- `lib/index.js` 是由 esbuild 打出的 ESM，`@deepseek-ai/schemastery` 内联；`package.json`
+  无 `dependencies`，安装时不会执行任何 install script。
+- 本会话沙箱禁止 Node 的管道子进程（esbuild JS API `spawn EPERM`，且提权不可用），
+  构建脚本自动回退到同版本 esbuild CLI（`stdio: 'inherit'`）；两条路径共用同一份
+  banner/footer/intro 定义。正常终端里走 JS API。
+
+### 7.3 T5-03 Host 行为（真实 Loader）
+
+```text
+$ node scripts/experiments/host-settings-sync-probe.mjs
+...
+PASS all ten setting fields are volatile in the schema JSON ...
+PASS empty settings do not restart the MCP row actual=1 expected=1
+PASS empty settings keep the legacy env actual={"CODERAG_ROOT":"/legacy","KEEP":"1"} ...
+PASS the settings row stays active without a settings service actual=2 expected=2
+PASS boot settings restart the MCP row actual=true expected=true
+PASS boot settings export numeric fields as strings actual=["100","2048","5"] ...
+PASS an unevaluated !!js env entry is resolved by the Loader and survives actual="from-env" ...
+PASS the MCP row keeps the expression in its raw config actual={"__jsExpr":"'from-env'"} ...
+PASS a volatile-only save restarts the MCP row actual=true expected=true
+PASS the save removes settings that were cleared actual=[null,null,null,null] ...
+PASS the volatile-only save did not remount the settings row actual=2 expected=2
+
+SUMMARY: 18/18 checks passed
+```
+
+探针用 T5-01 解出的**真实 Loader**挂载构建后的 `lib/index.js`，用假 MCP 行观察
+“设置 → env → 重挂载”。它同时证明：不纳管的 env（含 `!!js` 表达式）在同步前后原样保留；
+设置行在 volatile 保存时不重挂载。
+
+### 7.4 T5-04 设置页 UI 与 patch 装载
+
+client 产物按 DSH 的模块表协议加载（`window.__ModuleLoader__.load` → factory(require)），
+再用 `react-dom/server` 渲染实际注册的组件：
+
+```text
+loaded id: dsh-coderag
+first line: window.__ModuleLoader__.load({ id: "dsh-coderag", factory: (require) => {
+exports: [ 'apply', 'inject' ] inject: [ 'slots' ]
+registrations: [ { name: 'plugins.row.config', key: 'dsh-coderag#coderag' } ]
+page has root value: true
+page labels present: true
+page inputs: 12        # 10 个控件 + 2 个按钮
+required externals only: [ 'react', 'react/jsx-runtime' ]
+```
+
+`cordis.patch.yml` 用**真实 DSH** 装载一次（全新 `DSH_HOME` 在仓库内，`--patch` 叠加）：
+
+```text
+$ dsh --profile probe --patch ./cordis.patch.yml --dump-config
+exit=0；lines=1261
+- id: coderag        → 1
+- id: mcp-coderag    → 1
+CODERAG_ROOT:（env 键）→ 0
+非纳管 env 键（MAX_TOKENS / MAX_CHUNKS / ALLOW_REMOTE / API_KEY）→ 4
+```
+
+这同时验证了 YAML 的 `!!js` 方言、行顺序与“不猜工作区”约束（T6-15/T6-26 的教训）。
+
+### 7.5 T5-05 测试
+
+```text
+$ node --test --test-isolation=none "tests/plugin/*.test.mjs"
+ℹ tests 34
+ℹ pass 34
+ℹ fail 0
+
+$ python -m pytest
+629 passed, 17 skipped in 52.48s
+```
+
+Node 测试覆盖：字段表/env 映射/校验、MCP 行同步（含竞态强制重启路径）、表单 draft↔JSON 与
+保存 op、构建产物契约（首行 banner、footer、仅 React externals、slot key）、bundle 清单
+（无 install script、无运行时依赖、patch 不重复纳管 env、不猜 root）。
+
+### 7.6 T5-06 文档
+
+```text
+$ python scripts/verify-plan.py .
+计划完备性：通过 ✅   （29 项检查全部实际执行，无空过）
+
+$ python -m pytest
+629 passed, 17 skipped in 52.70s
+
+$ node --test --test-isolation=none "tests/plugin/*.test.mjs"
+ℹ tests 34
+ℹ pass 34
+ℹ fail 0
+
+$ git status --short
+（空输出）
+```
+
+文档改动（人工检查，稳定锚点而非全文计数）：
+
+- `README.md` 新增 `### 原生设置页（推荐，DSH `plugins.row.config`）`，含字段/env 对照表、
+  保存/恢复默认/非法值行为、首次保存前后的老配置语义、5 步黑盒验收；
+  配置入口表、安装期望行、`CODERAG_ROOT` 说明与已知限制同步更新；文档表新增本文件与 PR 草稿。
+- `PROJECT.md` §1.6.1 的 bundle 形态由「没有 JavaScript」更新为「Host/Client 两个已构建产物 +
+  `coderag` 设置行，仍无运行时依赖、无 install script」；§6.7 注明 DeepForge M5 支线的证据位置。
+- `CHANGELOG.md` 的 `[Unreleased]` 增加设置页、构建产物、探针、Node 测试与 patch 调整。
+- 本文件 §7 记录 T5-02…T5-06 的命令与实际输出。
+
+### 7.7 环境限制（不影响交付）
+
+- 本会话的 Windows 沙箱拒绝 `os.chmod` / 0o700 目录，pytest 需要把 `TEMP`/`TMP` 指到仓库内
+  并用**仓库之外**的 `sitecustomize.py` 临时修正（不改项目代码）。正常终端直接
+  `python -m pytest` 即可。
+- 该沙箱尝试还在仓库根留下 5 个**空**目录 `pytest-cache-files-*`（不可读、不可删、未跟踪）。
+  用户可在正常终端里直接删除；它们不属于任何提交。
+- GUI 点击与真实 Python 重启仍需用户黑盒验证（见 §6）。
