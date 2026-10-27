@@ -21,7 +21,7 @@
   ],
   "scripts": {
     "build": "node scripts/build-plugin.mjs",
-    "test:plugin": "node --test tests/plugin/*.test.mjs"
+    "test:plugin": "node --test --test-isolation=none \"tests/plugin/*.test.mjs\""
   },
   "dsh": {
     "bundle": {
@@ -48,6 +48,8 @@
   },
   "devDependencies": {
     "@deepseek-ai/schemastery": "3.18.5",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   }
 }

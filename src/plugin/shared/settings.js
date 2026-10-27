@@ -290,8 +290,9 @@ export function validateValues(values) {
   if (!SEMANTIC_BACKENDS.includes(backend)) reject('semanticBackend', '只支持 未设置 / ollama / openai。')
 
   const url = String(draft.semanticUrl ?? '').trim()
-  if (url !== '' && !/^https?:\/\/[^\s]+$/i.test(url)) reject('semanticUrl', '需要以 http:// 或 https:// 开头的地址。')
-  if (url !== '') {
+  const urlWellFormed = url === '' || /^https?:\/\/[^\s]+$/i.test(url)
+  if (!urlWellFormed) reject('semanticUrl', '需要以 http:// 或 https:// 开头的地址。')
+  if (url !== '' && urlWellFormed) {
     const loopback = /^https?:\/\/(?:127(?:\.\d+){3}|localhost|\[::1\])(?::\d+)?(?:\/|$)/i.test(url)
     if (backend === 'ollama' && !loopback) {
       reject('semanticUrl', 'ollama 后端只允许 loopback 地址（127.0.0.1 / localhost / [::1]）。')
