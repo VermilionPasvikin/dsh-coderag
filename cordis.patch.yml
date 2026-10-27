@@ -1,37 +1,45 @@
 # dsh-coderag bundle patch.
 #
 # One file serves as both the local development overlay and the distributed
-# bundle patch. It inserts a single MCP client row pointing at the Python
-# engine; that row references a DSH built-in package, so this bundle ships no
-# JavaScript of its own.
+# bundle patch. It inserts two rows:
 #
-# The interpreter is overridable with CODERAG_PYTHON (E-06). The workspace the
-# engine indexes must be given with CODERAG_ROOT — there is no usable default,
-# because the only thing a default could be is the HOST process's working
-# directory. Both are set through config.env because stdio child environments
-# are scrubbed (E-02).
+#   - `coderag`      — this package's JS plugin. It owns the editable settings
+#                      (a schemastery Config whose fields are all `.volatile()`)
+#                      and the browser page that edits them under
+#                      Plugins → dsh-coderag → Configure.
+#   - `mcp-coderag`  — the MCP client that spawns the Python engine. The JS
+#                      plugin maps the settings onto this row's `config.env` and
+#                      reloads the row, which restarts the child process.
 #
 # --- Where to configure -----------------------------------------------------
-# This `config.env` block is THE configuration entry point for the engine: it is
-# the only channel that reliably reaches the MCP child process. DSH drops
-# ambient names matching /KEY|PASSWORD|SECRET|TOKEN/i and every DSH_* name when
-# it spawns the child, then merges the entries below on top — so whatever is
-# written here survives, and whatever is merely exported in your shell may not.
-# Notably `CODERAG_MAX_TOKENS` contains "TOKEN" and is dropped from the ambient
-# environment, which is why it is spelled out explicitly below.
+# The settings page is the primary entry point: it writes the `coderag` row into
+# `$DSH_HOME/profiles/<profile>/cordis.patch.yml` and the Host plugin syncs the
+# MCP row. Keep machine-local overrides in that profile patch (or
+# `$DSH_HOME/cordis.patch.yml`, which outranks it) instead of editing this file,
+# because an id-targeted patch replaces the whole `config` object and this file
+# is tracked by git and ships inside the bundle.
 #
-# Two ways to set a value:
-#   1. `!!js process.env.X ?? '<default>'` — read X from the shell that launches
-#      dsh, falling back to the default. Works for every variable, and keeps
-#      secrets out of this file. (This is the form used below.)
-#   2. a literal value — edit this file. Suits non-secret tuning.
+# The `!!js` expressions on the `coderag` row read the same variables from the
+# shell that launches dsh and use them as the settings defaults, so exported
+# values keep working without touching this file. They are evaluated by the HOST
+# process; the settings page shows the resolved values and saving persists them.
 #
-# Overriding from outside the repo: keep machine-local settings in
-# `$DSH_HOME/profiles/<profile>/cordis.patch.yml` (or `$DSH_HOME/cordis.patch.yml`,
-# which outranks it) instead of editing this file. Those layers are applied after
-# every bundle layer and are NOT part of the repository — which matters for
-# secrets (see the warning below). An id-targeted patch replaces the whole
-# `config` object, so a local override must restate the fields it keeps.
+# The interpreter is overridable with CODERAG_PYTHON (E-06). The workspace the
+# engine indexes must be given with CODERAG_ROOT through the settings page (or a
+# profile override) — there is no usable default, because the only thing a
+# default could be is the HOST process's working directory. Both are set through
+# config/env because stdio child environments are scrubbed (E-02).
+#
+# Variables the settings page owns, and which therefore no longer appear on the
+# MCP row: CODERAG_ROOT, CODERAG_MAX_FILES, CODERAG_MAX_FILE_BYTES,
+# CODERAG_EXTRA_EXTENSIONS, CODERAG_SEMANTIC, CODERAG_SEMANTIC_BACKEND,
+# CODERAG_SEMANTIC_URL, CODERAG_SEMANTIC_MODEL, CODERAG_SEMANTIC_TIMEOUT,
+# CODERAG_SEMANTIC_BATCH.
+#
+# Variables the settings page deliberately does NOT own, and which stay on the
+# MCP row below: CODERAG_MAX_TOKENS (its name contains "TOKEN", so the ambient
+# copy is scrubbed and it must be written explicitly), the max-chunks cap, the
+# remote-opt-in switch, and the cloud API key.
 #
 # `args` uses `-c`, not `-m`. The child runs with cwd set to the workspace being
 # indexed, and `python -m` imports `runpy` before any of our code runs, so a
@@ -42,6 +50,28 @@
 # `LAUNCHER_PROGRAM` in tests/test_cwd_shadowing.py, which asserts the two match.
 
 - insert:
+    - id: coderag
+      name: dsh-coderag
+      config:
+        # Settings defaults mirror the shell environment, exactly like the old
+        # `config.env` entries did. Values are validated by the plugin Config
+        # before the row mounts; malformed numbers fall back to 0 (engine
+        # default) instead of failing the whole settings page.
+        #
+        # CODERAG_ROOT has no fallback on purpose: the shipped bundle must never
+        # guess a workspace (T6-26). An empty value makes the engine report
+        # WORKSPACE_INVALID with the directory it would have used.
+        root: !!js "process.env.CODERAG_ROOT ?? ''"
+        maxFiles: !!js "Number(process.env.CODERAG_MAX_FILES ?? 0) || 0"
+        maxFileBytes: !!js "Number(process.env.CODERAG_MAX_FILE_BYTES ?? 0) || 0"
+        extraExtensions: !!js "process.env.CODERAG_EXTRA_EXTENSIONS ?? ''"
+        semantic: !!js "(process.env.CODERAG_SEMANTIC ?? '') === 'on'"
+        semanticBackend: !!js "process.env.CODERAG_SEMANTIC_BACKEND ?? ''"
+        semanticUrl: !!js "process.env.CODERAG_SEMANTIC_URL ?? ''"
+        semanticModel: !!js "process.env.CODERAG_SEMANTIC_MODEL ?? ''"
+        semanticTimeout: !!js "Number(process.env.CODERAG_SEMANTIC_TIMEOUT ?? 0) || 0"
+        semanticBatch: !!js "Number(process.env.CODERAG_SEMANTIC_BATCH ?? 0) || 0"
+
     - id: mcp-coderag
       name: '@deepseek-ai/dsh-mcp-client'
       config:
@@ -64,14 +94,10 @@
         command: !!js "process.env.CODERAG_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')"
         args: ['-c', 'import dsh_coderag.server as s; s.run()']
         env:
-          # CODERAG_ROOT is required, and it is not set here because no useful
-          # default exists. An expression in this file is evaluated by the HOST
-          # process, so `process.cwd()` would name $DSH_HOME/profiles/<profile>;
-          # and the engine's own working directory is the same profile directory
-          # (both measured 2026-09-30, T6-25 / T6-26) - DSH's own state, never the
-          # folder the user opened. Set it here or in the environment; left unset,
-          # or set inside DSH's own home, the engine answers WORKSPACE_INVALID and
-          # reports the root it resolved.
+          # CODERAG_ROOT, the index limits, the extension whitelist and the
+          # semantic settings are owned by the `coderag` row above; the plugin
+          # merges them into this env at runtime. Do not add them here: two
+          # sources of truth would silently disagree on the next settings save.
           #
           # CODERAG_PYTHON is deliberately NOT repeated here. Only `command`
           # above decides which executable DSH spawns, and the engine itself
@@ -82,27 +108,16 @@
           # ambient environment (see "Where to configure" above).
           CODERAG_MAX_TOKENS: !!js process.env.CODERAG_MAX_TOKENS ?? '4000'
 
-          # Extra file extensions to index, on top of the built-in whitelist
-          # (.py .c .h .cpp .hpp .ts .js). Comma or space separated, e.g.
-          # '.mxml,.as'. It only ADDS: a built-in extension cannot be removed,
-          # and the secret blacklist (.env*, *.pem, credentials*, ...) still runs
-          # on every file the wider net catches (RL-03). Extensions without a
-          # tree-sitter grammar fall back to low-confidence chunking.
-          CODERAG_EXTRA_EXTENSIONS: !!js process.env.CODERAG_EXTRA_EXTENSIONS ?? ''
-
           # ==================================================================
           #  OPTIONAL SEMANTIC BACKEND — OFF BY DEFAULT
           # ==================================================================
+          # The switch, backend, URL, model, timeout and batch are settings-page
+          # fields (see the `coderag` row). The three variables below stay here
+          # because the settings page does not own them.
           # Both backends stay disabled until CODERAG_SEMANTIC=on. Empty string
           # means "unset", so the engine's own defaults still apply. See
           # `docs/adr/ADR-16-optional-vector-backend.md` (local, Ollama) and
           # `docs/adr/ADR-17-optional-cloud-embedding.md` (cloud).
-          CODERAG_SEMANTIC: !!js process.env.CODERAG_SEMANTIC ?? ''
-          CODERAG_SEMANTIC_BACKEND: !!js process.env.CODERAG_SEMANTIC_BACKEND ?? ''
-          CODERAG_SEMANTIC_URL: !!js process.env.CODERAG_SEMANTIC_URL ?? ''
-          CODERAG_SEMANTIC_MODEL: !!js process.env.CODERAG_SEMANTIC_MODEL ?? ''
-          CODERAG_SEMANTIC_TIMEOUT: !!js process.env.CODERAG_SEMANTIC_TIMEOUT ?? ''
-          CODERAG_SEMANTIC_BATCH: !!js process.env.CODERAG_SEMANTIC_BATCH ?? ''
           CODERAG_SEMANTIC_MAX_CHUNKS: !!js process.env.CODERAG_SEMANTIC_MAX_CHUNKS ?? ''
           CODERAG_SEMANTIC_ALLOW_REMOTE: !!js process.env.CODERAG_SEMANTIC_ALLOW_REMOTE ?? ''
           CODERAG_SEMANTIC_API_KEY: !!js process.env.CODERAG_SEMANTIC_API_KEY ?? ''
@@ -134,6 +149,7 @@
           # A key must never reach logs, structured status or exception text.
           # A non-loopback URL only takes effect when CODERAG_SEMANTIC_ALLOW_REMOTE=1
           # is set as well (a second, deliberate key); use https:// for it.
+          # The settings page does not accept an API key field on purpose.
           #
           # Worked example — cloud backend, key from the environment:
           #   CODERAG_SEMANTIC: 'on'
