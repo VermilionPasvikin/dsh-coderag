@@ -36,7 +36,7 @@
 - **设置页运维面板**：云端 Key（状态/保存/删除）、语义后端（本地/云端连通性检查、一键启动本地、
   可关闭错误弹窗）、向量数据库（存在性/模型/维度/chunk 计数/检查点/生成时间、刷新、增量向量化、
   开始/停止、进度条、完成后自动刷新）；有未保存参数改动时提示先保存。
-- **Node 测试扩到 66 项**：新增 Host admin 服务（CLI 调用/流式 job/stop/ollama 轮询/密钥 scrub）、
+- **Node 测试扩到 69 项**：新增 Host admin 服务（CLI 调用/流式 job/stop/ollama 轮询/密钥 scrub）、
   路由鉴权与 action 分发、浏览器 admin helpers 与面板渲染。
 - **`@deepseek-ai/schemastery` 被内联进 Host bundle**：安装后**零运行时 npm 依赖**，
   不触发 pnpm 的 install-script 限制（`E-05`）。
@@ -64,6 +64,12 @@
 
 ### 修复
 
+- **旧 `vectorize` 子进程迟到的 close/error 会把新 job 标成 error**：每次运行改用独立
+  `handle{child,stopRequested,key}`；close/error 只在 `active === handle` 时生效，
+  `stop` 与 5 秒 SIGKILL 兜底也只操作自己的 handle；有 handle 存活时拒绝新任务。
+  回归测试覆盖「停止后立刻启动第二个，旧 child 迟到事件不得影响新 job」。
+- **设置保存 / Key 保存按钮可能长期停在“保存中…”**：设置写入加 15 秒超时并恢复按钮；
+  key 写入成功后先释放 spinner，再等待 Host 的 MCP env refresh。
 - **`dsh-coderag index`（CLI）此前完全没有读取可选配置**：`CODERAG_MAX_FILES` /
   `CODERAG_MAX_TOKENS` / `CODERAG_MAX_FILE_BYTES` / `CODERAG_EXTRA_EXTENSIONS` 在 CLI 路径上
   都被忽略（`T6-07` 当时只把配置接进了 MCP 那条路径）。现在 CLI 与 MCP 共用

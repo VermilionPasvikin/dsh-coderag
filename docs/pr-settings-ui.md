@@ -72,7 +72,7 @@
 ```text
 $ node scripts/build-plugin.mjs
 esbuild path: cli        # 本会话沙箱禁止管道子进程；正常机器走 JS API
-built lib/index.js (68.6 KiB) and lib/client.js (46.4 KiB)
+built lib/index.js (69.5 KiB) and lib/client.js (46.8 KiB)
 
 $ node scripts/experiments/loader-volatile-probe.mjs --asar <app.asar> --out .tmp-asar/probe-run --keep
 SUMMARY: 20/20 checks passed
@@ -81,10 +81,10 @@ $ node scripts/experiments/host-settings-sync-probe.mjs
 SUMMARY: 19/19 checks passed
 
 $ node --test --test-isolation=none "tests/plugin/*.test.mjs"
-ℹ tests 66 / ℹ pass 66 / ℹ fail 0
+ℹ tests 69 / ℹ pass 69 / ℹ fail 0
 
 $ python -m pytest
-629 passed, 17 skipped
+671 tests, 0 failures, 0 errors, 17 skipped
 
 $ dsh --profile probe --patch ./cordis.patch.yml --dump-config   # 全新 DSH_HOME
 exit 0；`- id: coderag` 1 行、`- id: mcp-coderag` 1 行；
@@ -96,8 +96,34 @@ mcp 行只剩 `CODERAG_SEMANTIC_API_KEY`；`CODERAG_ROOT:`（env 键）0 行
 （revision 0→1）→ 会话模型调 `mcp__coderag__index_status`，**1.5 秒**后返回
 `root: F:\PersonalProjects\python\unname\demo-project`；再改回
 `dsh-coderag`（revision 4）后约 **2 秒**返回 `root: F:\PersonalProjects\python\unname\dsh-coderag`、
-`status: ready`。截图：`deliverables/screenshots/settings-coderag.png`
-（设置 → CodeRAG 的 13 字段首屏）。
+`status: ready`。截图：`deliverables/screenshots/S09-coderag-settings-page.png`
+（设置 → CodeRAG 的 13 字段首屏）与 `S07-coderag-plugin-page.png`（bundle 入口）。
+
+**运维路由实测**（同一实例，PYTHONPATH 指向本仓库 `src`）：
+
+```text
+GET  /coderag-admin/state   → 200，index_exists=true、total_chunks=1526、pending=1526
+POST /coderag-admin/action {action:"health",backend:"ollama"}
+                            → 200，{"ok":true,"model_present":true,"models":[4 个]}
+credentials/set(fake)       → ok；describe configured=true, source=file
+POST action refresh         → ok；state.config.key_present=true（Host resolve 生效）
+credentials/unset(fake)     → ok；describe configured=false；state.key_present=false
+```
+
+- 所有响应、仓库文件、profile patch 都不含假 key；唯一落点是仓库外的
+  `C:\Users\15349\.dsh\.credentials.yaml`。
+- 子进程 env 的直接读取被本会话沙箱拒绝（WMI/psutil 不可用）；MCP env 合并由
+  `host-sync.test.mjs` 单测钉住，未把“读不到”写成“已验证”。
+- 向量化停止/恢复：1526 pending → embed 16 → stop（checkpoint 16）→ resume → embed 32 →
+  stop（checkpoint 32）；未跑完，root 与 key 均已恢复。
+- 竞态修复：停止后立刻启动第二个 job 时，旧 child 迟到的 close/error 不再改写新 job
+  （每次运行独立 handle + `active === handle` 闸门）；回归测试覆盖。
+- UI（Playwright + 276 chunk 的 `vector-demo`）：key 保存后「已配置（不可查看），来源 file」、
+  输入框清空、页面无 key；删除后未配置且 `state.key_present=false`；本地 ollama 连通 bge-m3；
+  云端缺 URL 返回可展示错误。截图：`S10-coderag-key-configured.png`、
+  `S11-coderag-health-local.png`、`S12-vector-ready.png`、`S13-vector-running.png`、
+  `S14-vector-stopped.png`、`S15-vector-done.png`。
+
 
 ## 审阅者手工验收
 

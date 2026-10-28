@@ -540,19 +540,78 @@ key 变更后页面 POST `{action:'refresh'}`，Host 解析凭据并重同步 `m
 
 ```text
 $ node scripts/build-plugin.mjs
-built lib/index.js (68.6 KiB) and lib/client.js (46.4 KiB)
+built lib/index.js (69.5 KiB) and lib/client.js (46.8 KiB)
 
 $ node --test --test-isolation=none "tests/plugin/*.test.mjs"
-ℹ tests 66 / ℹ pass 66 / ℹ fail 0
+ℹ tests 69 / ℹ pass 69 / ℹ fail 0
+
+$ python -m pytest --junitxml=junit.xml
+671 tests, 0 failures, 0 errors, 17 skipped (exit 0)
 ```
 
-新增覆盖：`admin-host.test.mjs`（CLI 调用/流式 job/stop/ollama 轮询/密钥 scrub）、
-`admin-routes.test.mjs`（方法/媒体类型/action/refresh/信任围栏）、
+新增覆盖：`admin-host.test.mjs`（CLI 调用/流式 job/stop/ollama 轮询/密钥 scrub/结构化错误/
+迟到 close 竞态）、`admin-routes.test.mjs`（方法/媒体类型/action/refresh/信任围栏）、
 `admin-client.test.mjs`（envelope/job 归一化/进度/格式化）、host-sync 的 key 合并与保留、
 client-bundle 的运维面板渲染。
 
-### 9.5 联调状态
+### 9.5 真实实例联调（DeepForge，2026-10-28）
 
-- 本会话沙箱禁止带管道的子进程，因此**无法在会话内**真实 spawn Python/admin；
-  admin 服务的行为由注入式单测覆盖（真实子进程、流式事件、SIGTERM 均可模拟）。
-- 真实 DeepForge 实例联调需要重启加载新 host bundle；截图与路由响应在联调后补入本节。
+实例以 `PYTHONPATH=<repo>/src` 启动，MCP 与 admin 子进程都 import 本工作区副本；
+以下都走 Web cookie 信任围栏（`/connect?token=…` 换 cookie）：
+
+```text
+GET  /coderag-admin/state
+200 {"ok":true,"value":{"index_exists":true,"vector_exists":false,
+     "total_chunks":1526,"pending_chunks":1526,"checkpoint_vectors":0,
+     "config":{"enabled":true,"backend":"ollama","key_present":false}}}
+
+POST /coderag-admin/action {"action":"health","backend":"ollama"}
+200 {"ok":true,"value":{"ok":true,"backend":"ollama","model_present":true,
+     "models":["bge-m3:latest","nomic-embed-text:latest","deepseek-r1:8b","deepseek-r1:14b"]}}
+```
+
+**凭据闭环**（假 key `sk-test-coderag-do-not-use`，用后删除）：
+
+```text
+credentials/set        → {"ok":true}
+credentials/describe   → {"CODERAG_SEMANTIC_API_KEY":{"configured":true,"source":"file","writable":true}}
+POST action refresh    → {"ok":true,"value":{…job…}}
+GET  state             → config.key_present=true      ← Host credentials.resolve 生效
+credentials/unset      → {"ok":true}
+credentials/describe   → {"configured":false,"writable":true}
+state                  → config.key_present=false
+```
+
+- 任何 state/describe/action 响应、仓库文件、profile `cordis.patch.yml` 中都**没有**假 key；
+  key 只出现在 `C:\Users\15349\.dsh\.credentials.yaml`（仓库之外）。
+- MCP 子进程 env 的合并由同一条 `syncMCPRow(entry, values, {apiKey})` 完成，
+  单测 `host-sync.test.mjs` 钉住；本会话沙箱的 WMI 被拒绝、psutil 也不可用，
+  **无法直接读取另一个进程的环境块**，因此这里以 `key_present` + 单测作为证据
+  （不把“读不到”说成“已验证”）。
+
+**向量化停止/恢复**（root=`dsh-coderag`，1526 pending）：
+
+```text
+start → embed 16, pending 1510
+stop  → status stopped, error null
+state → checkpoint_vectors 16, vector_exists false
+resume → embed 32, pending 1494（从 16 继续）
+stop  → checkpoint_vectors 32
+```
+
+`PASS: stop kept a checkpoint and resume advanced the embedded count`。
+没有跑完 1526 个 chunk；测试后 key 已删除、root 未改（仍是 dsh-coderag），
+`.coderag/vectors` 留下 32 条检查点（停止不删除，符合契约）。
+
+**UI 实测（Lead，Playwright + `vector-demo` 276 chunk）**：
+
+- key：保存后状态「已配置（不可查看），来源 file」、输入框清空、页面/响应无 key；
+  删除后「未配置」、`state.config.key_present=false`。
+- 健康：本地 ollama 连通 `bge-m3`；云端没填 URL 时返回可展示的结构化错误。
+- 截图：`S10-coderag-key-configured.png`、`S11-coderag-health-local.png`、
+  `S12-vector-ready.png`、`S13-vector-running.png`、`S14-vector-stopped.png`、
+  `S15-vector-done.png`（均位于 `deliverables/screenshots/`；S15 抓到了修复前的
+  「停止后立刻恢复 → 旧 close 把新 job 标 error」现象，用于定位竞态）。
+- 竞态修复：每次 vectorize 独立 handle + `active === handle` 闸门；回归测试
+  `late exits from a stopped job cannot clobber the next job`。修复后需重启 Host
+  再复测一次「stop → 立刻 start」路径（由 Lead 的下一轮 UI 验证确认）。
