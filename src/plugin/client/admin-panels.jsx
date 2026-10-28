@@ -171,7 +171,13 @@ export function CredentialPanel({ remote }) {
       return
     }
     setStatus({ phase: 'loading' })
-    const response = await remote.credentials.describe([SEMANTIC_KEY_REF])
+    let response
+    try {
+      response = await remote.credentials.describe([SEMANTIC_KEY_REF])
+    } catch (failure) {
+      setStatus({ phase: 'error', message: failure instanceof Error ? failure.message : String(failure) })
+      return
+    }
     if (!response?.ok) {
       setStatus({ phase: 'error', message: response?.error?.message ?? '读取凭据状态失败' })
       return

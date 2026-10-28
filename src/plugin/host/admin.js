@@ -98,21 +98,27 @@ function excerpt(value) {
 
 /**
  * Build the environment handed to one admin child.
- * Settings values win over the ambient environment for every owned variable;
- * the health command always forces the switch on because it is a probe.
+ * Settings values win over the ambient environment for every owned variable.
+ * Only the health probe forces the semantic switch on; status/vectorize must
+ * observe the saved switch so their answers match the GUI.
+ * @param {Record<string, unknown>} values - normalized settings.
+ * @param {string | undefined} apiKey - resolved cloud key.
+ * @param {string | undefined} backend - backend override for a probe.
+ * @param {boolean} [forceSemantic] - force `CODERAG_SEMANTIC=on`.
+ * @returns {NodeJS.ProcessEnv} the child environment.
  */
-export function adminEnvironment(values, apiKey, backend) {
+export function adminEnvironment(values, apiKey, backend, forceSemantic = false) {
   const plan = envPlan(values)
   const env = {
     ...process.env,
     PYTHONIOENCODING: 'utf-8',
     PYTHONUTF8: '1',
     ...plan.set,
-    CODERAG_SEMANTIC: 'on',
   }
   // Clear owned variables the settings explicitly left empty; otherwise an
   // ambient value exported for an unrelated session would silently win.
   for (const name of plan.remove) delete env[name]
+  if (forceSemantic) env.CODERAG_SEMANTIC = 'on'
   if (backend !== undefined && HEALTH_BACKENDS.includes(backend)) {
     env.CODERAG_SEMANTIC_BACKEND = backend
   }
@@ -174,7 +180,7 @@ export function createAdminService(options) {
    */
   async function runOnce(args, config) {
     const command = pythonOf()
-    const env = adminEnvironment(options.readValues(), config.apiKey, config.backend)
+    const env = adminEnvironment(options.readValues(), config.apiKey, config.backend, config.forceSemantic === true)
     return new Promise(resolve => {
       let settled = false
       let stdout = ''
@@ -264,6 +270,7 @@ export function createAdminService(options) {
         timeoutMs: COMMAND_TIMEOUT_MS,
         apiKey: key,
         backend: HEALTH_BACKENDS.includes(backend) ? backend : undefined,
+        forceSemantic: true,
       })
       if (result.ok === false) return result
       return { ok: true, value: normalizeHealth(result.value) }
@@ -275,9 +282,9 @@ export function createAdminService(options) {
      */
     async startLocal() {
       const values = options.readValues()
-      const url = (typeof values.semanticUrl === 'string' && values.semanticUrl.trim() !== ''
-        ? values.semanticUrl.trim().replace(/\/+$/, '')
-        : DEFAULT_OLLAMA_URL)
+      const configuredUrl = typeof values.semanticUrl === 'string' ? values.semanticUrl.trim().replace(/\/+$/, '') : ''
+      // start-local is specifically Ollama: never poll a configured cloud URL.
+      const url = configuredUrl !== '' && values.semanticBackend !== 'openai' ? configuredUrl : DEFAULT_OLLAMA_URL
       let child
       try {
         child = spawn('ollama', ['serve'], {

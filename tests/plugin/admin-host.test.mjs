@@ -86,6 +86,17 @@ test('adminEnvironment carries settings and the resolved key into the child only
   assert.equal(env.PYTHONIOENCODING, 'utf-8')
 })
 
+test('status observes the saved switch instead of forcing it on', () => {
+  const saved = process.env.CODERAG_SEMANTIC
+  delete process.env.CODERAG_SEMANTIC
+  try {
+    const env = adminEnvironment({ ...VALUES, semantic: false }, 'k')
+    assert.equal(env.CODERAG_SEMANTIC, undefined)
+  } finally {
+    if (saved !== undefined) process.env.CODERAG_SEMANTIC = saved
+  }
+})
+
 test('state runs the admin CLI with the saved root and never returns the key', async () => {
   const { value, recorder } = service()
   const pending = value.state()
