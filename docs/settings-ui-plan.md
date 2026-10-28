@@ -489,3 +489,70 @@ SUMMARY: 19/19 checks passed
 $ python -m pytest
 629 passed, 17 skipped
 ```
+
+---
+
+## 9. M5+ 增量：API key、后端健康与向量库运维（T7-02，2026-10-28）
+
+设置页在 13 字段表单下新增三块运维区。数据面由 T7-01 的
+`python -m dsh_coderag.admin` 提供；控制面是 Host 插件，浏览器只经过鉴权路由。
+
+### 9.1 凭据边界
+
+| 方向 | 路径 |
+|---|---|
+| 写 | 浏览器 `ctx.remote.credentials.set('CODERAG_SEMANTIC_API_KEY', key)` → DSH credentials 服务（**不写 profile patch**） |
+| 读状态 | `remote.credentials.describe([ref])` → 只拿 `{configured, source?, writable}`；输入框保存后立即清空 |
+| 读值 | 仅 Host `ctx.get('credentials').resolve(ref)`；结果只进 MCP 行 env 与 admin 子进程 env |
+| 删除 | `remote.credentials.unset(ref)`，页面二次确认 |
+| 不出现 | state/job/health 响应、错误消息、日志、凭据值回显 |
+
+key 变更后页面 POST `{action:'refresh'}`，Host 解析凭据并重同步 `mcp-coderag` env；
+解析不到（provider 缺失/未配置）时**保留行里已有的值**，不删除。
+
+### 9.2 Host 路由
+
+| 路由 | 行为 |
+|---|---|
+| `GET /coderag-admin/state` | `admin status --root <当前 Config.root>`，投影为白名单状态 |
+| `POST /coderag-admin/action` | `health`（可带 `backend`，覆盖 admin env 里的后端）/ `start-local` / `vectorize` / `stop` / `refresh` |
+| `GET /coderag-admin/job` | 内存 job `{status,total,embedded,pending,model,generatedAt,error,...}` |
+
+- 只在 Web profile 注册（`ctx.inject(['webServer','connection'])`）；每个请求先过
+  `connection.requestRejection`，拒绝时返回 401/403。
+- 请求体 ≤64 KiB、必须 `application/json`；action 必须在固定列表内。
+- `start-local`：detached `ollama serve`，轮询 `http://127.0.0.1:11434/api/tags`
+  ≤15 秒（每 500ms 一次，单次 1.5s 超时），失败返回可展示的 `ollama-unreachable` 错误。
+- `vectorize`：`spawn` admin CLI，逐行解析 `start`/`progress`/`done`/`error` JSON；
+  job 只存内存。`stop` 发 SIGTERM（5 秒后 SIGKILL 兜底），检查点保留；
+  退出码非 0 或 `error` 事件 → job `error`，消息用解析出的 key 做 scrub。
+
+### 9.3 页面模块
+
+1. **云端 API Key**：状态（已配置/未配置）、密码输入、保存/删除（确认）。
+2. **语义后端**：本地/云端两个检查按钮（health 用已保存配置，可覆盖 backend）、
+   一键启动本地 ollama、失败弹窗（可关闭，显示 `message`）。
+3. **向量数据库**：存在性/模型/维度/总 chunk/已向量化/待向量化/过期/检查点/生成时间；
+   刷新、增量向量化、开始/停止、进度条；运行中每秒轮询 job，完成后自动刷新状态；
+   有未保存参数时提示先保存。
+
+### 9.4 测试与构建
+
+```text
+$ node scripts/build-plugin.mjs
+built lib/index.js (68.6 KiB) and lib/client.js (46.4 KiB)
+
+$ node --test --test-isolation=none "tests/plugin/*.test.mjs"
+ℹ tests 66 / ℹ pass 66 / ℹ fail 0
+```
+
+新增覆盖：`admin-host.test.mjs`（CLI 调用/流式 job/stop/ollama 轮询/密钥 scrub）、
+`admin-routes.test.mjs`（方法/媒体类型/action/refresh/信任围栏）、
+`admin-client.test.mjs`（envelope/job 归一化/进度/格式化）、host-sync 的 key 合并与保留、
+client-bundle 的运维面板渲染。
+
+### 9.5 联调状态
+
+- 本会话沙箱禁止带管道的子进程，因此**无法在会话内**真实 spawn Python/admin；
+  admin 服务的行为由注入式单测覆盖（真实子进程、流式事件、SIGTERM 均可模拟）。
+- 真实 DeepForge 实例联调需要重启加载新 host bundle；截图与路由响应在联调后补入本节。

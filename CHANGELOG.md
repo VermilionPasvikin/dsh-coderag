@@ -22,9 +22,22 @@
     + `useSyncExternalStore` 订阅快照。
   - 保存**即时热重载**（本机实测：改 root 后 1.5–2 秒内模型调 `mcp__coderag__index_status`
     返回新 root；改回后同样恢复），页面提示「已保存，MCP 已按新环境热重载」。
-  - 同步只碰上述 13 个变量；`CODERAG_SEMANTIC_API_KEY` 原样保留，设置页**没有、也不会有**
-    key 字段（`RL-02`/`S-05`）。
+  - 同步只碰上述 13 个变量；云端 API key 走 DSH credentials（见下条），不写入 Config / profile patch。
   - 首次保存前，profile 里已有的 `mcp-coderag` env 不会被启动同步清掉（全空设置不同步）。
+- **云端 API Key 走 DSH credentials（reference `CODERAG_SEMANTIC_API_KEY`）**：设置页密码框
+  保存后立即清空，只显示「已配置（不可查看）」，删除需二次确认；值**不回读、不写 profile patch、
+  不进 state/错误/日志**。Host 在同步 MCP 行和启动 admin 子进程时用 `credentials.resolve` 取它；
+  key 变更后页面调用 `refresh` 动作让 MCP env 立即更新。
+- **Host 运维路由（仅 Web profile）**：`GET /coderag-admin/state`、`POST /coderag-admin/action`
+  （`health` / `start-local` / `vectorize` / `stop` / `refresh`）、`GET /coderag-admin/job`；
+  全部经过 `connection.requestRejection` 鉴权，响应固定为 `{ok,value}` / `{ok:false,error}`。
+  `start-local` detached 启动 `ollama serve` 并轮询 `/api/tags` ≤15 秒；`vectorize` 流式解析
+  admin CLI 的 JSON 行，job 存内存，`stop` 杀子进程但保留检查点。
+- **设置页运维面板**：云端 Key（状态/保存/删除）、语义后端（本地/云端连通性检查、一键启动本地、
+  可关闭错误弹窗）、向量数据库（存在性/模型/维度/chunk 计数/检查点/生成时间、刷新、增量向量化、
+  开始/停止、进度条、完成后自动刷新）；有未保存参数改动时提示先保存。
+- **Node 测试扩到 66 项**：新增 Host admin 服务（CLI 调用/流式 job/stop/ollama 轮询/密钥 scrub）、
+  路由鉴权与 action 分发、浏览器 admin helpers 与面板渲染。
 - **`@deepseek-ai/schemastery` 被内联进 Host bundle**：安装后**零运行时 npm 依赖**，
   不触发 pnpm 的 install-script 限制（`E-05`）。
 - **`scripts/experiments/` 下的两个可复现探针**：`loader-volatile-probe.mjs`（对 `app.asar`
@@ -45,7 +58,9 @@
 - **`cordis.patch.yml`**：新增 `coderag` 设置行（13 个 `!!js` 默认值）；`mcp-coderag` 行只保留
   解释器与 `CODERAG_SEMANTIC_API_KEY`。原先的 12 个管理型 env 改由设置行
   （`!!js` 读同名 shell 变量作默认值）→ Host 同步提供，避免两份真相互相覆盖。
-- **README**：新增「原生设置页」章节（三个入口、13 字段表、热重载实测、已知限制）。
+- **运维面板依赖 `python -m dsh_coderag.admin`**（T7-01）：状态、健康、可恢复向量化都由它提供；
+  缺失或失败时页面显示可关闭的结构化错误，不影响参数表单本身。
+- **README**：新增「运维面板」章节（key/后端/向量库、路由与安全边界）与相应已知限制。
 
 ### 修复
 

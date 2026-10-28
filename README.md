@@ -370,6 +370,45 @@ key 继续写在 patch 的 `env:` 或启动 dsh 的 shell 里（`RL-02`/`S-05`�
 4. 把文件上限改成 `-1` 或把扩展名改成 `a.b` → 页面就地报错，保存被拒绝。
 5. 点「恢复默认」→ 表单回到默认值 → 保存 → `coderag` 行的 `config` 被移除，行为回到环境变量/引擎默认。
 
+### 运维面板（云端 Key / 后端连通性 / 向量库）
+
+设置 → CodeRAG 的参数表单下面还有三块运维区（只读状态 + 受控操作）：
+
+1. **云端 API Key**
+   - 状态只显示「已配置（不可查看）」/「未配置」，输入框是密码框，**保存后立即清空**；
+     删除需要二次确认。
+   - 值只写进 DSH 的 **credentials 服务**（reference 固定为 `CODERAG_SEMANTIC_API_KEY`），
+     **不写 profile patch、不回读、不显示**；Host 同步 MCP 行和启动 admin 子进程时用
+     `credentials.resolve` 取它。key 不会出现在任何 state/错误响应或日志里。
+   - 保存/删除后自动调用 Host 的 `refresh` 动作，把新 key 同步进 `mcp-coderag` 的 env。
+
+2. **语义后端**
+   - 「检查本地连通性」/「检查云端连通性」分别调用 admin `health`；
+     使用已保存的 URL/model/key，云端检查会按 `openai` 后端覆盖。
+   - 「一键启动本地后端」会 detached 启动 `ollama serve`，并轮询 `http://127.0.0.1:11434/api/tags`
+     ≤15 秒；成功/失败都有状态行，失败弹出可关闭的错误弹窗（显示 admin 的结构化 `message`）。
+   - 前提：本机装了 `ollama`（可选后端，默认关闭）。
+
+3. **向量数据库**
+   - 状态卡显示：索引/向量库存在性、模型与维度、总 chunk、已向量化、待向量化、过期 chunk、
+     检查点数量、生成时间；数据来自 `python -m dsh_coderag.admin status --root <已保存的 root>`。
+   - 「向量化增量」/「开始向量化」启动 admin `vectorize` 子进程；运行中显示进度条与
+     `embedded/total` 数字，可「停止」（SIGTERM，检查点保留，下次从检查点恢复）。
+   - 完成后自动刷新状态卡；有未保存的参数改动时提示先保存（任务使用已保存的 root）。
+   - 依赖 T7-01 的 admin CLI（`src/dsh_coderag/admin.py`）；进程退出码/错误事件会变成
+     可关闭的错误弹窗，不会把 key 放进消息。
+
+> **⚠️ 云端 embedding 会外发数据**（与「③ 云端 embedding 后端」同一套要点，`D-08`）：
+> 外发已入库 chunk 文本**及上下文前缀行（含文件路径与符号名）**；被三层过滤拦下的密钥文件
+> 不会外发；按 token 计费，首次索引是**全量支出**；合规自负；key 只从环境 / 仓库之外的
+> 本机配置层 / DSH credentials 读，不入库、不入日志或状态；非 loopback 必须同时设
+> `CODERAG_SEMANTIC_ALLOW_REMOTE=1` 并建议 `https://`。
+
+**安全性**：三条运维路由（`GET /coderag-admin/state`、`POST /coderag-admin/action`、
+`GET /coderag-admin/job`）只在 Web profile 注册，并且每个请求都过 `connection.requestRejection`
+（与 GUI 其他 API 同一信任边界）；响应永远是 `{ok,value}` / `{ok:false,error}`，
+state 中只有 `config.key_present`，没有 key 值。
+
 **Windows 上写到一个持久位置**——打开 `%USERPROFILE%\.dsh\profiles\<你实际在跑的 profile>\cordis.patch.yml`
 （该文件由 `dsh plugin --profile <profile> add .` 生成），把下面这段放进去。**参数本身建议留在设置页**，
 这里只覆盖解释器与执行器字段：
@@ -608,7 +647,8 @@ export CODERAG_SEMANTIC=on CODERAG_SEMANTIC_MODEL=bge-m3
 > - **不再成立**：本地后端的"代码不出机器"在云端下**不成立**。
 > - **费用**：按 token 计费；首次索引对**全量 chunk** 做 embedding，是一次性真实支出。
 > - **合规自负**：代码可能是公司资产或含第三方许可限制，**外发前请确认你有权发给该服务商**。
-> - **key**：只从环境或**仓库之外**的本机配置层读，**绝不**入库、不入日志、不入结构化状态。
+> - **key**：只从环境、**仓库之外**的本机配置层或 **DSH credentials 服务**（同样在本机）读，
+>   **绝不**入库、不入日志、不入结构化状态。
 > - **传输**：非 loopback 地址必须**同时**设 `CODERAG_SEMANTIC_ALLOW_REMOTE=1`（第二把钥匙），
 >   并请使用 `https://`。
 
@@ -709,7 +749,11 @@ $env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
 | **可选向量后端默认关闭，且不声称检索质量** | 本地后端只允许 loopback；按 `ADR-14` §10.4 的 `V4`，`natural` 桶 `S@5 = 0.300 < 0.40` | 「② 本地 embedding 后端」 |
 | **设置页需要 DSH 支持 `settings.section` / `plugins.row.config` / `plugins.bundle.config`** | 0.1.7-rc.1 起提供（本仓库在 0.2.1-rc.3 实测）；旧版 DSH 里没有这些入口，但 env / patch 配置仍照旧生效 | README「原生设置页」、`docs/settings-ui-plan.md` |
 | **首次保存后，设置页接管 13 个变量** | 旧 `mcp-coderag` 行 `env` 里的同名项会被覆盖/删除；只有 `CODERAG_SEMANTIC_API_KEY` 始终原样保留 | `docs/settings-ui-plan.md` §4.3 |
-| **设置页不管理 API key** | `CODERAG_SEMANTIC_API_KEY` 只能写在启动 shell 或本机 patch 的 `env:` 里；表单没有也不会有 key 字段（`RL-02`/`S-05`） | 配置章节 |
+| **设置页把 API key 存在 DSH credentials，而不是设置/patch** | 页面只显示「已配置/未配置」；值由 Host 在同步 MCP 行与 admin 子进程时读取，永不出现在 state/错误/日志里（`RL-02`/`S-05`） | 「运维面板」 |
+| **运维路由只在 Web profile 注册** | 需要 `webServer` + `connection` 服务，并用 `connection.requestRejection` 鉴权；headless 只有 env/patch 配置，没有运维面板 | 「运维面板」 |
+| **向量化 job 状态只存在于 Host 内存** | DSH 重启会丢失进度视图，但检查点（`.coderag/vectors/`）保留，重跑会从检查点恢复；停止不会删除检查点 | 「运维面板」 |
+| **一键启动只支持本机 `ollama serve`** | 只自动拉起 Ollama；其它本地服务或云端需要用户先启动/配置 | 「运维面板」 |
+| **运维面板依赖 admin CLI** | 需要 `python -m dsh_coderag.admin`（T7-01）在 MCP 同一解释器里可用；缺失/失败时面板显示可关闭的结构化错误 | 「运维面板」 |
 | **带环境默认值启动时 MCP 子进程可能启动两次** | 先按启动环境起一次，设置同步后再以同一/新环境重启一次；之后的保存都是即时热重载（实测 1.5–2 秒） | `docs/settings-ui-plan.md` §4.3 |
 
 ## 文档
