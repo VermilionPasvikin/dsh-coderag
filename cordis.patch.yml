@@ -5,8 +5,9 @@
 #
 #   - `coderag`      — this package's JS plugin. It owns the editable settings
 #                      (a schemastery Config whose fields are all `.volatile()`)
-#                      and the browser page that edits them under
-#                      Plugins → dsh-coderag → Configure.
+#                      and renders them in the browser: Plugins → dsh-coderag
+#                      opens the bundle page with the form, and the row's own
+#                      Configure control shows the same form.
 #   - `mcp-coderag`  — the MCP client that spawns the Python engine. The JS
 #                      plugin maps the settings onto this row's `config.env` and
 #                      reloads the row, which restarts the child process.
@@ -32,14 +33,15 @@
 #
 # Variables the settings page owns, and which therefore no longer appear on the
 # MCP row: CODERAG_ROOT, CODERAG_MAX_FILES, CODERAG_MAX_FILE_BYTES,
-# CODERAG_EXTRA_EXTENSIONS, CODERAG_SEMANTIC, CODERAG_SEMANTIC_BACKEND,
-# CODERAG_SEMANTIC_URL, CODERAG_SEMANTIC_MODEL, CODERAG_SEMANTIC_TIMEOUT,
-# CODERAG_SEMANTIC_BATCH.
+# CODERAG_MAX_TOKENS, CODERAG_EXTRA_EXTENSIONS, CODERAG_SEMANTIC,
+# CODERAG_SEMANTIC_BACKEND, CODERAG_SEMANTIC_URL, CODERAG_SEMANTIC_MODEL,
+# CODERAG_SEMANTIC_TIMEOUT, CODERAG_SEMANTIC_BATCH, CODERAG_SEMANTIC_MAX_CHUNKS,
+# CODERAG_SEMANTIC_ALLOW_REMOTE.
 #
-# Variables the settings page deliberately does NOT own, and which stay on the
-# MCP row below: CODERAG_MAX_TOKENS (its name contains "TOKEN", so the ambient
-# copy is scrubbed and it must be written explicitly), the max-chunks cap, the
-# remote-opt-in switch, and the cloud API key.
+# The one variable the settings page deliberately does NOT own is the cloud API
+# key: it stays on the MCP row (or the launching shell) and is never rendered in
+# the browser form, so a secret cannot be written into a settings document, a
+# log or a screenshot (RL-02 / S-05).
 #
 # `args` uses `-c`, not `-m`. The child runs with cwd set to the workspace being
 # indexed, and `python -m` imports `runpy` before any of our code runs, so a
@@ -64,6 +66,7 @@
         root: !!js "process.env.CODERAG_ROOT ?? ''"
         maxFiles: !!js "Number(process.env.CODERAG_MAX_FILES ?? 0) || 0"
         maxFileBytes: !!js "Number(process.env.CODERAG_MAX_FILE_BYTES ?? 0) || 0"
+        maxTokens: !!js "Number(process.env.CODERAG_MAX_TOKENS ?? 0) || 0"
         extraExtensions: !!js "process.env.CODERAG_EXTRA_EXTENSIONS ?? ''"
         semantic: !!js "(process.env.CODERAG_SEMANTIC ?? '') === 'on'"
         semanticBackend: !!js "process.env.CODERAG_SEMANTIC_BACKEND ?? ''"
@@ -71,6 +74,8 @@
         semanticModel: !!js "process.env.CODERAG_SEMANTIC_MODEL ?? ''"
         semanticTimeout: !!js "Number(process.env.CODERAG_SEMANTIC_TIMEOUT ?? 0) || 0"
         semanticBatch: !!js "Number(process.env.CODERAG_SEMANTIC_BATCH ?? 0) || 0"
+        semanticMaxChunks: !!js "Number(process.env.CODERAG_SEMANTIC_MAX_CHUNKS ?? 0) || 0"
+        semanticAllowRemote: !!js "(process.env.CODERAG_SEMANTIC_ALLOW_REMOTE ?? '') === '1'"
 
     - id: mcp-coderag
       name: '@deepseek-ai/dsh-mcp-client'
@@ -94,32 +99,28 @@
         command: !!js "process.env.CODERAG_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')"
         args: ['-c', 'import dsh_coderag.server as s; s.run()']
         env:
-          # CODERAG_ROOT, the index limits, the extension whitelist and the
-          # semantic settings are owned by the `coderag` row above; the plugin
-          # merges them into this env at runtime. Do not add them here: two
-          # sources of truth would silently disagree on the next settings save.
+          # Every CODERAG_* tuning variable is owned by the `coderag` row above;
+          # the plugin merges them into this env at runtime. Do not add them
+          # here: two sources of truth would silently disagree on the next
+          # settings save.
           #
           # CODERAG_PYTHON is deliberately NOT repeated here. Only `command`
           # above decides which executable DSH spawns, and the engine itself
           # never reads this variable — a copy in `env` only made a broken
           # `command` look correct.
 
-          # Spelled out because "TOKEN" in the name gets scrubbed from the
-          # ambient environment (see "Where to configure" above).
-          CODERAG_MAX_TOKENS: !!js process.env.CODERAG_MAX_TOKENS ?? '4000'
-
           # ==================================================================
           #  OPTIONAL SEMANTIC BACKEND — OFF BY DEFAULT
           # ==================================================================
-          # The switch, backend, URL, model, timeout and batch are settings-page
-          # fields (see the `coderag` row). The three variables below stay here
-          # because the settings page does not own them.
+          # The switch, backend, URL, model, timeout, batch, chunk cap and the
+          # remote opt-in are settings-page fields (see the `coderag` row). The
+          # one variable below stays here because the settings page must never
+          # handle a secret.
+          #
           # Both backends stay disabled until CODERAG_SEMANTIC=on. Empty string
           # means "unset", so the engine's own defaults still apply. See
           # `docs/adr/ADR-16-optional-vector-backend.md` (local, Ollama) and
           # `docs/adr/ADR-17-optional-cloud-embedding.md` (cloud).
-          CODERAG_SEMANTIC_MAX_CHUNKS: !!js process.env.CODERAG_SEMANTIC_MAX_CHUNKS ?? ''
-          CODERAG_SEMANTIC_ALLOW_REMOTE: !!js process.env.CODERAG_SEMANTIC_ALLOW_REMOTE ?? ''
           CODERAG_SEMANTIC_API_KEY: !!js process.env.CODERAG_SEMANTIC_API_KEY ?? ''
 
           # ------------------------------------------------------------------
@@ -151,15 +152,18 @@
           # is set as well (a second, deliberate key); use https:// for it.
           # The settings page does not accept an API key field on purpose.
           #
-          # Worked example — cloud backend, key from the environment:
+          # Worked example — cloud backend. The first six values are settings-page
+          # fields (the plugin exports them to this row's env); only the key stays
+          # an environment expression here:
           #   CODERAG_SEMANTIC: 'on'
           #   CODERAG_SEMANTIC_BACKEND: 'openai'
           #   CODERAG_SEMANTIC_URL: 'https://api.openai.com/v1'
           #   CODERAG_SEMANTIC_MODEL: 'text-embedding-3-small'
-          #   CODERAG_SEMANTIC_ALLOW_REMOTE: '1'      # required for any non-loopback URL
+          #   CODERAG_SEMANTIC_ALLOW_REMOTE: '1'      # settings toggle, required for any non-loopback URL
           #   CODERAG_SEMANTIC_API_KEY: !!js process.env.CODERAG_SEMANTIC_API_KEY ?? ''
           #
-          # Worked example — local backend (nothing leaves the machine):
+          # Worked example — local backend (nothing leaves the machine). All four
+          # are settings-page fields:
           #   CODERAG_SEMANTIC: 'on'
           #   CODERAG_SEMANTIC_BACKEND: 'ollama'
           #   CODERAG_SEMANTIC_URL: 'http://127.0.0.1:11434'

@@ -39,6 +39,7 @@ export const Config = z.object({
   root: z.string().default(DEFAULT_VALUES.root).description('Workspace root the engine indexes.').volatile(),
   maxFiles: z.natural().default(DEFAULT_VALUES.maxFiles).description('File cap; 0 uses the engine default.').volatile(),
   maxFileBytes: z.natural().default(DEFAULT_VALUES.maxFileBytes).description('Per-file byte cap; 0 uses the engine default.').volatile(),
+  maxTokens: z.natural().default(DEFAULT_VALUES.maxTokens).description('Search token budget; 0 uses the engine default (4000).').volatile(),
   extraExtensions: z.string().default(DEFAULT_VALUES.extraExtensions).description('Extra extensions, comma or space separated.').volatile(),
   semantic: z.boolean().default(DEFAULT_VALUES.semantic).description('Enable the optional semantic backend.').volatile(),
   semanticBackend: z.union([z.const(''), z.const('ollama'), z.const('openai')])
@@ -49,6 +50,10 @@ export const Config = z.object({
   semanticModel: z.string().default(DEFAULT_VALUES.semanticModel).description('Embedding model name.').volatile(),
   semanticTimeout: z.natural().default(DEFAULT_VALUES.semanticTimeout).description('Request timeout in seconds; 0 uses the default.').volatile(),
   semanticBatch: z.natural().default(DEFAULT_VALUES.semanticBatch).description('Embedding batch size; 0 uses the default.').volatile(),
+  semanticMaxChunks: z.natural().default(DEFAULT_VALUES.semanticMaxChunks).description('Embedding chunk cap; 0 uses the engine default.').volatile(),
+  semanticAllowRemote: z.boolean().default(DEFAULT_VALUES.semanticAllowRemote)
+    .description('Allow a non-loopback cloud embedding URL (second opt-in).')
+    .volatile(),
 })
 
 /** How long a boot-time sync waits for the MCP row to finish its first start. */

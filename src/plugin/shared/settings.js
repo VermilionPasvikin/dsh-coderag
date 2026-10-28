@@ -26,6 +26,7 @@ export const DEFAULT_VALUES = Object.freeze({
   root: '',
   maxFiles: 0,
   maxFileBytes: 0,
+  maxTokens: 0,
   extraExtensions: '',
   semantic: false,
   semanticBackend: '',
@@ -33,6 +34,8 @@ export const DEFAULT_VALUES = Object.freeze({
   semanticModel: '',
   semanticTimeout: 0,
   semanticBatch: 0,
+  semanticMaxChunks: 0,
+  semanticAllowRemote: false,
 })
 
 /** Backends accepted by the engine; the empty string means "engine default". */
@@ -42,8 +45,10 @@ export const SEMANTIC_BACKENDS = Object.freeze(['', 'ollama', 'openai'])
 export const ENGINE_DEFAULTS = Object.freeze({
   maxFiles: 20000,
   maxFileBytes: 1048576,
+  maxTokens: 4000,
   semanticTimeout: 30,
   semanticBatch: 16,
+  semanticMaxChunks: 100000,
   semanticUrl: 'http://127.0.0.1:11434',
   semanticModel: 'bge-m3',
 })
@@ -80,6 +85,14 @@ export const FIELDS = Object.freeze([
     label: '单文件字节上限',
     env: 'CODERAG_MAX_FILE_BYTES',
     hint: `0 = 引擎默认（${ENGINE_DEFAULTS.maxFileBytes}）。超过上限的文件计入 skipped.too_large。`,
+  }),
+  Object.freeze({
+    key: 'maxTokens',
+    group: 'index',
+    kind: 'integer',
+    label: '检索 token 预算',
+    env: 'CODERAG_MAX_TOKENS',
+    hint: `0 = 引擎默认（${ENGINE_DEFAULTS.maxTokens}）。这个名字含 TOKEN，历史配置里无法从继承环境传下来，所以由设置行显式接管。`,
   }),
   Object.freeze({
     key: 'extraExtensions',
@@ -145,6 +158,23 @@ export const FIELDS = Object.freeze([
     env: 'CODERAG_SEMANTIC_BATCH',
     hint: `0 = 引擎默认（${ENGINE_DEFAULTS.semanticBatch}）。`,
   }),
+  Object.freeze({
+    key: 'semanticMaxChunks',
+    group: 'semantic',
+    kind: 'integer',
+    label: '向量化 chunk 上限',
+    env: 'CODERAG_SEMANTIC_MAX_CHUNKS',
+    hint: `0 = 引擎默认（${ENGINE_DEFAULTS.semanticMaxChunks}）。首次云端索引会按此上限一次性计费，达到上限即停止。`,
+  }),
+  Object.freeze({
+    key: 'semanticAllowRemote',
+    group: 'semantic',
+    kind: 'boolean',
+    label: '允许非 loopback 云端地址',
+    env: 'CODERAG_SEMANTIC_ALLOW_REMOTE',
+    envTrue: '1',
+    hint: '只有「语义检索开启 + openai 后端 + 非 loopback URL」时才需要打开；否则引擎会拒绝启用云端后端。',
+  }),
 ])
 
 /** Form sections in render order. */
@@ -157,7 +187,8 @@ export const GROUPS = Object.freeze([
 /** The extension-token grammar the Python engine enforces (`config.EXTENSION_TOKEN`). */
 const EXTENSION_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_+-]*$/
 
-const INTEGER_KEYS = new Set(['maxFiles', 'maxFileBytes', 'semanticTimeout', 'semanticBatch'])
+const FIELD_BY_KEY = new Map(FIELDS.map(field => [field.key, field]))
+const INTEGER_KEYS = new Set(['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticTimeout', 'semanticBatch', 'semanticMaxChunks'])
 
 /**
  * Coerce one accepted Host value into the shape this module and env mapping use.
@@ -166,7 +197,7 @@ const INTEGER_KEYS = new Set(['maxFiles', 'maxFileBytes', 'semanticTimeout', 'se
  * @returns {unknown} the normalized value (string, boolean or non-negative integer).
  */
 function normalizeValue(key, value) {
-  if (key === 'semantic') return value === true
+  if (FIELD_BY_KEY.get(key)?.kind === 'boolean') return value === true
   if (INTEGER_KEYS.has(key)) {
     const number = Math.floor(Number(value))
     return Number.isFinite(number) && number > 0 ? number : 0
@@ -178,7 +209,7 @@ function normalizeValue(key, value) {
 /**
  * Normalize a whole settings object.
  * @param {Record<string, unknown>} values - raw values (settings value or draft).
- * @returns {Record<string, unknown>} all ten fields, normalized.
+ * @returns {Record<string, unknown>} all thirteen fields, normalized.
  */
 export function normalizeValues(values = {}) {
   const source = values !== null && typeof values === 'object' ? values : {}
@@ -193,7 +224,7 @@ export function normalizeValues(values = {}) {
 /**
  * Read a plugin Config whose fields are schemastery volatile references.
  * @param {Record<string, { get(): unknown } | unknown>} config - parsed Config.
- * @returns {Record<string, unknown>} all ten fields, normalized.
+ * @returns {Record<string, unknown>} all thirteen fields, normalized.
  */
 export function valuesFromConfig(config) {
   const values = {}
@@ -216,11 +247,14 @@ export function isEmptySettings(values) {
     && !normalized.semantic
     && normalized.maxFiles === 0
     && normalized.maxFileBytes === 0
+    && normalized.maxTokens === 0
     && normalized.semanticBackend === ''
     && normalized.semanticUrl === ''
     && normalized.semanticModel === ''
     && normalized.semanticTimeout === 0
     && normalized.semanticBatch === 0
+    && normalized.semanticMaxChunks === 0
+    && !normalized.semanticAllowRemote
 }
 
 /**
@@ -235,7 +269,9 @@ export function envPlan(values) {
   for (const field of FIELDS) {
     if (field.env === undefined) continue
     const value = normalized[field.key]
-    const text = field.kind === 'boolean' ? (value === true ? 'on' : '') : String(value)
+    // Boolean variables use their own true spelling: `on` for the semantic
+    // switch, `1` for the remote opt-in (the engine compares `== '1'`).
+    const text = field.kind === 'boolean' ? (value === true ? field.envTrue ?? 'on' : '') : String(value)
     if (text === '' || value === 0) remove.push(field.env)
     else set[field.env] = text
   }
@@ -267,7 +303,7 @@ export function validateValues(values) {
   const errors = []
   const reject = (field, message) => errors.push({ field, message })
 
-  for (const key of ['maxFiles', 'maxFileBytes', 'semanticTimeout', 'semanticBatch']) {
+  for (const key of ['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticTimeout', 'semanticBatch', 'semanticMaxChunks']) {
     const raw = Object.hasOwn(draft, key) ? draft[key] : DEFAULT_VALUES[key]
     const text = typeof raw === 'string' ? raw.trim() : String(raw)
     // An empty input means "engine default" (0), matching the placeholder.
@@ -292,19 +328,22 @@ export function validateValues(values) {
   const url = String(draft.semanticUrl ?? '').trim()
   const urlWellFormed = url === '' || /^https?:\/\/[^\s]+$/i.test(url)
   if (!urlWellFormed) reject('semanticUrl', '需要以 http:// 或 https:// 开头的地址。')
-  if (url !== '' && urlWellFormed) {
-    const loopback = /^https?:\/\/(?:127(?:\.\d+){3}|localhost|\[::1\])(?::\d+)?(?:\/|$)/i.test(url)
-    if (backend === 'ollama' && !loopback) {
-      reject('semanticUrl', 'ollama 后端只允许 loopback 地址（127.0.0.1 / localhost / [::1]）。')
-    }
+  const loopbackUrl = url !== '' && /^https?:\/\/(?:127(?:\.\d+){3}|localhost|\[::1\])(?::\d+)?(?:\/|$)/i.test(url)
+  if (url !== '' && urlWellFormed && backend === 'ollama' && !loopbackUrl) {
+    reject('semanticUrl', 'ollama 后端只允许 loopback 地址（127.0.0.1 / localhost / [::1]）。')
   }
 
-  if (draft.semantic === true) {
-    if (backend === 'openai') {
-      if (url === '') reject('semanticUrl', '云端 openai 后端必须显式给出 URL。')
-      if (String(draft.semanticModel ?? '').trim() === '') {
-        reject('semanticModel', '云端 openai 后端必须显式给出模型名。')
-      }
+  const allowRemote = draft.semanticAllowRemote === true
+  if (draft.semantic === true && backend === 'openai') {
+    if (url === '') reject('semanticUrl', '云端 openai 后端必须显式给出 URL。')
+    if (String(draft.semanticModel ?? '').trim() === '') {
+      reject('semanticModel', '云端 openai 后端必须显式给出模型名。')
+    }
+    // The engine requires a second, explicit opt-in before it talks to a
+    // non-loopback host (ADR-17 §1.3). The browser mirrors that rule so the
+    // user sees it before the save reaches the MCP row.
+    if (url !== '' && urlWellFormed && !loopbackUrl && !allowRemote) {
+      reject('semanticAllowRemote', '该云端地址不是 loopback；请打开「允许非 loopback 云端地址」，否则引擎拒绝启用云端后端。')
     }
   }
   return errors

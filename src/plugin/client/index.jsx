@@ -1,10 +1,14 @@
 /**
  * dsh-coderag — browser half of the native settings page.
  *
- * Registers one `plugins.row.config` entry for the `coderag` Loader row. DSH
- * hands the entry the Host-owned form (`form.state` snapshot + `form.mutate`
- * write queue); this module renders the grouped form, validates the draft in
- * the browser, and submits one `set` operation per field.
+ * Registers two contributions that render the same form:
+ *
+ * - `plugins.row.config` (`dsh-coderag#coderag`): the row-level Configure page;
+ *   DSH hands the form in as an owner prop.
+ * - `plugins.bundle.config` (`dsh-coderag`): the bundle detail page, so opening
+ *   Plugins → dsh-coderag shows the parameters on the first screen. This slot
+ *   passes no form, so the component reads the Host-owned form itself through
+ *   `ctx.configForms.get('coderag')` and subscribes with `useSyncExternalStore`.
  *
  * Every write goes through `form.mutate`, so the Host validates it against the
  * plugin Config, persists the profile patch, and delivers a volatile-only
@@ -16,6 +20,7 @@
 
 import * as React from 'react'
 import {
+  BUNDLE_NAME,
   DEFAULT_VALUES,
   FIELDS,
   GROUPS,
@@ -25,9 +30,9 @@ import {
 import { buildSetOps, draftKey, toDraft } from '../shared/client-form.js'
 
 /** Browser services used by this plugin. */
-export const inject = ['slots']
+export const inject = ['slots', 'configForms']
 
-const { useCallback, useEffect, useMemo, useRef, useState } = React
+const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React
 
 /** How long the saved confirmation stays visible. */
 const SAVED_NOTICE_MS = 4000
@@ -251,13 +256,13 @@ function SettingsPage({ form }) {
           恢复默认
         </button>
         {dirty ? <span style={styles.hint}>有未保存的修改</span> : null}
-        {notice?.kind === 'saved' ? <span style={styles.hint} role="status">已保存，MCP 行将按新环境重启。</span> : null}
+        {notice?.kind === 'saved' ? <span style={styles.hint} role="status">已保存；MCP 行将按新环境重载（若工具仍读到旧目录，请重启 DSH）。</span> : null}
         {notice?.kind === 'reset' ? <span style={styles.hint} role="status">已恢复默认值，点击保存生效。</span> : null}
         {notice?.kind === 'failed' ? <span style={styles.error} role="alert">{notice.message}</span> : null}
       </div>
       <p style={styles.hint}>
         保存会写入当前 profile 的 cordis.patch.yml，并把纳管的 CODERAG_* 环境变量同步到 mcp-coderag 行；
-        MAX_TOKENS / MAX_CHUNKS / ALLOW_REMOTE / API_KEY 不在此页管理。
+        只有 CODERAG_SEMANTIC_API_KEY 不在此页出现（请按 README 走环境变量或本机 profile）。
       </p>
     </div>
   )
@@ -269,14 +274,37 @@ function SettingsSummary() {
 }
 
 /**
- * Register the row configuration page.
+ * Bundle-page form: the slot supplies no form, so this reads the Host-owned
+ * `coderag` namespace through the shared `configForms` service and re-renders on
+ * every settings snapshot change.
+ * @param {{ configForms: { get(id: string): { getSnapshot: Function, subscribe: Function, mutate: Function } } }} props
+ */
+function BundleSettings({ configForms }) {
+  const form = useMemo(() => configForms.get('coderag'), [configForms])
+  const subscribe = useCallback(listener => form.subscribe(listener), [form])
+  const getSnapshot = useCallback(() => form.getSnapshot(), [form])
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const mutate = useCallback((ops, revision) => form.mutate(ops, revision), [form])
+  const pageForm = useMemo(() => ({ state: snapshot, mutate }), [snapshot, mutate])
+  return <SettingsPage form={pageForm} />
+}
+
+/**
+ * Register both configuration pages.
  * @param {import('@deepseek-ai/cordis').Context} ctx - browser plugin context.
  */
 export function apply(ctx) {
+  const configForms = ctx.configForms
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register(
     { name: 'plugins.row.config', key: ROW_CONFIG_KEY },
     props => (props?.view === 'summary'
       ? <SettingsSummary />
       : <SettingsPage form={props?.form} />),
+  ))
+  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register(
+    { name: 'plugins.bundle.config', key: BUNDLE_NAME },
+    props => (props?.view === 'summary'
+      ? <SettingsSummary />
+      : <BundleSettings configForms={configForms} />),
   ))
 }
