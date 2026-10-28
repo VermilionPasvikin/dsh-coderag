@@ -16,6 +16,7 @@ const SETTINGS = {
   root: '/workspace',
   maxFiles: 100,
   maxFileBytes: 0,
+  maxTokens: 5000,
   extraExtensions: '',
   semantic: true,
   semanticBackend: 'ollama',
@@ -23,6 +24,8 @@ const SETTINGS = {
   semanticModel: '',
   semanticTimeout: 0,
   semanticBatch: 0,
+  semanticMaxChunks: 50000,
+  semanticAllowRemote: false,
 }
 
 /** Build one fake Loader with one row. */
@@ -75,11 +78,19 @@ test('ownedEnvMismatch ignores variables the plugin does not own', () => {
   const plan = envPlan(SETTINGS)
   assert.equal(ownedEnvMismatch({ CODERAG_MAX_TOKENS: '4000' }, plan), true)
   assert.equal(ownedEnvMismatch({
-    CODERAG_ROOT: '/workspace', CODERAG_MAX_FILES: '100', CODERAG_SEMANTIC: 'on', CODERAG_SEMANTIC_BACKEND: 'ollama', KEEP: '1',
+    CODERAG_ROOT: '/workspace', CODERAG_MAX_FILES: '100', CODERAG_MAX_TOKENS: '5000',
+    CODERAG_SEMANTIC: 'on', CODERAG_SEMANTIC_BACKEND: 'ollama', CODERAG_SEMANTIC_MAX_CHUNKS: '50000',
+    CODERAG_SEMANTIC_API_KEY: 'secret', KEEP: '1',
   }, plan), false)
   assert.equal(ownedEnvMismatch({
-    CODERAG_ROOT: '/workspace', CODERAG_MAX_FILES: '100', CODERAG_SEMANTIC: 'on',
-    CODERAG_SEMANTIC_BACKEND: 'ollama', CODERAG_EXTRA_EXTENSIONS: 'stale',
+    CODERAG_ROOT: '/workspace', CODERAG_MAX_FILES: '100', CODERAG_MAX_TOKENS: '5000',
+    CODERAG_SEMANTIC: 'on', CODERAG_SEMANTIC_BACKEND: 'ollama', CODERAG_SEMANTIC_MAX_CHUNKS: '50000',
+    CODERAG_EXTRA_EXTENSIONS: 'stale',
+  }, plan), true)
+  assert.equal(ownedEnvMismatch({
+    CODERAG_ROOT: '/workspace', CODERAG_MAX_FILES: '100', CODERAG_MAX_TOKENS: '5000',
+    CODERAG_SEMANTIC: 'on', CODERAG_SEMANTIC_BACKEND: 'ollama', CODERAG_SEMANTIC_MAX_CHUNKS: '50000',
+    CODERAG_SEMANTIC_ALLOW_REMOTE: '1',
   }, plan), true)
 })
 
@@ -101,8 +112,10 @@ test('a changed row is updated in memory and keeps unrelated env and expressions
     CODERAG_SEMANTIC_API_KEY: expression,
     CODERAG_ROOT: '/workspace',
     CODERAG_MAX_FILES: '100',
+    CODERAG_MAX_TOKENS: '5000',
     CODERAG_SEMANTIC: 'on',
     CODERAG_SEMANTIC_BACKEND: 'ollama',
+    CODERAG_SEMANTIC_MAX_CHUNKS: '50000',
   })
   assert.deepEqual(entry.fiberUpdates, [])
 })
@@ -131,10 +144,19 @@ test('a row that missed the first update is force-restarted with the accepted co
 })
 
 test('a cleared setting removes exactly its owned variable', async () => {
-  const entry = fakeEntry({ env: { CODERAG_ROOT: '/old', CODERAG_MAX_FILES: '100', KEEP: '1' } })
+  const entry = fakeEntry({ env: { CODERAG_ROOT: '/old', CODERAG_MAX_FILES: '100', CODERAG_MAX_TOKENS: '5000', KEEP: '1' } })
   const outcome = await syncMCPRow(entry, { ...SETTINGS, maxFiles: 0 })
   assert.equal(outcome, 'synced')
   assert.equal(entry.options.config.env.CODERAG_MAX_FILES, undefined)
   assert.equal(entry.options.config.env.KEEP, '1')
   assert.equal(entry.options.config.env.serverName, undefined)
+})
+
+test('the remote opt-in reaches the row only when it is enabled', async () => {
+  const withRemote = fakeEntry({ env: {} })
+  await syncMCPRow(withRemote, { ...SETTINGS, semanticAllowRemote: true })
+  assert.equal(withRemote.options.config.env.CODERAG_SEMANTIC_ALLOW_REMOTE, '1')
+  const withoutRemote = fakeEntry({ env: { CODERAG_SEMANTIC_ALLOW_REMOTE: '1' } })
+  await syncMCPRow(withoutRemote, SETTINGS)
+  assert.equal(withoutRemote.options.config.env.CODERAG_SEMANTIC_ALLOW_REMOTE, undefined)
 })

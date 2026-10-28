@@ -1,17 +1,17 @@
 /**
- * Tests for the built browser artifact and its `plugins.row.config` entry.
+ * Tests for the built browser artifact and its two configuration entries.
  *
  * `lib/client.js` is evaluated the way DSH's client module loader does it
  * (banner + factory with a `require` over the shell module table), then the
- * registered component is server-rendered with the owner props the Plugins page
- * passes. No DOM is needed; user interaction rules are covered separately by
- * `client-form.test.mjs` and the live-runtime host probe.
+ * registered components are server-rendered with the owner props the Plugins
+ * page passes. No DOM is needed; user interaction rules are covered separately
+ * by `client-form.test.mjs` and the live-runtime host probe.
  */
 
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
@@ -20,6 +20,44 @@ const React = nodeRequire('react')
 const { renderToStaticMarkup } = nodeRequire('react-dom/server')
 
 const BANNER = 'window.__ModuleLoader__.load({ id: "dsh-coderag", factory: (require) => {'
+
+const FIELD_LABELS = [
+  '工作区根', '文件数量上限', '单文件字节上限', '检索 token 预算', '额外文件扩展名',
+  '启用语义检索', '语义后端', '语义服务 URL', '语义模型', '语义请求超时（秒）',
+  '语义批量大小', '向量化 chunk 上限', '允许非 loopback 云端地址',
+]
+
+const READY_VALUES = {
+  root: 'F:\\repo',
+  maxFiles: 100,
+  maxFileBytes: 0,
+  maxTokens: 5000,
+  extraExtensions: '.mxml',
+  semantic: true,
+  semanticBackend: 'ollama',
+  semanticUrl: 'http://127.0.0.1:11434',
+  semanticModel: 'bge-m3',
+  semanticTimeout: 0,
+  semanticBatch: 0,
+  semanticMaxChunks: 50000,
+  semanticAllowRemote: false,
+}
+
+const form = {
+  state: {
+    status: 'ready',
+    value: READY_VALUES,
+    base: {
+      root: '', maxFiles: 0, maxFileBytes: 0, maxTokens: 0, extraExtensions: '', semantic: false,
+      semanticBackend: '', semanticUrl: '', semanticModel: '', semanticTimeout: 0, semanticBatch: 0,
+      semanticMaxChunks: 0, semanticAllowRemote: false,
+    },
+    user: { root: 'F:\\repo' },
+    revision: 3,
+    writable: true,
+  },
+  mutate: async () => true,
+}
 
 /** Load the artifact through a fake module table. */
 function loadClient() {
@@ -37,17 +75,28 @@ function loadClient() {
   return { loaded, module: loaded.factory(requireStub), requested, source }
 }
 
-/** Capture the row-config contribution. */
+/** Capture both slot contributions, with the shared configForms service stubbed. */
 function contribute(module) {
-  const registrations = []
+  const registrations = new Map()
+  const observable = {
+    getSnapshot: () => form.state,
+    subscribe: () => () => {},
+    mutate: async () => true,
+  }
   const ctx = {
+    configForms: {
+      get: id => {
+        assert.equal(id, 'coderag')
+        return observable
+      },
+    },
     slots: {
       inject: (name, callback) => {
-        assert.equal(name, 'plugins.row.config')
+        assert.ok(name === 'plugins.row.config' || name === 'plugins.bundle.config', name)
         callback()
       },
       register: (options, component) => {
-        registrations.push({ options, component })
+        registrations.set(options.name, { options, component })
         return () => {}
       },
     },
@@ -56,35 +105,9 @@ function contribute(module) {
   return registrations
 }
 
-const form = {
-  state: {
-    status: 'ready',
-    value: {
-      root: 'F:\\repo',
-      maxFiles: 100,
-      maxFileBytes: 0,
-      extraExtensions: '.mxml',
-      semantic: true,
-      semanticBackend: 'ollama',
-      semanticUrl: 'http://127.0.0.1:11434',
-      semanticModel: 'bge-m3',
-      semanticTimeout: 0,
-      semanticBatch: 0,
-    },
-    base: {
-      root: '', maxFiles: 0, maxFileBytes: 0, extraExtensions: '', semantic: false,
-      semanticBackend: '', semanticUrl: '', semanticModel: '', semanticTimeout: 0, semanticBatch: 0,
-    },
-    user: { root: 'F:\\repo' },
-    revision: 3,
-    writable: true,
-  },
-  mutate: async () => true,
-}
-
-/** Render the registered contribution with owner props. */
-function render(registrations, props) {
-  const markup = renderToStaticMarkup(React.createElement(registrations[0].component, props))
+/** Render one contribution with owner props. */
+function render(registrations, slot, props) {
+  const markup = renderToStaticMarkup(React.createElement(registrations.get(slot).component, props))
   return { markup, text: markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ') }
 }
 
@@ -94,7 +117,7 @@ test('the browser artifact is a lazy-CJS ModuleLoader factory', () => {
   assert.equal(loaded.id, 'dsh-coderag')
   assert.match(source.trimEnd(), /return module\.exports; \} \}\);$/)
   assert.deepEqual(Object.keys(module).sort(), ['apply', 'inject'])
-  assert.deepEqual(module.inject, ['slots'])
+  assert.deepEqual(module.inject, ['slots', 'configForms'])
 })
 
 test('only React is requested from the shell module table', () => {
@@ -102,28 +125,49 @@ test('only React is requested from the shell module table', () => {
   assert.deepEqual([...new Set(requested)].sort(), ['react', 'react/jsx-runtime'])
 })
 
-test('the contribution registers under dsh-coderag#coderag', () => {
+test('both the row page and the bundle page are registered', () => {
   const { module } = loadClient()
   const registrations = contribute(module)
-  assert.equal(registrations.length, 1)
-  assert.deepEqual(registrations[0].options, { name: 'plugins.row.config', key: 'dsh-coderag#coderag' })
+  assert.deepEqual([...registrations.keys()].sort(), ['plugins.bundle.config', 'plugins.row.config'])
+  assert.deepEqual(registrations.get('plugins.row.config').options, {
+    name: 'plugins.row.config', key: 'dsh-coderag#coderag',
+  })
+  assert.deepEqual(registrations.get('plugins.bundle.config').options, {
+    name: 'plugins.bundle.config', key: 'dsh-coderag',
+  })
 })
 
 test('the summary view describes the row without a form', () => {
   const { module } = loadClient()
-  const { text } = render(contribute(module), { view: 'summary' })
-  assert.match(text, /CodeRAG/)
-  assert.match(text, /同步到 MCP 行/)
+  const registrations = contribute(module)
+  for (const slot of ['plugins.row.config', 'plugins.bundle.config']) {
+    const { text } = render(registrations, slot, { view: 'summary' })
+    assert.match(text, /CodeRAG/)
+    assert.match(text, /同步到 MCP 行/)
+  }
 })
 
-test('the page view renders every field and the accepted values', () => {
+test('the bundle page renders the form from configForms without an owner form', () => {
   const { module } = loadClient()
-  const { markup, text } = render(contribute(module), { view: 'page', form })
-  for (const label of ['工作区根', '文件数量上限', '单文件字节上限', '额外文件扩展名', '启用语义检索', '语义后端', '语义服务 URL', '语义模型', '语义请求超时（秒）', '语义批量大小']) {
-    assert.match(text, new RegExp(label), `missing field label: ${label}`)
+  const registrations = contribute(module)
+  const { markup, text } = render(registrations, 'plugins.bundle.config', { view: 'page' })
+  for (const label of FIELD_LABELS) {
+    assert.match(text, new RegExp(label), `missing bundle-page field label: ${label}`)
   }
   assert.match(markup, /value="F:\\repo"/)
-  assert.match(markup, /value="100"/)
+  assert.match(markup, /value="5000"/)
+  assert.match(markup, /value="50000"/)
+  assert.match(text, /保存/)
+})
+
+test('the row page still renders the owner-supplied form', () => {
+  const { module } = loadClient()
+  const { markup, text } = render(contribute(module), 'plugins.row.config', { view: 'page', form })
+  for (const label of FIELD_LABELS) {
+    assert.match(text, new RegExp(label), `missing row-page field label: ${label}`)
+  }
+  assert.match(markup, /value="F:\\repo"/)
+  assert.match(markup, /value="5000"/)
   assert.match(markup, /<select/)
   assert.match(markup, /type="checkbox"/)
   assert.match(text, /保存/)
@@ -133,9 +177,9 @@ test('the page view renders every field and the accepted values', () => {
 test('loading and unavailable states explain themselves instead of rendering a form', () => {
   const { module } = loadClient()
   const registrations = contribute(module)
-  const loading = render(registrations, { view: 'page', form: undefined })
+  const loading = render(registrations, 'plugins.row.config', { view: 'page', form: undefined })
   assert.match(loading.text, /正在读取 CodeRAG 设置/)
-  const unavailable = render(registrations, {
+  const unavailable = render(registrations, 'plugins.row.config', {
     view: 'page',
     form: { state: { status: 'unavailable', writable: false }, mutate: async () => false },
   })
@@ -144,7 +188,8 @@ test('loading and unavailable states explain themselves instead of rendering a f
 
 test('a read-only Host disables saving and says so', () => {
   const { module } = loadClient()
-  const { markup, text } = render(contribute(module), {
+  const registrations = contribute(module)
+  const { markup, text } = render(registrations, 'plugins.row.config', {
     view: 'page',
     form: { ...form, state: { ...form.state, writable: false } },
   })

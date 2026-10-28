@@ -26,6 +26,7 @@ const OLLAMA = {
   root: '/workspace',
   maxFiles: 100,
   maxFileBytes: 2048,
+  maxTokens: 5000,
   extraExtensions: '.mxml,.as',
   semantic: true,
   semanticBackend: 'ollama',
@@ -33,6 +34,8 @@ const OLLAMA = {
   semanticModel: 'bge-m3',
   semanticTimeout: 5,
   semanticBatch: 4,
+  semanticMaxChunks: 50000,
+  semanticAllowRemote: false,
 }
 
 test('the settings namespace and row key follow the documented contract', () => {
@@ -41,30 +44,44 @@ test('the settings namespace and row key follow the documented contract', () => 
   assert.equal(ROW_CONFIG_KEY, 'dsh-coderag#coderag')
 })
 
-test('the field table covers exactly the owned environment variables', () => {
+test('the field table covers all thirteen owned environment variables', () => {
   assert.deepEqual(FIELDS.map(field => field.key), Object.keys(DEFAULT_VALUES))
   assert.deepEqual(
     FIELDS.filter(field => field.env !== undefined).map(field => field.env),
     [
-      'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_EXTRA_EXTENSIONS',
-      'CODERAG_SEMANTIC', 'CODERAG_SEMANTIC_BACKEND', 'CODERAG_SEMANTIC_URL',
-      'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT', 'CODERAG_SEMANTIC_BATCH',
+      'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_MAX_TOKENS',
+      'CODERAG_EXTRA_EXTENSIONS', 'CODERAG_SEMANTIC', 'CODERAG_SEMANTIC_BACKEND',
+      'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT',
+      'CODERAG_SEMANTIC_BATCH', 'CODERAG_SEMANTIC_MAX_CHUNKS', 'CODERAG_SEMANTIC_ALLOW_REMOTE',
     ],
   )
 })
 
+test('every field carries a label and a one-line hint', () => {
+  for (const field of FIELDS) {
+    assert.equal(typeof field.label, 'string')
+    assert.ok(field.label.length > 0)
+    assert.equal(typeof field.hint, 'string')
+    assert.ok(field.hint.length > 0)
+  }
+})
+
 test('normalization trims strings and clamps bad numbers to the engine default', () => {
   const values = normalizeValues({
-    root: '  /workspace  ', maxFiles: '12', maxFileBytes: -1,
+    root: '  /workspace  ', maxFiles: '12', maxFileBytes: -1, maxTokens: 'abc',
     extraExtensions: ' .mxml ', semantic: 1, semanticTimeout: Number.NaN,
+    semanticMaxChunks: '9000', semanticAllowRemote: 1,
   })
   assert.equal(values.root, '/workspace')
   assert.equal(values.maxFiles, 12)
   assert.equal(values.maxFileBytes, 0)
+  assert.equal(values.maxTokens, 0)
   assert.equal(values.extraExtensions, '.mxml')
   assert.equal(values.semantic, false)
   assert.equal(values.semanticTimeout, 0)
   assert.equal(values.semanticModel, '')
+  assert.equal(values.semanticMaxChunks, 9000)
+  assert.equal(values.semanticAllowRemote, false)
 })
 
 test('an entirely empty settings object is recognized as "nothing to say"', () => {
@@ -73,6 +90,9 @@ test('an entirely empty settings object is recognized as "nothing to say"', () =
   assert.equal(isEmptySettings({ semantic: false, semanticBackend: '', semanticUrl: ' ' }), true)
   assert.equal(isEmptySettings({ root: '/workspace' }), false)
   assert.equal(isEmptySettings({ semantic: true }), false)
+  assert.equal(isEmptySettings({ maxTokens: 4000 }), false)
+  assert.equal(isEmptySettings({ semanticMaxChunks: 100000 }), false)
+  assert.equal(isEmptySettings({ semanticAllowRemote: true }), false)
 })
 
 test('the env plan exports strings and marks cleared fields for removal', () => {
@@ -81,6 +101,7 @@ test('the env plan exports strings and marks cleared fields for removal', () => 
     CODERAG_ROOT: '/workspace',
     CODERAG_MAX_FILES: '100',
     CODERAG_MAX_FILE_BYTES: '2048',
+    CODERAG_MAX_TOKENS: '5000',
     CODERAG_EXTRA_EXTENSIONS: '.mxml,.as',
     CODERAG_SEMANTIC: 'on',
     CODERAG_SEMANTIC_BACKEND: 'ollama',
@@ -88,39 +109,56 @@ test('the env plan exports strings and marks cleared fields for removal', () => 
     CODERAG_SEMANTIC_MODEL: 'bge-m3',
     CODERAG_SEMANTIC_TIMEOUT: '5',
     CODERAG_SEMANTIC_BATCH: '4',
+    CODERAG_SEMANTIC_MAX_CHUNKS: '50000',
   })
-  assert.deepEqual(plan.remove, [])
-  const cleared = envPlan({ ...OLLAMA, maxFiles: 0, semantic: false, extraExtensions: '' })
+  assert.deepEqual(plan.remove, ['CODERAG_SEMANTIC_ALLOW_REMOTE'])
+  const cleared = envPlan({ ...OLLAMA, maxFiles: 0, maxTokens: 0, semantic: false, extraExtensions: '', semanticMaxChunks: 0 })
   assert.equal(cleared.set.CODERAG_MAX_FILES, undefined)
   assert.equal(cleared.set.CODERAG_SEMANTIC, undefined)
-  assert.deepEqual(cleared.remove.sort(), ['CODERAG_EXTRA_EXTENSIONS', 'CODERAG_MAX_FILES', 'CODERAG_SEMANTIC'])
+  assert.equal(cleared.set.CODERAG_MAX_TOKENS, undefined)
+  assert.equal(cleared.set.CODERAG_SEMANTIC_MAX_CHUNKS, undefined)
+  assert.deepEqual(cleared.remove.sort(), [
+    'CODERAG_EXTRA_EXTENSIONS', 'CODERAG_MAX_FILES', 'CODERAG_MAX_TOKENS',
+    'CODERAG_SEMANTIC', 'CODERAG_SEMANTIC_ALLOW_REMOTE', 'CODERAG_SEMANTIC_MAX_CHUNKS',
+  ])
 })
 
-test('merging preserves variables this plugin does not own', () => {
+test('the remote opt-in uses the "1" spelling the engine compares against', () => {
+  const plan = envPlan({ ...OLLAMA, semanticBackend: 'openai', semanticUrl: 'https://api.example.com/v1', semanticAllowRemote: true })
+  assert.equal(plan.set.CODERAG_SEMANTIC_ALLOW_REMOTE, '1')
+  const off = envPlan({ ...OLLAMA, semanticAllowRemote: false })
+  assert.deepEqual(off.remove, ['CODERAG_SEMANTIC_ALLOW_REMOTE'])
+})
+
+test('merging preserves the API key and unrelated variables', () => {
   const current = {
-    CODERAG_MAX_TOKENS: '4000',
     CODERAG_SEMANTIC_API_KEY: 'secret',
     CODERAG_ROOT: '/old',
+    CODERAG_MAX_TOKENS: '8000',
     UNRELATED: 'kept',
   }
-  const next = mergeOwnedEnv(current, { ...OLLAMA, root: '' })
-  assert.equal(next.CODERAG_MAX_TOKENS, '4000')
+  const next = mergeOwnedEnv(current, { ...OLLAMA, root: '', maxTokens: 0 })
   assert.equal(next.CODERAG_SEMANTIC_API_KEY, 'secret')
   assert.equal(next.UNRELATED, 'kept')
   assert.equal(next.CODERAG_ROOT, undefined)
+  assert.equal(next.CODERAG_MAX_TOKENS, undefined)
   assert.equal(next.CODERAG_SEMANTIC, 'on')
   assert.equal(current.CODERAG_ROOT, '/old', 'the input env must not be mutated')
 })
 
 test('validation accepts the documented values and the empty integer shorthand', () => {
   assert.deepEqual(validateValues(OLLAMA), [])
-  assert.deepEqual(validateValues({ ...OLLAMA, maxFiles: '', semanticTimeout: '0', semanticBatch: '2048' }), [])
+  assert.deepEqual(validateValues({
+    ...OLLAMA, maxFiles: '', maxTokens: '', semanticTimeout: '0', semanticBatch: '2048', semanticMaxChunks: '',
+  }), [])
 })
 
 test('validation rejects malformed numbers, extensions, backends and URLs', () => {
   const fields = values => validateValues({ ...OLLAMA, ...values }).map(error => error.field)
   assert.deepEqual(fields({ maxFiles: '1.5' }), ['maxFiles'])
   assert.deepEqual(fields({ maxFiles: '-1' }), ['maxFiles'])
+  assert.deepEqual(fields({ maxTokens: '-1' }), ['maxTokens'])
+  assert.deepEqual(fields({ semanticMaxChunks: 'x' }), ['semanticMaxChunks'])
   assert.deepEqual(fields({ extraExtensions: 'a.b' }), ['extraExtensions'])
   assert.deepEqual(fields({ extraExtensions: '.mxml,*/x' }), ['extraExtensions'])
   assert.deepEqual(fields({ semanticBackend: 'local' }), ['semanticBackend'])
@@ -128,10 +166,14 @@ test('validation rejects malformed numbers, extensions, backends and URLs', () =
   assert.deepEqual(fields({ semanticBackend: 'ollama', semanticUrl: 'http://example.com:11434' }), ['semanticUrl'])
 })
 
-test('the cloud backend requires an explicit URL and model', () => {
+test('the cloud backend requires an explicit URL, model and remote opt-in', () => {
   const cloud = { ...OLLAMA, semanticBackend: 'openai', semanticUrl: '', semanticModel: '' }
   assert.deepEqual(validateValues(cloud).map(error => error.field).sort(), ['semanticModel', 'semanticUrl'])
-  assert.deepEqual(validateValues({ ...cloud, semanticUrl: 'https://api.example.com/v1', semanticModel: 'm' }), [])
+  const remote = { ...OLLAMA, semanticBackend: 'openai', semanticUrl: 'https://api.example.com/v1', semanticModel: 'm' }
+  assert.deepEqual(validateValues(remote).map(error => error.field), ['semanticAllowRemote'])
+  assert.deepEqual(validateValues({ ...remote, semanticAllowRemote: true }), [])
+  const loopback = { ...remote, semanticUrl: 'http://127.0.0.1:8080/v1', semanticAllowRemote: false }
+  assert.deepEqual(validateValues(loopback), [])
 })
 
 test('the row summary names the workspace, file cap and semantic state', () => {

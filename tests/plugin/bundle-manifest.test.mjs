@@ -50,9 +50,10 @@ test('the patch inserts the settings row and keeps the MCP executor row', () => 
 
 test('the settings row reads the shell environment as its defaults', () => {
   for (const variable of [
-    'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_EXTRA_EXTENSIONS',
-    'CODERAG_SEMANTIC', 'CODERAG_SEMANTIC_BACKEND', 'CODERAG_SEMANTIC_URL',
-    'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT', 'CODERAG_SEMANTIC_BATCH',
+    'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_MAX_TOKENS',
+    'CODERAG_EXTRA_EXTENSIONS', 'CODERAG_SEMANTIC', 'CODERAG_SEMANTIC_BACKEND',
+    'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT',
+    'CODERAG_SEMANTIC_BATCH', 'CODERAG_SEMANTIC_MAX_CHUNKS', 'CODERAG_SEMANTIC_ALLOW_REMOTE',
   ]) {
     assert.match(patch, new RegExp(`!!js[^\\n]*process\\.env\\.${variable}`), `missing default expression for ${variable}`)
   }
@@ -66,12 +67,16 @@ test('owned variables are not duplicated on the MCP row', () => {
     .filter(line => !line.trimStart().startsWith('#'))
     .join('\n')
   for (const owned of [
-    'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_EXTRA_EXTENSIONS',
-    'CODERAG_SEMANTIC:', 'CODERAG_SEMANTIC_BACKEND', 'CODERAG_SEMANTIC_URL',
-    'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT', 'CODERAG_SEMANTIC_BATCH',
+    'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_MAX_TOKENS',
+    'CODERAG_EXTRA_EXTENSIONS', 'CODERAG_SEMANTIC:', 'CODERAG_SEMANTIC_BACKEND',
+    'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT',
+    'CODERAG_SEMANTIC_BATCH', 'CODERAG_SEMANTIC_MAX_CHUNKS', 'CODERAG_SEMANTIC_ALLOW_REMOTE',
   ]) {
     assert.equal(mcpRow.includes(owned), false, `the MCP row must not set ${owned}`)
   }
+  // The key is the only variable that stays on the MCP row on purpose.
+  const envKeys = [...mcpRow.matchAll(/^\s+(CODERAG_[A-Z_]+):/gm)].map(match => match[1])
+  assert.deepEqual(envKeys, ['CODERAG_SEMANTIC_API_KEY'])
 })
 
 test('the shipped bundle bakes in no interpreter path and no workspace guess', () => {
@@ -92,8 +97,9 @@ test('the built Host bundle exports a function plugin with an all-volatile Confi
   const root = graph.refs[graph.uid]
   assert.equal(root.type, 'object')
   const expected = [
-    'root', 'maxFiles', 'maxFileBytes', 'extraExtensions', 'semantic',
+    'root', 'maxFiles', 'maxFileBytes', 'maxTokens', 'extraExtensions', 'semantic',
     'semanticBackend', 'semanticUrl', 'semanticModel', 'semanticTimeout', 'semanticBatch',
+    'semanticMaxChunks', 'semanticAllowRemote',
   ]
   assert.deepEqual(Object.keys(root.dict).sort(), expected.sort())
   for (const field of expected) {
