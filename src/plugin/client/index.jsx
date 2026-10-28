@@ -32,9 +32,10 @@ import {
   validateValues,
 } from '../shared/settings.js'
 import { buildSetOps, draftKey, toDraft } from '../shared/client-form.js'
+import { AdminPanels } from './admin-panels.jsx'
 
 /** Browser services used by this plugin. */
-export const inject = ['slots', 'configForms']
+export const inject = ['slots', 'configForms', 'remote', 'remote.credentials']
 
 const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React
 
@@ -156,7 +157,7 @@ function Field({ field, draft, disabled, errors, onChange }) {
  * The page rendered for `view: 'page'`.
  * @param {{ form: { state: object, mutate: Function } | undefined }} props - slot owner props.
  */
-function SettingsPage({ form }) {
+function SettingsPage({ form, remote }) {
   const state = form?.state
   const acceptedDraft = useMemo(() => toDraft(state?.value ?? DEFAULT_VALUES), [state?.value])
   const baseDraft = useMemo(() => toDraft(state?.base ?? DEFAULT_VALUES), [state?.base])
@@ -274,8 +275,9 @@ function SettingsPage({ form }) {
       </div>
       <p style={styles.hint}>
         保存会写入当前 profile 的 cordis.patch.yml，并把纳管的 CODERAG_* 环境变量同步到 mcp-coderag 行；
-        只有 CODERAG_SEMANTIC_API_KEY 不在此页出现（请按 README 走环境变量或本机 profile）。
+        云端 API Key 在下面的运维区写入 DSH credentials 服务，不落 profile。
       </p>
+      <AdminPanels remote={remote} values={state?.value} dirty={dirty} />
     </div>
   )
 }
@@ -289,16 +291,16 @@ function SettingsSummary() {
  * Form page for slots that supply no form (the bundle page and the Settings
  * section): read the Host-owned `coderag` namespace through the shared
  * `configForms` service and re-render on every settings snapshot change.
- * @param {{ configForms: { get(id: string): { getSnapshot: Function, subscribe: Function, mutate: Function } } }} props
+ * @param {{ configForms: object, remote: object }} props - browser services.
  */
-function ConfigFormPage({ configForms }) {
+function ConfigFormPage({ configForms, remote }) {
   const form = useMemo(() => configForms.get('coderag'), [configForms])
   const subscribe = useCallback(listener => form.subscribe(listener), [form])
   const getSnapshot = useCallback(() => form.getSnapshot(), [form])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   const mutate = useCallback((ops, revision) => form.mutate(ops, revision), [form])
   const pageForm = useMemo(() => ({ state: snapshot, mutate }), [snapshot, mutate])
-  return <SettingsPage form={pageForm} />
+  return <SettingsPage form={pageForm} remote={remote} />
 }
 
 /**
@@ -307,6 +309,7 @@ function ConfigFormPage({ configForms }) {
  */
 export function apply(ctx) {
   const configForms = ctx.configForms ?? ctx.get('configForms')
+  const remote = ctx.remote
   ctx.slots.inject('settings.section', () => ctx.slots.register(
     {
       name: 'settings.section',
@@ -314,18 +317,18 @@ export function apply(ctx) {
       order: 30,
       label: () => 'CodeRAG',
     },
-    () => <ConfigFormPage configForms={configForms} />,
+    () => <ConfigFormPage configForms={configForms} remote={remote} />,
   ))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register(
     { name: 'plugins.row.config', key: ROW_CONFIG_KEY },
     props => (props?.view === 'summary'
       ? <SettingsSummary />
-      : <SettingsPage form={props?.form} />),
+      : <SettingsPage form={props?.form} remote={remote} />),
   ))
   ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register(
     { name: 'plugins.bundle.config', key: BUNDLE_NAME },
     props => (props?.view === 'summary'
       ? <SettingsSummary />
-      : <ConfigFormPage configForms={configForms} />),
+      : <ConfigFormPage configForms={configForms} remote={remote} />),
   ))
 }
