@@ -90,6 +90,13 @@ function contribute(module) {
         return observable
       },
     },
+    remote: {
+      credentials: {
+        describe: async () => ({ ok: true, value: { CODERAG_SEMANTIC_API_KEY: { configured: false, writable: true } } }),
+        set: async () => ({ ok: true }),
+        unset: async () => ({ ok: true }),
+      },
+    },
     slots: {
       inject: (name, callback) => {
         assert.ok(
@@ -120,7 +127,7 @@ test('the browser artifact is a lazy-CJS ModuleLoader factory', () => {
   assert.equal(loaded.id, 'dsh-coderag')
   assert.match(source.trimEnd(), /return module\.exports; \} \}\);$/)
   assert.deepEqual(Object.keys(module).sort(), ['apply', 'inject'])
-  assert.deepEqual(module.inject, ['slots', 'configForms'])
+  assert.deepEqual(module.inject, ['slots', 'configForms', 'remote', 'remote.credentials'])
 })
 
 test('only React is requested from the shell module table', () => {
@@ -168,6 +175,19 @@ test('the Settings section renders the form from configForms', () => {
   assert.match(markup, /value="F:\\repo"/)
   assert.match(markup, /value="5000"/)
   assert.match(text, /保存/)
+})
+
+test('the Settings section renders the operations panels', () => {
+  const { module } = loadClient()
+  const registrations = contribute(module)
+  const { text } = render(registrations, 'settings.section', { close: () => {} })
+  assert.match(text, /CodeRAG 运维/)
+  assert.match(text, /云端 API Key/)
+  assert.match(text, /语义后端/)
+  assert.match(text, /向量数据库/)
+  assert.match(text, /已配置（不可查看）|未配置|读取中/)
+  assert.match(text, /检查本地连通性/)
+  assert.match(text, /一键启动本地后端/)
 })
 
 test('the bundle page renders the form from configForms without an owner form', () => {

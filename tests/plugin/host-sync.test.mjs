@@ -160,3 +160,26 @@ test('the remote opt-in reaches the row only when it is enabled', async () => {
   await syncMCPRow(withoutRemote, SETTINGS)
   assert.equal(withoutRemote.options.config.env.CODERAG_SEMANTIC_ALLOW_REMOTE, undefined)
 })
+
+test('the resolved cloud key is merged into the MCP env', async () => {
+  const entry = fakeEntry({ env: { KEEP: '1' } })
+  const outcome = await syncMCPRow(entry, SETTINGS, { apiKey: 'sk-test-secret' })
+  assert.equal(outcome, 'synced')
+  assert.equal(entry.options.config.env.CODERAG_SEMANTIC_API_KEY, 'sk-test-secret')
+  assert.equal(entry.options.config.env.KEEP, '1')
+})
+
+test('an unavailable credentials lookup keeps the row key the child already has', async () => {
+  const entry = fakeEntry({ env: { CODERAG_SEMANTIC_API_KEY: 'sk-existing' } })
+  const outcome = await syncMCPRow(entry, { ...SETTINGS, maxFiles: 0 })
+  assert.equal(outcome, 'synced')
+  assert.equal(entry.options.config.env.CODERAG_SEMANTIC_API_KEY, 'sk-existing')
+  assert.equal(entry.options.config.env.CODERAG_MAX_FILES, undefined)
+})
+
+test('a rotated key alone restarts the row', async () => {
+  const entry = fakeEntry({ env: { CODERAG_SEMANTIC_API_KEY: 'sk-old' } })
+  const outcome = await syncMCPRow(entry, SETTINGS, { apiKey: 'sk-new' })
+  assert.equal(outcome, 'synced')
+  assert.equal(entry.options.config.env.CODERAG_SEMANTIC_API_KEY, 'sk-new')
+})
