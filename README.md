@@ -314,7 +314,7 @@ DSH **0.1.7-rc.1 起**（本仓库在 **0.2.1-rc.3** 上实测）插件可以在
 
 保存会写进当前 profile 的 `cordis.patch.yml`（`coderag` 行），Host 半侧再把它同步成
 `mcp-coderag` 行的 `config.env`，MCP 行随即重挂载、**Python 子进程以新环境重启**。
-**实测热重载**：在一个真实 DeepForge 实例里改 `root` 后，**1.5 秒**内模型调
+**实测热重载**：在一个真实 DSH Web 实例里改 `root` 后，**1.5 秒**内模型调
 `mcp__coderag__index_status` 返回的 `root` 已是新目录；再改回后约 2 秒内恢复。
 不需要手工改 YAML，也不需要重启 DSH。
 

@@ -15,7 +15,7 @@
    `mcp-coderag` 行的 `config.env`；
 3. `env` 是 MCP 行的普通（非 volatile）字段，Loader 重挂载该行，
    **Python 子进程以新环境重启**。
-4. **热重载已在真实 DeepForge 实例实测**：改 `root` 后 1.5 秒内会话里的
+4. **热重载已在真实 DSH Web 实例实测**：改 `root` 后 1.5 秒内会话里的
    `mcp__coderag__index_status` 返回新 root；改回后约 2 秒恢复。浏览器提示为
    「已保存，MCP 已按新环境热重载」。
 5. 运维面板（T7-02）：云端 key 写入 **DSH credentials**（`CODERAG_SEMANTIC_API_KEY`，
@@ -92,13 +92,13 @@ exit 0；`- id: coderag` 1 行、`- id: mcp-coderag` 1 行；
 mcp 行只剩 `CODERAG_SEMANTIC_API_KEY`；`CODERAG_ROOT:`（env 键）0 行
 ```
 
-**真实实例热重载实测**（DeepForge `http://127.0.0.1:3099`，DSH 0.2.1-rc.3）：
+**真实实例热重载实测**（DSH Web（本地实例），DSH 0.2.1-rc.3）：
 通过 `/connect` 换 API cookie → `settings/mutate` 把 `root` 改为 `demo-project`
 （revision 0→1）→ 会话模型调 `mcp__coderag__index_status`，**1.5 秒**后返回
-`root: F:\PersonalProjects\python\unname\demo-project`；再改回
-`dsh-coderag`（revision 4）后约 **2 秒**返回 `root: F:\PersonalProjects\python\unname\dsh-coderag`、
-`status: ready`。截图：`deliverables/screenshots/S09-coderag-settings-page.png`
-（设置 → CodeRAG 的 13 字段首屏）与 `S07-coderag-plugin-page.png`（bundle 入口）。
+`root: <workspace>/demo-project`；再改回
+`dsh-coderag`（revision 4）后约 **2 秒**返回 `root: <workspace>/dsh-coderag`、
+`status: ready`。截图：本地验证截图（未随仓库提交）
+（设置 → CodeRAG 的 13 字段首屏）与另一张本地验证截图（bundle 入口）。
 
 **运维路由实测**（同一实例，PYTHONPATH 指向本仓库 `src`）：
 

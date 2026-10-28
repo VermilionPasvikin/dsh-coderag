@@ -141,7 +141,7 @@ Python 子进程以新 env 重新拉起。**不需要退化为“保存后提示
 - 设置命名空间：`coderag`，即 `ctx.configForms.get('coderag')` 可用（工作台摘要）。
 - Config 字段至少含 `root`、`maxFiles`、`semantic`；`semantic` 用 boolean
   （工作台兼容 `'on' | 'off'` 字符串或 boolean，这里选 boolean，映射到 env 时写 `'on'`/省略）。
-- 行 id **不再改名**；若以后要改，必须先同步 Lead 和 DeepForge 工作台。
+- 行 id **不再改名**；若以后要改，必须先同步产品工作台维护者。
 
 ---
 
@@ -270,9 +270,9 @@ return module.exports; } });
 
 最初由用户黑盒确认「bundle 页只看到 README、看不到表单」，因此追加了独立设置页并重做验证：
 
-1. ✅ **设置 → CodeRAG** 页面（`settings.section`）已在真实 DeepForge 实例出现，13 字段全部可见；
-   截图 `deliverables/screenshots/S09-coderag-settings-page.png`。
-2. ✅ bundle 详情页的附加入口同样可见；截图 `deliverables/screenshots/S07-coderag-plugin-page.png`。
+1. ✅ **设置 → CodeRAG** 页面（`settings.section`）已在真实 DSH Web 实例出现，13 字段全部可见；
+   截图：本地验证截图（未随仓库提交）。
+2. ✅ bundle 详情页的附加入口同样可见；截图：本地验证截图（未随仓库提交）。
 3. ✅ **热重载实测**：改 `root` 后 1.5 秒内 `mcp__coderag__index_status` 返回新 root；改回后约 2 秒恢复。
 4. ✅ 保存后写进 profile 的 `coderag` 行（`settings/mutate` 的 revision 变化 + `describe` 读回确认）。
 5. ⏳ 非法值在 UI 上的逐字段提示仍以 Node 测试 + 纯函数校验覆盖，未逐项截图。
@@ -407,7 +407,7 @@ $ git status --short
   保存/恢复默认/非法值行为、热重载实测、首次保存前后的老配置语义、5 步黑盒验收；
   配置入口表、安装期望行、`CODERAG_ROOT` 说明与已知限制同步更新；文档表新增本文件与 PR 草稿。
 - `PROJECT.md` §1.6.1 的 bundle 形态由「没有 JavaScript」更新为「Host/Client 两个已构建产物 +
-  `coderag` 设置行，仍无运行时依赖、无 install script」；§6.7 注明 DeepForge M5 支线的证据位置。
+  `coderag` 设置行，仍无运行时依赖、无 install script」；§6.7 注明产品集成侧验证的证据位置。
 - `CHANGELOG.md` 的 `[Unreleased]` 增加设置页、构建产物、探针、Node 测试与 patch 调整。
 - 本文件 §7 记录 T5-02…T5-06 的命令与实际输出。
 
@@ -418,7 +418,7 @@ $ git status --short
   `python -m pytest` 即可。
 - 该沙箱尝试还在仓库根留下 5 个**空**目录 `pytest-cache-files-*`（不可读、不可删、未跟踪）。
   用户可在正常终端里直接删除；它们不属于任何提交。
-- GUI 页面已由用户在真实 DeepForge 实例上确认（§6、§8），截图见 `deliverables/screenshots/`。
+- GUI 页面已由用户在真实 DSH Web 实例上确认（§6、§8），截图见本地验证截图（未随仓库提交）。
 
 ---
 
@@ -451,13 +451,13 @@ $ git status --short
 `/api/settings/mutate`（这就是设置页保存走的同一条 settings Remote）：
 
 ```text
-baseline  root = F:\PersonalProjects\python\unname\dsh-coderag   revision 0
-mutate    root = F:\PersonalProjects\python\unname\demo-project revision 1
+baseline  root = <workspace>/dsh-coderag   revision 0
+mutate    root = <workspace>/demo-project revision 1
 会话模型调用 mcp__coderag__index_status（同一进程，未重启 DSH）：
   status: error / code: INDEX_NOT_FOUND
-  root: F:\PersonalProjects\python\unname\demo-project        ← prompt 后 1.5 秒
-mutate    恢复 root = F:\PersonalProjects\python\unname\dsh-coderag  revision 4
-  {"status": "ready", "root": "F:\\PersonalProjects\\python\\unname\\dsh-coderag", ...}
+  root: <workspace>/demo-project        ← prompt 后 1.5 秒
+mutate    恢复 root = <workspace>/dsh-coderag  revision 4
+  {"status": "ready", "root": "<workspace>\\dsh-coderag", ...}
                                                               ← prompt 后 2.0 秒
 ```
 
@@ -471,8 +471,8 @@ mutate    恢复 root = F:\PersonalProjects\python\unname\dsh-coderag  revision 
 
 | 文件 | 内容 |
 |---|---|
-| `F:\PersonalProjects\python\unname\deliverables\screenshots\S09-coderag-settings-page.png` | **设置 → CodeRAG** 首屏，13 字段 |
-| `F:\PersonalProjects\python\unname\deliverables\screenshots\S07-coderag-plugin-page.png` | Plugins → dsh-coderag 详情页（附加入口） |
+| `本地验证截图（未随仓库提交）` | **设置 → CodeRAG** 首屏，13 字段 |
+| `本地验证截图（未随仓库提交）` | Plugins → dsh-coderag 详情页（附加入口） |
 
 ### 8.4 本次验证输出
 
@@ -555,7 +555,7 @@ $ python -m pytest --junitxml=junit.xml
 `admin-client.test.mjs`（envelope/job 归一化/进度/格式化）、host-sync 的 key 合并与保留、
 client-bundle 的运维面板渲染。
 
-### 9.5 真实实例联调（DeepForge，2026-10-28）
+### 9.5 真实实例联调（DSH Web，2026-10-28）
 
 实例以 `PYTHONPATH=<repo>/src` 启动，MCP 与 admin 子进程都 import 本工作区副本；
 以下都走 Web cookie 信任围栏（`/connect?token=…` 换 cookie）：
@@ -611,7 +611,7 @@ stop  → checkpoint_vectors 32
 - 健康：本地 ollama 连通 `bge-m3`；云端没填 URL 时返回可展示的结构化错误。
 - 截图：`S10-coderag-key-configured.png`、`S11-coderag-health-local.png`、
   `S12-vector-ready.png`、`S13-vector-running.png`、`S14-vector-stopped.png`、
-  `S15-vector-done.png`（均位于 `deliverables/screenshots/`；S15 抓到了修复前的
+  `S15-vector-done.png`（均位于本地验证截图（未随仓库提交）；S15 抓到了修复前的
   「停止后立刻恢复 → 旧 close 把新 job 标 error」现象，用于定位竞态）。
 - 竞态修复：每次 vectorize 独立 handle + `active === handle` 闸门；回归测试
   `late exits from a stopped job cannot clobber the next job`。

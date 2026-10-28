@@ -3,7 +3,7 @@
 > 依据 PROJECT.md 的 T1-16。记录在 DSH Web（dsh 0.1.5-rc.1，forBSH 环境）上对
 > dsh-coderag MCP 服务器的实际观察。下列条目都是**实际发生**的现象，不是预期。
 >
-> 环境：DSH Web http://127.0.0.1:3099，通过 --patch ./cordis.patch.yml 加载；被测工作区
+> 环境：DSH Web http://127.0.0.1:<port>，通过 --patch ./cordis.patch.yml 加载；被测工作区
 > examples/demo-workspace（3 个文件 / 3 个 chunk）；模型侧工具名 mcp__coderag__code_search。
 > 下面引用的返回文本均由该工具实际产生。
 
