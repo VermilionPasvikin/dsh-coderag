@@ -13,7 +13,8 @@
 2. Host 半侧在 `loader/volatile-update` 里把 10 个字段映射成 `CODERAG_*`，合并进既有
    `mcp-coderag` 行的 `config.env`；
 3. `env` 是 MCP 行的普通（非 volatile）字段，Loader 重挂载该行，
-   **Python 子进程以新环境重启**——`index_status` 立刻反映新的工作区根。
+   **Python 子进程以新环境重启**；本次浏览器黑盒在重启 DSH 后确认新的工作区根生效，
+   实时热同步路径由 Host 插件探针覆盖。
 
 之前用户只能手工编辑 YAML；本 PR 不改变 Python 运行时行为。
 
@@ -75,7 +76,7 @@ mcp 行保留 4 个非纳管 env；`CODERAG_ROOT:`（env 键）0 行
 
 1. 重启 DSH → Plugins → `dsh-coderag` → `coderag` 行出现 **配置** 按钮。
 2. 填工作区根 → 保存 → 提示「已保存」；profile 的 `cordis.patch.yml` 出现 `- id: coderag`。
-3. 模型调 `mcp__coderag__index_status` → `root` 变成新目录（不再是 `WORKSPACE_INVALID`）。
+3. 重启 DSH 后让模型调 `mcp__coderag__index_status` → `root` 变成新目录（不再是 `WORKSPACE_INVALID`）。
 4. 输入 `-1` 上限 / `a.b` 扩展名 / cloud 缺 URL → 页面就地报错，保存被拒。
 5. 点「恢复默认」→ 保存 → `coderag` 行 config 被移除，行为回到环境变量默认。
 
