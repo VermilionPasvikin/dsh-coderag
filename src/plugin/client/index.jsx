@@ -1,14 +1,18 @@
 /**
  * dsh-coderag — browser half of the native settings page.
  *
- * Registers two contributions that render the same form:
+ * Registers three contributions that render the same form:
  *
+ * - `settings.section` (`coderag`, label `CodeRAG`): the primary entry point —
+ *   Settings → CodeRAG shows the parameters directly, without the plugin README.
  * - `plugins.row.config` (`dsh-coderag#coderag`): the row-level Configure page;
  *   DSH hands the form in as an owner prop.
- * - `plugins.bundle.config` (`dsh-coderag`): the bundle detail page, so opening
- *   Plugins → dsh-coderag shows the parameters on the first screen. This slot
- *   passes no form, so the component reads the Host-owned form itself through
- *   `ctx.configForms.get('coderag')` and subscribes with `useSyncExternalStore`.
+ * - `plugins.bundle.config` (`dsh-coderag`): the bundle detail page, as a
+ *   secondary entry point below the README.
+ *
+ * The two non-row slots pass no form, so those components read the Host-owned
+ * form themselves through `ctx.configForms.get('coderag')` and subscribe with
+ * `useSyncExternalStore`.
  *
  * Every write goes through `form.mutate`, so the Host validates it against the
  * plugin Config, persists the profile patch, and delivers a volatile-only
@@ -47,6 +51,8 @@ const styles = {
     fontSize: '13px',
     lineHeight: 1.5,
   },
+  header: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  title: { margin: 0, fontSize: '15px', fontWeight: 600 },
   group: {
     border: '1px solid var(--dsw-alias-border-secondary, #d0d7de)',
     borderRadius: '8px',
@@ -231,6 +237,12 @@ function SettingsPage({ form }) {
 
   return (
     <div style={styles.root}>
+      <div style={styles.header}>
+        <h3 style={styles.title}>CodeRAG 参数设置</h3>
+        <p style={styles.description}>
+          保存后同步到 mcp-coderag 行；也可在 设置 → CodeRAG、Plugins → dsh-coderag，或该行的“配置”里打开。
+        </p>
+      </div>
       {writable ? null : <p style={styles.notice}>当前 profile 是只读的，不能保存设置。</p>}
       {GROUPS.map(group => (
         <fieldset key={group.id} style={styles.group}>
@@ -256,7 +268,7 @@ function SettingsPage({ form }) {
           恢复默认
         </button>
         {dirty ? <span style={styles.hint}>有未保存的修改</span> : null}
-        {notice?.kind === 'saved' ? <span style={styles.hint} role="status">已保存；MCP 行将按新环境重载（若工具仍读到旧目录，请重启 DSH）。</span> : null}
+        {notice?.kind === 'saved' ? <span style={styles.hint} role="status">已保存，MCP 已按新环境热重载</span> : null}
         {notice?.kind === 'reset' ? <span style={styles.hint} role="status">已恢复默认值，点击保存生效。</span> : null}
         {notice?.kind === 'failed' ? <span style={styles.error} role="alert">{notice.message}</span> : null}
       </div>
@@ -274,12 +286,12 @@ function SettingsSummary() {
 }
 
 /**
- * Bundle-page form: the slot supplies no form, so this reads the Host-owned
- * `coderag` namespace through the shared `configForms` service and re-renders on
- * every settings snapshot change.
+ * Form page for slots that supply no form (the bundle page and the Settings
+ * section): read the Host-owned `coderag` namespace through the shared
+ * `configForms` service and re-render on every settings snapshot change.
  * @param {{ configForms: { get(id: string): { getSnapshot: Function, subscribe: Function, mutate: Function } } }} props
  */
-function BundleSettings({ configForms }) {
+function ConfigFormPage({ configForms }) {
   const form = useMemo(() => configForms.get('coderag'), [configForms])
   const subscribe = useCallback(listener => form.subscribe(listener), [form])
   const getSnapshot = useCallback(() => form.getSnapshot(), [form])
@@ -290,11 +302,20 @@ function BundleSettings({ configForms }) {
 }
 
 /**
- * Register both configuration pages.
+ * Register the three configuration surfaces.
  * @param {import('@deepseek-ai/cordis').Context} ctx - browser plugin context.
  */
 export function apply(ctx) {
-  const configForms = ctx.configForms
+  const configForms = ctx.configForms ?? ctx.get('configForms')
+  ctx.slots.inject('settings.section', () => ctx.slots.register(
+    {
+      name: 'settings.section',
+      id: 'coderag',
+      order: 30,
+      label: () => 'CodeRAG',
+    },
+    () => <ConfigFormPage configForms={configForms} />,
+  ))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register(
     { name: 'plugins.row.config', key: ROW_CONFIG_KEY },
     props => (props?.view === 'summary'
@@ -305,6 +326,6 @@ export function apply(ctx) {
     { name: 'plugins.bundle.config', key: BUNDLE_NAME },
     props => (props?.view === 'summary'
       ? <SettingsSummary />
-      : <BundleSettings configForms={configForms} />),
+      : <ConfigFormPage configForms={configForms} />),
   ))
 }
