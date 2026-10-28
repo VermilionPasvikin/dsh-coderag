@@ -21,23 +21,25 @@ const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 /** Minimal package used as the "real" admin module. */
 const REAL_ADMIN = `
 import json, os, sys
-print(json.dumps({
-    "ok": True,
-    "index_exists": os.environ.get("CODERAG_SEMANTIC_API_KEY") is None,
-    "vector_exists": False,
-    "model": "real",
-    "dim": 1,
-    "total_chunks": 4242,
-    "pending_chunks": 0,
-    "config": {
-        "enabled": True,
-        "backend": "ollama",
-        "url": "",
+
+def main():
+    print(json.dumps({
+        "ok": True,
+        "index_exists": os.environ.get("CODERAG_SEMANTIC_API_KEY") is None,
+        "vector_exists": False,
         "model": "real",
-        "allow_remote": False,
-        "key_present": os.environ.get("CODERAG_SEMANTIC_KEY_PRESENT") == "1",
-    },
-}))
+        "dim": 1,
+        "total_chunks": 4242,
+        "pending_chunks": 0,
+        "config": {
+            "enabled": True,
+            "backend": "ollama",
+            "url": "",
+            "model": "real",
+            "allow_remote": False,
+            "key_present": os.environ.get("CODERAG_SEMANTIC_KEY_PRESENT") == "1",
+        },
+    }))
 `
 
 /** A hijack attempt that would answer if cwd were ever importable. */
