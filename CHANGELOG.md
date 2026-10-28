@@ -7,18 +7,23 @@
 
 ### 新增
 
-- **DSH 原生设置页（`plugins.row.config`）**：bundle 新增一个 JS 双端插件。
-  - Host 半侧（`lib/index.js`，ESM）持有 `coderag` 行的 schemastery Config，**10 个字段全部
-    `.volatile()`**：`root` / `maxFiles` / `maxFileBytes` / `extraExtensions` / `semantic` /
-    `semanticBackend` / `semanticUrl` / `semanticModel` / `semanticTimeout` / `semanticBatch`。
+- **DSH 原生设置页（三个入口，13 个字段）**：bundle 新增一个 JS 双端插件。
+  - Host 半侧（`lib/index.js`，ESM）持有 `coderag` 行的 schemastery Config，**13 个字段全部
+    `.volatile()`**：`root` / `maxFiles` / `maxFileBytes` / `maxTokens` / `extraExtensions` /
+    `semantic` / `semanticBackend` / `semanticUrl` / `semanticModel` / `semanticTimeout` /
+    `semanticBatch` / `semanticMaxChunks` / `semanticAllowRemote`。
     保存时 Loader 只提交 volatile 值、**不重挂载设置行**；Host 再把它们映射成 `CODERAG_*`
     合并进既有 `mcp-coderag` 行的 `config.env`。`env` 是 MCP 行的普通字段，因此该行会重挂载、
     Python 子进程以新环境重启。
   - Client 半侧（`lib/client.js`，lazy-CJS ModuleLoader factory，只 external `react` 与
-    `react/jsx-runtime`）注册 `plugins.row.config`（key `dsh-coderag#coderag`），用 React
-    渲染分组表单，显示保存/重置/加载/只读/错误状态，调用 `form.state` 与 `form.mutate`。
-  - 同步只碰上述 10 个变量；`CODERAG_MAX_TOKENS` / `CODERAG_SEMANTIC_MAX_CHUNKS` /
-    `CODERAG_SEMANTIC_ALLOW_REMOTE` / `CODERAG_SEMANTIC_API_KEY` 原样保留，设置页没有 key 字段。
+    `react/jsx-runtime`）注册三个原生入口：**`settings.section`（设置 → CodeRAG，主入口）**、
+    `plugins.row.config`（key `dsh-coderag#coderag`）与 `plugins.bundle.config`（key
+    `dsh-coderag`，bundle 详情页）。后两者不传 form，组件用 `ctx.configForms.get('coderag')`
+    + `useSyncExternalStore` 订阅快照。
+  - 保存**即时热重载**（本机实测：改 root 后 1.5–2 秒内模型调 `mcp__coderag__index_status`
+    返回新 root；改回后同样恢复），页面提示「已保存，MCP 已按新环境热重载」。
+  - 同步只碰上述 13 个变量；`CODERAG_SEMANTIC_API_KEY` 原样保留，设置页**没有、也不会有**
+    key 字段（`RL-02`/`S-05`）。
   - 首次保存前，profile 里已有的 `mcp-coderag` env 不会被启动同步清掉（全空设置不同步）。
 - **`@deepseek-ai/schemastery` 被内联进 Host bundle**：安装后**零运行时 npm 依赖**，
   不触发 pnpm 的 install-script 限制（`E-05`）。
@@ -26,7 +31,7 @@
   实测 Loader 单行更新 / volatile 语义）与 `host-settings-sync-probe.mjs`（用真实 Loader
   跑构建后的 Host 插件、验证设置 → env → 重挂载）。
 - **Node 测试**：`tests/plugin/*.test.mjs`（settings 映射、MCP 行同步、表单纯逻辑、
-  client 产物与 slot 注册的 server-render 测试、bundle 清单/产物契约）。
+  client 产物与三个 slot 注册的 server-render 测试、bundle 清单/产物契约）。
 - **`CODERAG_EXTRA_EXTENSIONS`：让用户自行扩展可索引的文件后缀**（`T6-17`）。内置白名单
   （`.py` / `.c` / `.h` / `.cpp` / `.hpp` / `.ts` / `.js`）保持不变，这个变量**只增不减**：
   逗号或空格分隔、大小写不敏感、可省前导点，例如 `CODERAG_EXTRA_EXTENSIONS=.mxml,.as`。
@@ -37,10 +42,10 @@
 
 ### 变更
 
-- **`cordis.patch.yml`**：新增 `coderag` 设置行；`mcp-coderag` 行只保留解释器、
-  `CODERAG_MAX_TOKENS` 与 3 个不被设置页管理的语义变量。原先 9 个管理型 env 改由设置行
+- **`cordis.patch.yml`**：新增 `coderag` 设置行（13 个 `!!js` 默认值）；`mcp-coderag` 行只保留
+  解释器与 `CODERAG_SEMANTIC_API_KEY`。原先的 12 个管理型 env 改由设置行
   （`!!js` 读同名 shell 变量作默认值）→ Host 同步提供，避免两份真相互相覆盖。
-- **README**：新增「原生设置页」章节、更新配置入口表与已知限制。
+- **README**：新增「原生设置页」章节（三个入口、13 字段表、热重载实测、已知限制）。
 
 ### 修复
 

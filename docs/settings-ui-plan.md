@@ -185,6 +185,7 @@ return module.exports; } });
 | `root` | string `''` | `CODERAG_ROOT` | 省略（引擎报 `WORKSPACE_INVALID`，符合 T6-26） |
 | `maxFiles` | natural `0` | `CODERAG_MAX_FILES` | 0 = 省略，用引擎默认 20000 |
 | `maxFileBytes` | natural `0` | `CODERAG_MAX_FILE_BYTES` | 0 = 省略，用引擎默认 1048576 |
+| `maxTokens` | natural `0` | `CODERAG_MAX_TOKENS` | 0 = 省略，用引擎默认 4000（名字含 `TOKEN`，只能显式投递） |
 | `extraExtensions` | string `''` | `CODERAG_EXTRA_EXTENSIONS` | 省略 |
 | `semantic` | boolean `false` | `CODERAG_SEMANTIC` | false = 省略；true = `'on'` |
 | `semanticBackend` | `'' \| 'ollama' \| 'openai'` | `CODERAG_SEMANTIC_BACKEND` | 省略（引擎默认 ollama） |
@@ -192,21 +193,20 @@ return module.exports; } });
 | `semanticModel` | string `''` | `CODERAG_SEMANTIC_MODEL` | 省略 |
 | `semanticTimeout` | natural `0` | `CODERAG_SEMANTIC_TIMEOUT` | 0 = 省略，默认 30 |
 | `semanticBatch` | natural `0` | `CODERAG_SEMANTIC_BATCH` | 0 = 省略，默认 16 |
+| `semanticMaxChunks` | natural `0` | `CODERAG_SEMANTIC_MAX_CHUNKS` | 0 = 省略，默认 100000 |
+| `semanticAllowRemote` | boolean `false` | `CODERAG_SEMANTIC_ALLOW_REMOTE` | false = 省略；true = `'1'` |
 
-**不纳管**（继续留在 mcp 行的 `config.env`，由现有文档路径配置）：
-`CODERAG_MAX_TOKENS`（名字含 `TOKEN`，ambient 会被清洗，只能显式写在 patch 里）、
-`CODERAG_SEMANTIC_MAX_CHUNKS`、`CODERAG_SEMANTIC_ALLOW_REMOTE`、`CODERAG_SEMANTIC_API_KEY`
-（`!!js process.env.…` 表达式，仓库内不留值，RL-02）。
+**唯一不纳管**：`CODERAG_SEMANTIC_API_KEY`（`!!js process.env.…` 表达式，仓库内不留值，RL-02）。
 **任何 key 都不进设置表单、不进设置 Config、不进日志。**
 
 ### 4.3 同步策略（避免误伤既有配置）
 
-- **`apply` 时**：读 10 个字段的当前值；**全部为空就不动 mcp 行**。
+- **`apply` 时**：读 13 个字段的当前值；**全部为空就不动 mcp 行**。
   这保护了已有用户：他们的 `mcp-coderag` 行可能写在 profile 的
   `cordis.patch.yml` 里（id 定向 patch 会整体替换 config），旧 env 继续生效。
 - **`loader/volatile-update` 时**：总是同步（这是用户显式保存）。
-- 同步只碰**纳管的 10 个 env key**：有值则写字符串，空值则从 env 删除；
-  其它 env key（token / key / allow_remote / max_chunks 等）原样保留。
+- 同步只碰**纳管的 13 个 env key**：有值则写字符串，空值则从 env 删除；
+  `CODERAG_SEMANTIC_API_KEY` 原样保留。
 - 找到 mcp 行的方法：`[...ctx.loader.entries()].find(e => e.options.id === 'mcp-coderag')`。
 - 更新前比较 env；相同则不动（避免无谓重启）。
 - 更新用 `entry.update({ config: { ...entry.options.config, env } })`：
@@ -221,27 +221,34 @@ return module.exports; } });
 
 ### 4.4 bundle patch
 
-- 新增 `id: coderag`（`name: dsh-coderag`），config 用 `!!js` 表达式把
+- 新增 `id: coderag`（`name: dsh-coderag`），config 用 13 个 `!!js` 表达式把
   **同名 shell 环境变量**作为默认值（`CODERAG_ROOT ?? ''`、`Number(CODERAG_MAX_FILES ?? 0)` …），
   这样“以前 export 环境变量”的用法仍然生效，且设置页首次打开就能看到这些值。
-- `mcp-coderag` 行**保留**：`command` / `args` / 服务名，以及未被纳管的 4 个 env；
-  删除被 `coderag` 行接管的 9 个 env（`CODERAG_EXTRA_EXTENSIONS` 与 8 个 `CODERAG_SEMANTIC*`
-  ——`CODERAG_ROOT` 本来就不在 bundle 里，`test_bundle_patch.py` 会继续钉住这一点）。
+- `mcp-coderag` 行**保留**：`command` / `args` / 服务名，以及唯一未纳管的
+  `CODERAG_SEMANTIC_API_KEY`；其余 13 个 env 由 `coderag` 行接管
+  （`CODERAG_ROOT` 本来就不在 bundle 里，`test_bundle_patch.py` 会继续钉住这一点）。
 - 设置行放 mcp 行之前，注释说明“设置行是参数入口，mcp 行是执行器”。
 
 ### 4.5 client UI
 
-- 三个分组：工作区（`root`）、索引范围（`maxFiles` / `maxFileBytes` / `extraExtensions`）、
-  语义检索（开关 + backend + url + model + timeout + batch）。
+- **三个入口共用同一个 `SettingsPage`**：
+  - `settings.section`（id `coderag`，order 30，label `CodeRAG`）→ **设置 → CodeRAG**，主入口；
+  - `plugins.bundle.config`（key `dsh-coderag`）→ Plugins 详情页，附加入口；
+  - `plugins.row.config`（key `dsh-coderag#coderag`）→ 行内「配置」。
+  - 后两者不传 form，组件用 `ctx.configForms.get('coderag')` + `useSyncExternalStore`
+    订阅快照；row 入口仍使用 DSH 传入的 `form`。
+- 三个分组：工作区（`root`）、索引范围（`maxFiles` / `maxFileBytes` / `maxTokens` /
+  `extraExtensions`）、语义检索（开关 + backend + url + model + timeout + batch +
+  `semanticMaxChunks` + `semanticAllowRemote`）。页面顶部有「CodeRAG 参数设置」标题与入口说明。
 - 显示 `loading` / `unavailable` / 只读 / 已保存 / 保存失败 / 字段级校验错误。
-- 保存：把**全部字段**作为 `set` op 提交（首次保存即把当前生效值固化进 profile patch，
-  避免 bundle 表达式在“保存任意一项后整体替换”的语义下丢失）；`重置为默认`
-  会把表单恢复成 `state.base` 并把用户层字段以 `unset` 提交。
-- 校验在客户端先做（整数 ≥ 0、backend 枚举、cloud 需要 URL+model、URL 形态），
-  Host 的 schemastery 是第二道闸；非法值不会到达 mcp 行。
-- 不用 `settings.configure({auto:false})`?? → **使用**：与 dsh-free-search 相同，
-  用 `ctx.inject(['settings'], sctx => sctx.effect(() => sctx.settings.configure({ auto: false }, ctx.fiber)))`
-  抑制设置页的自动生成表单，只保留本插件的行配置页。
+- 保存：把**全部 13 个字段**作为 `set` op 提交（首次保存即把当前生效值固化进 profile patch，
+  避免 bundle 表达式在“保存任意一项后整体替换”的语义下丢失）；`恢复默认`
+  会把表单恢复成 `state.base` 再随保存写回。
+- 校验在客户端先做（整数 ≥ 0、backend 枚举、cloud 需要 URL+model、URL 形态、
+  云端非 loopback 必须 `semanticAllowRemote`），Host 的 schemastery 是第二道闸；
+  非法值不会到达 mcp 行。
+- 使用 `settings.configure({auto:false})`（与 dsh-free-search 相同）抑制设置页的自动生成表单，
+  改由本插件的 `settings.section` 页面提供唯一正式设置页。
 - `view: 'summary'` 渲染一行静态摘要（工作区 + 语义开关），作为行描述缺省。
 
 ---
@@ -259,12 +266,16 @@ return module.exports; } });
 | GUI 页面无法由 Agent 黑盒验证 | T5-01..06 只验证构建/接口/host 行为；最终页面由用户黑盒测试（见交接清单） |
 | 环境沙箱阻止 esbuild JS API 的管道子进程 | 构建脚本优先 JS API，检测到 `spawn EPERM` 时退回同版本 esbuild CLI（`stdio: 'inherit'`）；两条路径使用同一份 banner/footer/intro 定义 |
 
-## 6. 未验证事项（交给用户黑盒）
+## 6. 验证状态（2026-10-28 增量）
 
-1. 真实 GUI 里 Plugins → dsh-coderag → `coderag` 行 → Configure 的渲染与保存点击。
-2. 保存后 `cordis.patch.yml` 里 `coderag` 行的实际落盘内容与 mcp 子进程重启。
-3. 重启 DSH 后设置是否仍生效（持久化闭环）。
-4. 非法值（负数、`a.b` 扩展名、cloud 缺 URL）在 UI 上被拒绝的提示文案。
+最初由用户黑盒确认「bundle 页只看到 README、看不到表单」，因此追加了独立设置页并重做验证：
+
+1. ✅ **设置 → CodeRAG** 页面（`settings.section`）已在真实 DeepForge 实例出现，13 字段全部可见；
+   截图 `deliverables/screenshots/S09-coderag-settings-page.png`。
+2. ✅ bundle 详情页的附加入口同样可见；截图 `deliverables/screenshots/S07-coderag-plugin-page.png`。
+3. ✅ **热重载实测**：改 `root` 后 1.5 秒内 `mcp__coderag__index_status` 返回新 root；改回后约 2 秒恢复。
+4. ✅ 保存后写进 profile 的 `coderag` 行（`settings/mutate` 的 revision 变化 + `describe` 读回确认）。
+5. ⏳ 非法值在 UI 上的逐字段提示仍以 Node 测试 + 纯函数校验覆盖，未逐项截图。
 
 ---
 
@@ -392,8 +403,8 @@ $ git status --short
 
 文档改动（人工检查，稳定锚点而非全文计数）：
 
-- `README.md` 新增 `### 原生设置页（推荐，DSH `plugins.row.config`）`，含字段/env 对照表、
-  保存/恢复默认/非法值行为、首次保存前后的老配置语义、5 步黑盒验收；
+- `README.md` 新增 `### 原生设置页（推荐）`，含三个入口、13 字段/env 对照表、
+  保存/恢复默认/非法值行为、热重载实测、首次保存前后的老配置语义、5 步黑盒验收；
   配置入口表、安装期望行、`CODERAG_ROOT` 说明与已知限制同步更新；文档表新增本文件与 PR 草稿。
 - `PROJECT.md` §1.6.1 的 bundle 形态由「没有 JavaScript」更新为「Host/Client 两个已构建产物 +
   `coderag` 设置行，仍无运行时依赖、无 install script」；§6.7 注明 DeepForge M5 支线的证据位置。
@@ -407,4 +418,74 @@ $ git status --short
   `python -m pytest` 即可。
 - 该沙箱尝试还在仓库根留下 5 个**空**目录 `pytest-cache-files-*`（不可读、不可删、未跟踪）。
   用户可在正常终端里直接删除；它们不属于任何提交。
-- GUI 点击与真实 Python 重启仍需用户黑盒验证（见 §6）。
+- GUI 页面已由用户在真实 DeepForge 实例上确认（§6、§8），截图见 `deliverables/screenshots/`。
+
+---
+
+## 8. M5 增量：独立设置页、13 字段与热重载实测（2026-10-28）
+
+用户黑盒反馈「bundle 页第一屏仍是 README」后追加的改动（都在 `feat/settings-ui`）：
+
+| 内容 | 提交 |
+|---|---|
+| 13 字段（新增 `maxTokens` / `semanticMaxChunks` / `semanticAllowRemote`）+ bundle 页表单 | `a4e4cf0` `feat(ui): expose all coderag settings on the bundle page` |
+| 13 字段测试 | `1f86856` `test(plugin): cover the thirteen settings fields` |
+| `settings.section` 独立设置页（主入口）+ 页面标题 + 热重载成功文案 | 见本次 `feat(ui): add a dedic…` 提交 |
+| settings.section 注册测试与 39 用例 | 见本次 `test(plugin): cover the settings section…` 提交 |
+| README/CHANGELOG/PR/本文件 | 见本次 `docs(readme): record the settings section…` 提交 |
+
+### 8.1 13 字段与入口
+
+- `settings.section`：id `coderag`、order 30、label `CodeRAG`，**设置 → CodeRAG**；
+- `plugins.bundle.config`：key `dsh-coderag`，Plugins 详情页；
+- `plugins.row.config`：key `dsh-coderag#coderag`，行内「配置」；
+- 三个入口共用 `SettingsPage`；无 form 的两个入口用
+  `ctx.configForms.get('coderag')` + `useSyncExternalStore` 读快照。
+- `semanticAllowRemote` 的跨字段校验：语义开启 + `openai` + 非 loopback URL 时必须打开，
+  与引擎的 `CODERAG_SEMANTIC_ALLOW_REMOTE=1` 双重开关一致；映射时 true→`'1'`。
+- API key 仍**不暴露**：唯一不在表单里的变量，继续走环境变量 / 本机 profile。
+
+### 8.2 热重载实测（真实实例，DSH 0.2.1-rc.3）
+
+通过 `/connect?token=…` 换 API cookie，调用 `/api/settings/describe` 与
+`/api/settings/mutate`（这就是设置页保存走的同一条 settings Remote）：
+
+```text
+baseline  root = F:\PersonalProjects\python\unname\dsh-coderag   revision 0
+mutate    root = F:\PersonalProjects\python\unname\demo-project revision 1
+会话模型调用 mcp__coderag__index_status（同一进程，未重启 DSH）：
+  status: error / code: INDEX_NOT_FOUND
+  root: F:\PersonalProjects\python\unname\demo-project        ← prompt 后 1.5 秒
+mutate    恢复 root = F:\PersonalProjects\python\unname\dsh-coderag  revision 4
+  {"status": "ready", "root": "F:\\PersonalProjects\\python\\unname\\dsh-coderag", ...}
+                                                              ← prompt 后 2.0 秒
+```
+
+- 测量方式：会话日志里 `agent/inbox/spliced`（prompt 入队）→ `tool/result`（工具返回）的
+  事件时间差；工具结果从会话 JSONL（多帧 zstd）解出。
+- 结论：**保存即热重载，无需重启 DSH**。保存提示据此定稿为
+  「已保存，MCP 已按新环境热重载」。
+- 测试结束后 `settings/describe` 复核：root 仍为 `dsh-coderag`，已恢复。
+
+### 8.3 截图（用户从真实实例抓取）
+
+| 文件 | 内容 |
+|---|---|
+| `F:\PersonalProjects\python\unname\deliverables\screenshots\S09-coderag-settings-page.png` | **设置 → CodeRAG** 首屏，13 字段 |
+| `F:\PersonalProjects\python\unname\deliverables\screenshots\S07-coderag-plugin-page.png` | Plugins → dsh-coderag 详情页（附加入口） |
+
+### 8.4 本次验证输出
+
+```text
+$ node scripts/build-plugin.mjs
+built lib/index.js (48.0 KiB) and lib/client.js (21.1 KiB)
+
+$ node --test --test-isolation=none "tests/plugin/*.test.mjs"
+ℹ tests 39 / ℹ pass 39 / ℹ fail 0
+
+$ node scripts/experiments/host-settings-sync-probe.mjs
+SUMMARY: 19/19 checks passed
+
+$ python -m pytest
+629 passed, 17 skipped
+```

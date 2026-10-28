@@ -291,7 +291,7 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 
 | 写在哪 | Windows 上的路径 | 适合什么 | 会不会入库 |
 |---|---|---|---|
-| **原生设置页**（Plugins → dsh-coderag → 配置） | 落盘位置：`%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml` 的 `coderag` 行 | **最推荐**：10 个常用参数，保存即同步、即重启 MCP 子进程 | ❌ 仓库之外，不会 |
+| **原生设置页**（设置 → CodeRAG；或 Plugins → dsh-coderag） | 落盘位置：`%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml` 的 `coderag` 行 | **最推荐**：13 个常用参数，保存即热重载 MCP 子进程 | ❌ 仓库之外，不会 |
 | profile 的 `cordis.patch.yml` | `%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml` | 本机持久设置，**包括密钥字面值**；设置页不管理的 4 个变量写在这里 | ❌ 仓库之外，不会 |
 | `$DSH_HOME/cordis.patch.yml` | `%USERPROFILE%\.dsh\cordis.patch.yml` | 同上，且**优先级更高**（对所有 profile 生效） | ❌ 仓库之外，不会 |
 | 启动 dsh 的那个 shell | `export X=...`（macOS / Linux）／`$env:X = "..."`（PowerShell） | 只对"名字不含 `KEY/PASSWORD/SECRET/TOKEN`"的变量有效；**只活到窗口关闭** | ❌ 不涉及文件 |
@@ -303,18 +303,27 @@ stdio 子进程的环境会被清洗：**继承来的**环境里，匹配 `*KEY*
 > （PowerShell 用 `$env:CODERAG_PYTHON = $py`，macOS / Linux 用 `export CODERAG_PYTHON=...`）。
 > **桌面版是从快捷方式启动的，读不到你在终端里设的变量**，所以桌面版用户请把解释器写进下面的 `env:`。
 
-### 原生设置页（推荐，DSH `plugins.row.config`）
+### 原生设置页（推荐）
 
-DSH **0.1.7-rc.1 起**（本仓库在 **0.2.1-rc.3** 上实测）插件可以在 Plugins 页提供自己的行配置页。
-装好本插件并重启后，打开 **Plugins → dsh-coderag → `coderag` 行 → 配置**，即可编辑下面 10 个参数；
-保存写进当前 profile 的 `cordis.patch.yml`（`coderag` 行），Host 半侧再把它同步成 `mcp-coderag` 行的
-`config.env`，MCP 行随即重挂载、**Python 子进程以新环境重启**——不需要手工改 YAML，也不需要重启 DSH。
+DSH **0.1.7-rc.1 起**（本仓库在 **0.2.1-rc.3** 上实测）插件可以在原生 UI 里提供自己的设置页。
+本插件提供**三个入口**，内容完全一致（13 个字段）：
+
+1. **设置 → CodeRAG**（`settings.section`，主入口）——一点就行，不经过任何 README；
+2. **Plugins → dsh-coderag → `coderag` 行 → 配置**（`plugins.row.config`）；
+3. **Plugins → dsh-coderag 详情页**里的「CodeRAG 参数设置」表单（`plugins.bundle.config`，附加入口）。
+
+保存会写进当前 profile 的 `cordis.patch.yml`（`coderag` 行），Host 半侧再把它同步成
+`mcp-coderag` 行的 `config.env`，MCP 行随即重挂载、**Python 子进程以新环境重启**。
+**实测热重载**：在一个真实 DeepForge 实例里改 `root` 后，**1.5 秒**内模型调
+`mcp__coderag__index_status` 返回的 `root` 已是新目录；再改回后约 2 秒内恢复。
+不需要手工改 YAML，也不需要重启 DSH。
 
 | 表单字段 | 写入的环境变量 | 空值/0 的含义 |
 |---|---|---|
 | 工作区根 `root` | `CODERAG_ROOT` | 省略；引擎明确报 `WORKSPACE_INVALID`，不猜目录（`T6-26`） |
 | 文件数量上限 `maxFiles` | `CODERAG_MAX_FILES` | 省略，用引擎默认 20000 |
 | 单文件字节上限 `maxFileBytes` | `CODERAG_MAX_FILE_BYTES` | 省略，用引擎默认 1 MiB |
+| 检索 token 预算 `maxTokens` | `CODERAG_MAX_TOKENS` | 0 = 省略，用引擎默认 4000（名字含 `TOKEN`，只能显式投递） |
 | 额外文件扩展名 `extraExtensions` | `CODERAG_EXTRA_EXTENSIONS` | 省略；只增不减，密钥黑名单仍生效（`RL-03`） |
 | 启用语义检索 `semantic` | `CODERAG_SEMANTIC` | 关闭 = 省略；开启 = `on` |
 | 语义后端 `semanticBackend` | `CODERAG_SEMANTIC_BACKEND` | 省略，用引擎默认 `ollama`；云端选 `openai` |
@@ -322,40 +331,48 @@ DSH **0.1.7-rc.1 起**（本仓库在 **0.2.1-rc.3** 上实测）插件可以在
 | 语义模型 `semanticModel` | `CODERAG_SEMANTIC_MODEL` | 省略，本地默认 `bge-m3` |
 | 语义请求超时 `semanticTimeout` | `CODERAG_SEMANTIC_TIMEOUT` | 0 = 省略，默认 30 秒 |
 | 语义批量大小 `semanticBatch` | `CODERAG_SEMANTIC_BATCH` | 0 = 省略，默认 16 |
+| 向量化 chunk 上限 `semanticMaxChunks` | `CODERAG_SEMANTIC_MAX_CHUNKS` | 0 = 省略，默认 100000（云端首次索引的计费上限） |
+| 允许非 loopback 云端地址 `semanticAllowRemote` | `CODERAG_SEMANTIC_ALLOW_REMOTE` | 关闭 = 省略；开启 = `1`（仅云端 openai + 非 loopback 需要） |
 
-**不在此页管理**（继续写在 patch 的 `env:` 或启动 dsh 的 shell 里）：
-`CODERAG_MAX_TOKENS`（名字含 `TOKEN`，ambient 会被清洗）、`CODERAG_SEMANTIC_MAX_CHUNKS`、
-`CODERAG_SEMANTIC_ALLOW_REMOTE`、`CODERAG_SEMANTIC_API_KEY`。**设置页没有、也不会有 API key 字段**
-（`RL-02`/`S-05`：key 只从环境或本机配置层读，不入库、不入日志）。
+**只有 `CODERAG_SEMANTIC_API_KEY` 不在设置页里**（也不会有、不应该有 API key 字段）：
+key 继续写在 patch 的 `env:` 或启动 dsh 的 shell 里（`RL-02`/`S-05`：key 只从环境或本机配置层读，
+不入库、不入日志、不进浏览器表单）。表单对「语义检索 + openai + 非 loopback URL」会强制要求打开
+`semanticAllowRemote`，与引擎的 `ALLOW_REMOTE=1` 双重开关一致（`ADR-17` §1.3）。
 
 **行为与边界**：
 
-- **保存**把 10 个字段一起写进 `coderag` 行（包括打开页面时显示的环境默认值），所以 bundle 里
+- **保存**把 13 个字段一起写进 `coderag` 行（包括打开页面时显示的环境默认值），所以 bundle 里
   `!!js` 读到的 shell 值不会因为“只改了一项”而在下次启动时丢失。
+- **保存即热重载**（本机实测）：保存后 Loader 以 volatile 方式提交设置行，
+  Host 同步 MCP 行 env、MCP 行重挂载、Python 子进程重启；**1.5–2 秒**内 `index_status` 已返回新 `root`。
+  页面提示为「已保存，MCP 已按新环境热重载」。
 - **恢复默认**把表单恢复成 `base`（bundle 层 / 环境变量解析出的值），再点保存才生效。
-- **非法值**先在浏览器里逐字段拒绝（非整数、`a.b` 这类扩展名、cloud 缺 URL/模型、本地后端配非 loopback URL），
-  Host 的 schemastery 再校验一次；失败时会显示错误，不会写进 mcp 行。
+- **非法值**先在浏览器里逐字段拒绝（非整数、`a.b` 这类扩展名、cloud 缺 URL/模型、本地后端配非 loopback URL、
+  云端非 loopback 未开 `semanticAllowRemote`），Host 的 schemastery 再校验一次；失败时会显示错误，
+  不会写进 mcp 行。
 - **首次保存前**，profile 里已经手写在 `mcp-coderag` 行 `env` 里的旧配置**不会被清掉**：Host 只在
-  “设置里至少有一个非空值”时才做启动同步。**第一次保存之后**，这 10 个变量以设置页为唯一来源
-  （旧 `env` 里的同名项会被覆盖或删除），其余 4 个变量始终原样保留。这是有意的取舍，见
-  [`docs/settings-ui-plan.md`](docs/settings-ui-plan.md) §4.3。
+  “设置里至少有一个非空值”时才做启动同步。**第一次保存之后**，这 13 个变量以设置页为唯一来源
+  （旧 `env` 里的同名项会被覆盖或删除），只有 `CODERAG_SEMANTIC_API_KEY` 始终原样保留。这是有意的取舍，
+  见 [`docs/settings-ui-plan.md`](docs/settings-ui-plan.md) §4.3。
 - 启动同步时若设置来自 shell 环境变量，MCP 子进程可能先以旧环境启动一次、随后被设置同步重启一次；
   之后保存都是即时重启。
 - 用 CLI（`dsh-coderag index/search`）时**仍然只读当前 shell 的环境变量**，不读这份设置
   （见下文「谁读哪份配置」）。
-- DSH 版本不支持 `plugins.row.config` 时页面不会出现；此时照旧用下面的 `env:` / shell 变量配置，
-  功能不受影响。
+- DSH 版本不支持这些 slot（`settings.section` / `plugins.row.config` / `plugins.bundle.config`）时页面不会出现；
+  此时照旧用下面的 `env:` / shell 变量配置，功能不受影响。
 
 **手工验收（黑盒）**：
 
-1. 重启 DSH → Plugins → 找到 `dsh-coderag` → `coderag` 行出现 **配置** 按钮。
-2. 填工作区根 → 保存 → 页面显示「已保存」；profile 的 `cordis.patch.yml` 出现 `- id: coderag` 且含 `root:`。
+1. 重启 DSH → 打开 **设置 → CodeRAG**（或 Plugins → dsh-coderag），第一屏即可见 13 个字段。
+2. 填工作区根 → 保存 → 页面显示「已保存，MCP 已按新环境热重载」；profile 的 `cordis.patch.yml`
+   出现 `- id: coderag` 且含 `root:`。
 3. 让模型调 `mcp__coderag__index_status` → 返回的 `root` 是新目录、状态不再是 `WORKSPACE_INVALID`。
 4. 把文件上限改成 `-1` 或把扩展名改成 `a.b` → 页面就地报错，保存被拒绝。
 5. 点「恢复默认」→ 表单回到默认值 → 保存 → `coderag` 行的 `config` 被移除，行为回到环境变量/引擎默认。
 
 **Windows 上写到一个持久位置**——打开 `%USERPROFILE%\.dsh\profiles\<你实际在跑的 profile>\cordis.patch.yml`
-（该文件由 `dsh plugin --profile <profile> add .` 生成），把下面这段放进去：
+（该文件由 `dsh plugin --profile <profile> add .` 生成），把下面这段放进去。**参数本身建议留在设置页**，
+这里只覆盖解释器与执行器字段：
 
 ```yaml
 - id: mcp-coderag
@@ -364,9 +381,12 @@ DSH **0.1.7-rc.1 起**（本仓库在 **0.2.1-rc.3** 上实测）插件可以在
     transport: stdio
     command: 'C:\Users\<你>\dsh-coderag-venv\Scripts\python.exe'
     args: ['-c', 'import dsh_coderag.server as s; s.run()']
-    env:
-      CODERAG_ROOT: !!js process.env.CODERAG_ROOT ?? process.cwd()
+    env: {}
 ```
+
+> 工作区根与全部 `CODERAG_*` 参数优先在 **设置 → CodeRAG** 里配；如果确实要写死在 `env:` 里，
+> 请写完整字段（DSH 的 patch 是整体替换），并把工作区根显式写成绝对路径
+> （`CODERAG_ROOT: 'F:\src\my-repo'`）——**不要用 `process.cwd()`**，那是 DSH 自己的目录（`T6-26`）。
 
 > **两种情形写法不同（都实测过）**：
 > ① 文件里**只有占位符 `[]`**（全新 profile 的初始内容）→ 用上面这段**替换掉那一行**；
@@ -383,14 +403,14 @@ DSH **0.1.7-rc.1 起**（本仓库在 **0.2.1-rc.3** 上实测）插件可以在
 > **覆盖 `mcp-coderag` 时注意：DSH 的 patch 是「整体替换」而不是深合并**——DSH schema 自己的说明就是
 > *"A patch config replaces the whole config."*。**实测**：只写 `config.env` 一项去覆盖
 > `mcp-coderag` 时，`serverName` / `transport` / `args` 会**从结果里消失**。所以上面那个例子把要保留的
-> 字段**全部重写**了一遍；仓库根 `cordis.patch.yml` 里那条 `env` 的其它项（如 `CODERAG_MAX_TOKENS`）
-> 若你也想要，同样要抄进来。
+> 字段**全部重写**了一遍；`CODERAG_SEMANTIC_API_KEY`（唯一不由设置页管理的变量）若要写进 `env:`，
+> 也必须把其它 env 项抄全。
 
 | 变量 | 作用 | 默认 | **生效情况** |
 |---|---|---|---|
 | `CODERAG_PYTHON` | 运行 MCP 服务器的解释器路径 | `python` / `python3`（走 `PATH`；**桌面版请覆盖成绝对路径**，见 `doctor` 打印的块） | ✅ 由 DSH 读（patch 里的 `!!js`） |
-| `CODERAG_ROOT` | 要索引的工作区根 | DSH 进程的工作目录 | ✅ MCP 服务器读它决定工作区 |
-| `CODERAG_MAX_TOKENS` | 单次检索返回的 token 预算 | `4000` | ✅ 作为 `code_search` 的**默认**预算；某一次调用传入 `max_tokens` 参数仍可覆盖它 |
+| `CODERAG_ROOT` | 要索引的工作区根 | **无默认**（未设即 `WORKSPACE_INVALID`，不猜 DSH 自己的目录） | ✅ MCP 服务器读它决定工作区 |
+| `CODERAG_MAX_TOKENS` | 单次检索返回的 token 预算 | `4000` | ✅ 作为 `code_search` 的**默认**预算；某一次调用传入 `max_tokens` 参数仍可覆盖它；设置页可改 |
 | `CODERAG_MAX_FILES` | 文件数上限，**超限显式失败**并报实际数量（不静默截断） | `20000` | ✅ 建索引时生效；`index_status` 在超限时返回 `INDEX_TOO_MANY_FILES` + 实际数量 |
 | `CODERAG_MAX_FILE_BYTES` | 单文件大小上限，超过则跳过并计入 `skipped.too_large` | `1048576`（1 MiB） | ✅ 建索引时生效，且 `index_status` 的 `skipped` 统计与它一致 |
 | `CODERAG_BATCH_SIZE` | 索引写库批大小（不设则自适应推导） | 自适应（1–512） | ✅ 建索引时生效 |
@@ -687,10 +707,10 @@ $env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
 | **大文件默认跳过** | 超过 `CODERAG_MAX_FILE_BYTES`（1 MiB）的文件不入库，只在 `skipped.too_large` 里计数 | 配置章节 |
 | **云端后端对超长 chunk 无能为力** | 代码原样发送 chunk 文本、**不截断**；实测一份含几何数据的 89.5 万 chunk 索引里有 **8,270 个超过 3.2 万字符**（≈8k token，多数模型的上限），这些会被服务商拒绝。云端向量化前需先把这类大块从索引里排除 | 配置章节 ③ |
 | **可选向量后端默认关闭，且不声称检索质量** | 本地后端只允许 loopback；按 `ADR-14` §10.4 的 `V4`，`natural` 桶 `S@5 = 0.300 < 0.40` | 「② 本地 embedding 后端」 |
-| **设置页需要 DSH 支持 `plugins.row.config`** | 0.1.7-rc.1 起提供（本仓库在 0.2.1-rc.3 实测）；旧版 DSH 里没有这个入口，但 env / patch 配置仍照旧生效 | README「原生设置页」、`docs/settings-ui-plan.md` |
-| **首次保存后，设置页接管 10 个变量** | 旧 `mcp-coderag` 行 `env` 里的同名项会被覆盖/删除；`CODERAG_MAX_TOKENS` / `MAX_CHUNKS` / `ALLOW_REMOTE` / `API_KEY` 不受影响 | `docs/settings-ui-plan.md` §4.3 |
-| **设置页不管理 API key 与 remote opt-in** | 云端 key 与 `CODERAG_SEMANTIC_ALLOW_REMOTE` 只能写在启动 shell 或本机 patch 的 `env:` 里；这是有意的（`RL-02`） | 配置章节 |
-| **带环境默认值启动时 MCP 子进程可能启动两次** | 先按启动环境起一次，设置同步后再以同一/新环境重启一次；之后的保存都是即时重启 | `docs/settings-ui-plan.md` §4.3 |
+| **设置页需要 DSH 支持 `settings.section` / `plugins.row.config` / `plugins.bundle.config`** | 0.1.7-rc.1 起提供（本仓库在 0.2.1-rc.3 实测）；旧版 DSH 里没有这些入口，但 env / patch 配置仍照旧生效 | README「原生设置页」、`docs/settings-ui-plan.md` |
+| **首次保存后，设置页接管 13 个变量** | 旧 `mcp-coderag` 行 `env` 里的同名项会被覆盖/删除；只有 `CODERAG_SEMANTIC_API_KEY` 始终原样保留 | `docs/settings-ui-plan.md` §4.3 |
+| **设置页不管理 API key** | `CODERAG_SEMANTIC_API_KEY` 只能写在启动 shell 或本机 patch 的 `env:` 里；表单没有也不会有 key 字段（`RL-02`/`S-05`） | 配置章节 |
+| **带环境默认值启动时 MCP 子进程可能启动两次** | 先按启动环境起一次，设置同步后再以同一/新环境重启一次；之后的保存都是即时热重载（实测 1.5–2 秒） | `docs/settings-ui-plan.md` §4.3 |
 
 ## 文档
 
