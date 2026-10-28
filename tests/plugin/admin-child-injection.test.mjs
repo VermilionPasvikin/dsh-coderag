@@ -9,10 +9,14 @@
  */
 
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { createAdminService } from '../../src/plugin/host/admin.js'
+
+const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
 /** Minimal package used as the "real" admin module. */
 const REAL_ADMIN = `
@@ -52,16 +56,26 @@ function writePackage(base, body) {
 }
 
 test('the admin child ignores a shadow package in its cwd and status has no key', async t => {
-  const python = process.env.CODERAG_TEST_PYTHON
-    ?? process.env.CODERAG_PYTHON
-    ?? (process.platform === 'win32' ? 'python' : 'python3')
+  const python = process.env.CODERAG_PYTHON || (process.platform === 'win32' ? 'python' : 'python3')
+  let probe
+  try {
+    probe = spawnSync(python, ['--version'], { encoding: 'utf8', timeout: 5000 })
+  } catch (error) {
+    t.skip(`no Python interpreter for the real-child test: ${error.message}`)
+    return
+  }
+  if (probe.error !== undefined || probe.status !== 0) {
+    t.skip(`no Python interpreter for the real-child test: ${probe.error?.message ?? probe.stderr ?? python}`)
+    return
+  }
   const savedPath = process.env.PYTHONPATH
   const base = mkdtempSync(join(process.cwd(), '.tmp-admin-injection-'))
   const realDir = writePackage(join(base, 'real'), REAL_ADMIN)
   const privateDir = join(base, 'private')
   mkdirSync(privateDir, { recursive: true })
   writePackage(privateDir, SHADOW_ADMIN)
-  process.env.PYTHONPATH = savedPath === undefined ? realDir : `${realDir}${delimiter}${savedPath}`
+  const repoSource = join(REPO_ROOT, 'src')
+  process.env.PYTHONPATH = [realDir, repoSource, savedPath].filter(part => typeof part === 'string' && part !== '').join(delimiter)
   const service = createAdminService({
     readValues: () => ({ root: base, semanticBackend: 'ollama' }),
     resolveKey: async () => ({ available: true, value: 'sk-inject-secret' }),
