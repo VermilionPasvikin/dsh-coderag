@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import struct
 import threading
 import urllib.error
 import urllib.request
@@ -22,12 +23,14 @@ from typing import Any
 import numpy as np
 import pytest
 
-from dsh_coderag import admin, index_sync
+from dsh_coderag import admin, index_sync, vectors
 from dsh_coderag.config import SemanticConfig
+from dsh_coderag.embed import CHECKPOINT_FILENAME, CHECKPOINT_MAGIC
 from dsh_coderag.indexer import connect
 from dsh_coderag.vectors import (
     EMBEDDINGS_FILENAME,
     MANIFEST_FILENAME,
+    checkpoint_slug,
     vectors_dir,
 )
 
@@ -75,6 +78,13 @@ def _chunk_count(root: Path) -> int:
         return int(connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
     finally:
         connection.close()
+
+
+def _checkpoint_file(root: Path, model: str = "bge-m3") -> Path:
+    """Return the on-disk checkpoint path for one model."""
+    return (
+        vectors_dir(root) / vectors.CHECKPOINT_SUBDIR / checkpoint_slug(model) / CHECKPOINT_FILENAME
+    )
 
 
 @pytest.fixture
@@ -245,9 +255,16 @@ class _HealthHandler(BaseHTTPRequestHandler):
     openai_models: list[str] = []
     status = 200
     authorization: list[str | None] = []
+    redirect_to: str | None = None
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         type(self).authorization.append(self.headers.get("Authorization"))
+        if type(self).redirect_to is not None:
+            self.send_response(302)
+            self.send_header("Location", type(self).redirect_to)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if type(self).status != 200:
             self.send_response(type(self).status)
             self.send_header("Content-Length", "0")
@@ -277,12 +294,27 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
 
 @contextmanager
+def _serve(handler: type[BaseHTTPRequestHandler]) -> Iterator[int]:
+    """Run one loopback stub handler and yield its port."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@contextmanager
 def _health_server() -> Iterator[int]:
     """Run the stub on a random loopback port and yield it."""
     _HealthHandler.ollama_models = ["bge-m3:latest"]
     _HealthHandler.openai_models = ["bge-m3"]
     _HealthHandler.status = 200
     _HealthHandler.authorization = []
+    _HealthHandler.redirect_to = None
     server = ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -364,7 +396,7 @@ def test_health_refuses_a_remote_url_without_allow_remote(
     def explode(*args: object, **kwargs: object) -> object:
         raise AssertionError("a remote URL without the switch must not be contacted")
 
-    monkeypatch.setattr(urllib.request, "urlopen", explode)
+    monkeypatch.setattr(admin, "open_without_redirects", explode)
     payload = admin.health(tmp_path, _config(url="http://10.0.0.5:11434", allow_remote=False))
 
     assert payload["ok"] is False
@@ -377,6 +409,7 @@ class _CapturingResponse:
 
     def __init__(self, payload: object) -> None:
         self._body = json.dumps(payload).encode("utf-8")
+        self._offset = 0
 
     def __enter__(self) -> _CapturingResponse:
         return self
@@ -384,8 +417,13 @@ class _CapturingResponse:
     def __exit__(self, *_: object) -> bool:
         return False
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            chunk = self._body[self._offset :]
+        else:
+            chunk = self._body[self._offset : self._offset + size]
+        self._offset += len(chunk)
+        return chunk
 
 
 def test_health_allows_a_remote_url_only_with_allow_remote(
@@ -401,7 +439,7 @@ def test_health_allows_a_remote_url_only_with_allow_remote(
         captured["timeout"] = timeout
         return _CapturingResponse({"data": [{"id": "bge-m3"}]})
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(admin, "open_without_redirects", fake_urlopen)
     payload = admin.health(
         tmp_path,
         _config(
@@ -429,7 +467,7 @@ def test_health_reports_a_rejected_credential_without_echoing_it(
     ) -> _CapturingResponse:
         raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(admin, "open_without_redirects", fake_urlopen)
     payload = admin.health(
         tmp_path,
         _config(
@@ -710,3 +748,193 @@ def test_a_corrupt_manifest_yields_no_reusable_rows(tmp_path: Path) -> None:
     assert payload["vector_exists"] is True
     assert payload["vectorized_chunks"] == 0
     assert payload["pending_chunks"] == 0
+
+
+def test_status_counts_the_checkpoint_without_loading_or_writing_it(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1-3: status must not call checkpoint_cache/load on a file a build owns."""
+    _build_vectors(workspace)
+    path = _checkpoint_file(workspace)
+    before = path.read_bytes()
+
+    def explode(*args: object, **kwargs: object) -> object:
+        raise AssertionError("status must not load the embedding checkpoint")
+
+    monkeypatch.setattr(vectors, "checkpoint_cache", explode)
+    monkeypatch.setattr("dsh_coderag.embed.DiskEmbeddingCache.load", explode)
+
+    payload = admin.status(workspace, _config())
+
+    assert payload["checkpoint_vectors"] == 4
+    assert path.read_bytes() == before
+    assert path.stat().st_size == len(before)
+
+
+def test_status_leaves_a_torn_checkpoint_tail_untouched(workspace: Path) -> None:
+    """P1-3: a poll during a build must not truncate a partially written record."""
+    _build_vectors(workspace)
+    path = _checkpoint_file(workspace)
+    torn = path.read_bytes() + b"\x03\x00\x00\x00torn"
+    path.write_bytes(torn)
+
+    payload = admin.status(workspace, _config())
+
+    assert payload["checkpoint_vectors"] == 4
+    assert path.read_bytes() == torn
+    assert path.stat().st_size == len(torn)
+
+
+def test_status_counts_a_forged_huge_dimension_as_zero_without_allocating(
+    workspace: Path,
+) -> None:
+    """P1-3: a forged header must not make status allocate a giant vector."""
+    _build_vectors(workspace)
+    path = _checkpoint_file(workspace)
+    forged = CHECKPOINT_MAGIC + struct.pack("<I32s", 1_000_000_000, b"\0" * 32)
+    path.write_bytes(forged)
+
+    payload = admin.status(workspace, _config())
+
+    assert payload["checkpoint_vectors"] == 0
+    assert path.read_bytes() == forged
+
+
+def test_status_counts_an_empty_checkpoint_as_zero_and_keeps_it_empty(
+    workspace: Path,
+) -> None:
+    path = _checkpoint_file(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+
+    payload = admin.status(workspace, _config())
+
+    assert payload["checkpoint_vectors"] == 0
+    assert path.read_bytes() == b""
+
+
+def test_status_reports_key_present_from_the_host_marker_only(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T8-02: the Host no longer passes the key to status, only its presence marker."""
+    monkeypatch.delenv("CODERAG_SEMANTIC_API_KEY", raising=False)
+    monkeypatch.setenv(admin.ENV_SEMANTIC_KEY_PRESENT, "0")
+    assert admin.status(workspace, _config())["config"]["key_present"] is False
+
+    monkeypatch.setenv(admin.ENV_SEMANTIC_KEY_PRESENT, "1")
+    payload = admin.status(workspace, _config())
+
+    assert payload["config"]["key_present"] is True
+    assert SENTINEL_KEY not in json.dumps(payload)
+
+
+def test_health_refuses_a_redirect_without_reaching_the_target(tmp_path: Path) -> None:
+    """P1-4: a 302 must not forward the Bearer key to its Location target."""
+
+    class _Canary(_HealthHandler):
+        redirect_to = None
+        authorization: list[str | None] = []
+        ollama_models: list[str] = []
+        openai_models: list[str] = ["bge-m3"]
+        status = 200
+
+    class _Redirect(_HealthHandler):
+        redirect_to = ""
+        authorization: list[str | None] = []
+        status = 200
+
+    with _serve(_Canary) as canary_port:
+        _Redirect.redirect_to = f"http://127.0.0.1:{canary_port}/capture"
+        with _serve(_Redirect) as redirect_port:
+            payload = admin.health(
+                tmp_path,
+                _config(
+                    backend="openai",
+                    url=f"http://127.0.0.1:{redirect_port}",
+                    model="bge-m3",
+                    api_key=SENTINEL_KEY,
+                ),
+            )
+
+    assert payload["ok"] is False
+    assert payload["code"] == "HEALTH_REDIRECT_REFUSED"
+    assert _Canary.authorization == [], "the redirect target must never be called"
+    assert _Redirect.authorization == [f"Bearer {SENTINEL_KEY}"]
+    assert SENTINEL_KEY not in json.dumps(payload)
+
+
+class _EndlessResponse:
+    """A response whose body never ends, to exercise the health body cap."""
+
+    def __enter__(self) -> _EndlessResponse:
+        return self
+
+    def __exit__(self, *_: object) -> bool:
+        return False
+
+    def read(self, size: int = -1) -> bytes:
+        return b"x" * (size if size > 0 else 1)
+
+
+def test_health_refuses_an_oversized_body(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2-7: a health payload larger than 1 MiB is refused, not buffered forever."""
+    monkeypatch.setattr(
+        admin, "open_without_redirects", lambda request, timeout: _EndlessResponse()
+    )
+
+    payload = admin.health(
+        tmp_path,
+        _config(backend="openai", url="http://127.0.0.1:9", model="bge-m3"),
+    )
+
+    assert payload["ok"] is False
+    assert payload["code"] == "HEALTH_RESPONSE_TOO_LARGE"
+    assert payload["message"]
+
+
+class _UnreadResponse:
+    """A response that must never be read before the total deadline is checked."""
+
+    def __enter__(self) -> _UnreadResponse:
+        return self
+
+    def __exit__(self, *_: object) -> bool:
+        return False
+
+    def read(self, size: int = -1) -> bytes:
+        raise AssertionError("the deadline must be checked before a blocking read")
+
+
+def test_health_enforces_a_total_deadline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P2-7: the socket timeout is per read, so a monotonic total deadline is needed."""
+    monkeypatch.setattr(admin, "open_without_redirects", lambda request, timeout: _UnreadResponse())
+    times = iter([100.0, 106.0])
+    monkeypatch.setattr(admin, "_monotonic", lambda: next(times))
+
+    payload = admin.health(
+        tmp_path,
+        _config(backend="openai", url="http://127.0.0.1:9", model="bge-m3"),
+    )
+
+    assert payload["ok"] is False
+    assert payload["code"] == "HEALTH_TIMEOUT"
+    assert payload["message"]
+
+
+def test_health_maps_a_socket_timeout_to_health_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P2-7: a per-socket timeout is reported as the structured timeout code."""
+
+    def timed_out(request: object, timeout: float) -> object:
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(admin, "open_without_redirects", timed_out)
+
+    payload = admin.health(
+        tmp_path,
+        _config(backend="openai", url="http://127.0.0.1:9"),
+    )
+
+    assert payload["ok"] is False
+    assert payload["code"] == "HEALTH_TIMEOUT"

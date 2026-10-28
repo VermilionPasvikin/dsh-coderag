@@ -8,6 +8,7 @@ no request can leave this machine and no API key is needed.
 from __future__ import annotations
 
 import json
+import struct
 import subprocess
 import sys
 import threading
@@ -16,15 +17,20 @@ import urllib.request
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
 from dsh_coderag import embed
 from dsh_coderag.config import SemanticConfig, load_semantic_config
 from dsh_coderag.embed import (
+    CHECKPOINT_FILENAME,
+    CHECKPOINT_MAGIC,
     RETRY_LIMIT,
+    DiskEmbeddingCache,
     EmbeddingCache,
     SemanticError,
+    count_checkpoint_records,
     embed_texts,
     endpoint_for,
     validate_local_backend,
@@ -295,7 +301,7 @@ def test_the_openai_backend_posts_to_embeddings_with_a_bearer_header(
         captured["body"] = json.loads(request.data or b"{}")
         return _CapturingResponse({"embeddings": [[1.0, 0.0]]})
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(embed, "open_without_redirects", fake_urlopen)
     config = _config(
         backend="openai",
         url="https://api.example.invalid/v1",
@@ -348,7 +354,7 @@ def test_a_rejected_credential_is_not_retried_and_is_not_echoed(
         attempts["count"] += 1
         raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(embed, "open_without_redirects", fake_urlopen)
     config = _config(
         backend="openai",
         url="https://api.example.invalid/v1",
@@ -390,7 +396,7 @@ def test_an_openai_shaped_response_is_accepted(
     ) -> _CapturingResponse:
         return _CapturingResponse(payload)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(embed, "open_without_redirects", fake_urlopen)
     config = _config(
         backend="openai",
         url="https://api.example.invalid/v1",
@@ -409,7 +415,7 @@ def test_ollama_shaped_response_still_works(monkeypatch: pytest.MonkeyPatch) -> 
     ) -> _CapturingResponse:
         return _CapturingResponse({"embeddings": [[1.0, 1.0]]})
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(embed, "open_without_redirects", fake_urlopen)
     config = _config(url="http://127.0.0.1:11434", model="bge-m3")
 
     assert embed_texts(config, ["hello"]) == [[1.0, 1.0]]
@@ -425,7 +431,7 @@ def test_a_response_with_no_vectors_is_reported_as_embed_failed(
     ) -> _CapturingResponse:
         return _CapturingResponse({"result": []})
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(embed, "open_without_redirects", fake_urlopen)
     config = _config(
         backend="openai",
         url="https://api.example.invalid/v1",
@@ -493,3 +499,138 @@ def test_shortening_is_reported_in_a_log_event(
     assert summary["chunks"] == 1
     assert summary["of"] == 1
     assert summary["context_tokens"] == 1
+
+
+def test_count_checkpoint_records_counts_without_unpacking_vectors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T8-02: counting is not loading; only the 36-byte headers may be unpacked."""
+    cache = DiskEmbeddingCache(tmp_path, "m")
+    cache.put("m", "alpha", [1.0, 2.0, 3.0])
+    cache.put("m", "beta", [4.0, 5.0, 6.0])
+    cache.close()
+    path = tmp_path / CHECKPOINT_FILENAME
+
+    formats: list[str] = []
+    real_unpack = struct.unpack
+
+    def spy(fmt: str, data: bytes) -> tuple[object, ...]:
+        formats.append(fmt)
+        return real_unpack(fmt, data)
+
+    monkeypatch.setattr(struct, "unpack", spy)
+
+    assert count_checkpoint_records(path) == 2
+    assert formats == ["<I32s", "<I32s"], "vector payloads must never be unpacked"
+
+
+def test_count_checkpoint_records_never_truncates_a_torn_tail(tmp_path: Path) -> None:
+    """T8-02: status must not repair the file a running build is still appending to."""
+    cache = DiskEmbeddingCache(tmp_path, "m")
+    cache.put("m", "alpha", [1.0, 2.0, 3.0])
+    cache.close()
+    path = tmp_path / CHECKPOINT_FILENAME
+    torn = path.read_bytes() + b"\x03\x00\x00\x00torn"
+    path.write_bytes(torn)
+
+    assert count_checkpoint_records(path) == 1
+    assert path.read_bytes() == torn
+    assert path.stat().st_size == len(torn)
+
+
+def test_count_checkpoint_records_refuses_a_huge_dimension_without_allocating(
+    tmp_path: Path,
+) -> None:
+    """A forged header must not make the counter allocate or read a giant payload."""
+    path = tmp_path / CHECKPOINT_FILENAME
+    path.write_bytes(CHECKPOINT_MAGIC + struct.pack("<I32s", 1_000_000_000, b"\0" * 32))
+    before = path.read_bytes()
+
+    assert count_checkpoint_records(path) == 0
+    assert path.read_bytes() == before
+
+
+def test_count_checkpoint_records_handles_absent_empty_and_foreign_files(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / CHECKPOINT_FILENAME
+    assert count_checkpoint_records(path) == 0
+
+    path.write_bytes(b"")
+    assert count_checkpoint_records(path) == 0
+
+    path.write_bytes(b"not a coderag checkpoint")
+    assert count_checkpoint_records(path) == 0
+
+
+class _RedirectHandler(BaseHTTPRequestHandler):
+    """Answer every embeddings POST with a redirect to a canary host."""
+
+    target = ""
+    requests: list[tuple[str, str | None]] = []
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        type(self).requests.append((self.path, self.headers.get("Authorization")))
+        self.send_response(302)
+        self.send_header("Location", type(self).target)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, fmt: str, *args: object) -> None:
+        """Silence the stub's access log."""
+        return
+
+
+class _CanaryHandler(BaseHTTPRequestHandler):
+    """Records every request that reaches the redirect target."""
+
+    requests: list[tuple[str, str | None]] = []
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        type(self).requests.append((self.path, self.headers.get("Authorization")))
+        body = json.dumps({"embeddings": [[1.0, 0.0]]}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt: str, *args: object) -> None:
+        """Silence the stub's access log."""
+        return
+
+
+@contextmanager
+def _serve(handler: type[BaseHTTPRequestHandler]) -> Iterator[int]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_the_transport_refuses_a_redirect_without_forwarding_the_key() -> None:
+    """T8-02: following a 3xx would forward the Bearer key past ALLOW_REMOTE."""
+    _CanaryHandler.requests = []
+    _RedirectHandler.requests = []
+    with _serve(_CanaryHandler) as canary_port:
+        _RedirectHandler.target = f"http://127.0.0.1:{canary_port}/capture"
+        with _serve(_RedirectHandler) as redirect_port:
+            config = _config(
+                backend="openai",
+                url=f"http://127.0.0.1:{redirect_port}",
+                model="bge-m3",
+                api_key="sk-redirect-secret",
+            )
+            with pytest.raises(SemanticError) as caught:
+                embed_texts(config, ["hello"])
+
+    assert caught.value.code.value == "SEMANTIC_REDIRECT_REFUSED"
+    assert _CanaryHandler.requests == []
+    assert _RedirectHandler.requests == [("/embeddings", "Bearer sk-redirect-secret")]
+    assert "sk-redirect-secret" not in str(caught.value)
+    assert "sk-redirect-secret" not in (caught.value.hint or "")

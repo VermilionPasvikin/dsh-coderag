@@ -7,9 +7,10 @@ fallback are T3-10, and the cloud backend is T5-20.
 
 When CODERAG_SEMANTIC is not `on` nothing here runs, so importing this module
 must never touch the network, never require numpy and never block startup
-(RL-10). Failures are raised as SemanticError carrying one of the frozen
-ErrorCode values, so the caller can report a structured status and keep serving
-BM25 instead of turning it into an MCP isError (RL-06, RL-09).
+(RL-10). Failures are raised as SemanticError carrying a stable code -- one of
+the frozen ErrorCode values, or the redirect refusal added for T8-02 -- so the
+caller can report a structured status and keep serving BM25 instead of turning
+it into an MCP isError (RL-06, RL-09).
 """
 
 from __future__ import annotations
@@ -23,9 +24,10 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import IO
+from typing import IO, cast
 
 from dsh_coderag.config import ENV_SEMANTIC, ENV_SEMANTIC_API_KEY, SemanticConfig
 from dsh_coderag.log import log_event
@@ -68,12 +70,34 @@ _FLOAT_BYTES = 4
 
 _SUPPORTED_BACKENDS = frozenset(_ENDPOINT_PATHS)
 
+SEMANTIC_REDIRECT_REFUSED = "SEMANTIC_REDIRECT_REFUSED"
+"""Stable code for a refused 3xx response (T8-02).
+
+`ErrorCode` is frozen by ADR-16 6 and ADR-17 6, and those docs list exactly the
+ten SEMANTIC_* codes. This security refusal therefore travels as a `str` Enum
+code on the same `SemanticError` seam: every existing consumer reads `.value`,
+so it is reported as `SEMANTIC_REDIRECT_REFUSED` everywhere without extending
+the frozen contract.
+"""
+
+
+class _RedirectRefusedCode(str, Enum):
+    """The redirect code as an Enum so `SemanticError.code.value` keeps working."""
+
+    SEMANTIC_REDIRECT_REFUSED = SEMANTIC_REDIRECT_REFUSED
+
+
+_REDIRECT_REFUSED_CODE = cast(ErrorCode, _RedirectRefusedCode.SEMANTIC_REDIRECT_REFUSED)
+
 
 class SemanticError(Exception):
-    """An optional-backend failure carrying one frozen ErrorCode.
+    """An optional-backend failure carrying one stable code.
 
-    Callers turn this into a structured status and keep serving BM25; it must
-    never reach the MCP layer as an isError (RL-09).
+    Mostly a frozen `ErrorCode`; a redirect refusal carries
+    `SEMANTIC_REDIRECT_REFUSED` because the ADR contract did not reserve a
+    member for it (T8-02). Callers read `.value`, so both forms render without
+    a special case. They turn this into a structured status and keep serving
+    BM25; it must never reach the MCP layer as an isError (RL-09).
     """
 
     def __init__(self, code: ErrorCode, message: str, hint: str | None = None) -> None:
@@ -215,6 +239,49 @@ class DiskEmbeddingCache(EmbeddingCache):
         return self._handle
 
 
+def count_checkpoint_records(path: Path) -> int:
+    """Count complete records in a checkpoint file without loading any vector.
+
+    This is the read-only counterpart of `DiskEmbeddingCache.load`: it validates
+    the magic, every 36-byte record header, the dimension and the payload length
+    against the file size, but it materializes no vector, truncates no torn tail
+    and writes nothing. That makes it safe to run while a vector build is still
+    appending to the same file, which is exactly what the settings page's status
+    poll does.
+
+    A missing, empty or foreign file counts as zero. Only records whose header
+    and full float payload are present are counted, so a record torn by a kill
+    is deliberately not reported as complete.
+
+    Raises:
+        OSError: If the file exists but cannot be opened or read. The caller
+            decides whether that is a warning or an error.
+    """
+    try:
+        with path.open("rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
+            if handle.read(len(CHECKPOINT_MAGIC)) != CHECKPOINT_MAGIC:
+                return 0
+            offset = len(CHECKPOINT_MAGIC)
+            count = 0
+            while offset + _RECORD_HEADER <= size:
+                handle.seek(offset)
+                header = handle.read(_RECORD_HEADER)
+                if len(header) != _RECORD_HEADER:
+                    break
+                dim, _digest = struct.unpack("<I32s", header)
+                if dim <= 0:
+                    break
+                end = offset + _RECORD_HEADER + dim * _FLOAT_BYTES
+                if end > size:
+                    break
+                count += 1
+                offset = end
+            return count
+    except FileNotFoundError:
+        return 0
+
+
 def _text_key(text: str) -> str:
     """Return the cache key of one text (a digest, so text is not the key)."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -294,6 +361,51 @@ def _auth_rejected(url: str) -> SemanticError:
     )
 
 
+def _redirect_refused(url: str, status: int) -> SemanticError:
+    """Build the structured refusal for an HTTP 3xx (T8-02).
+
+    The message names the configured URL and the status only: a Location header
+    is untrusted input and the credential never appears in error text (S-05).
+    """
+    return SemanticError(
+        _REDIRECT_REFUSED_CODE,
+        f"the embedding backend at {url} answered HTTP {status}; redirects are "
+        "refused so the credential cannot be forwarded to another host",
+        "point CODERAG_SEMANTIC_URL at the final endpoint; redirects are never followed",
+    )
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect, so no request (and no header) is resent."""
+
+    def redirect_request(
+        self,
+        req: object,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> None:
+        """Return None: leaving the 3xx unhandled turns it into an HTTPError."""
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
+def open_without_redirects(request: urllib.request.Request, timeout: float) -> IO[bytes]:
+    """Open one HTTP request without following redirects (T8-02).
+
+    Following a 302 would resend the request to whatever host the Location
+    header names, potentially forwarding the `Authorization: Bearer` key past
+    the CODERAG_SEMANTIC_ALLOW_REMOTE gate. The shared opener is used by both the
+    embedding transport and the admin health probe; a 3xx surfaces as
+    `urllib.error.HTTPError`, which the callers map to a structured refusal.
+    """
+    return cast(IO[bytes], _NO_REDIRECT_OPENER.open(request, timeout=timeout))
+
+
 def _http_transport(
     url: str,
     model: str,
@@ -310,9 +422,10 @@ def _http_transport(
     `Authorization: Bearer` header — the one place it is used, never logged.
 
     Raises:
-        SemanticError: SEMANTIC_AUTH_REJECTED on HTTP 401/403. It is raised as a
-            SemanticError rather than an HTTPError so the retry loop lets it
-            through instead of retrying a credential that will keep failing.
+        SemanticError: SEMANTIC_AUTH_REJECTED on HTTP 401/403, and
+            SEMANTIC_REDIRECT_REFUSED on any 3xx. Both are raised as a
+            SemanticError rather than an HTTPError so the retry loop lets them
+            through instead of retrying something that will keep failing.
         ValueError: If the response is not JSON, is not an object, or does not
             carry exactly one vector per input.
     """
@@ -322,12 +435,19 @@ def _http_transport(
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(url, data=body, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with open_without_redirects(request, timeout) as response:
             payload = json.loads(response.read())
     except urllib.error.HTTPError as error:
-        if error.code in (401, 403):
-            raise _auth_rejected(url) from error
-        raise
+        # An HTTPError owns the response socket; close it before the structured
+        # error replaces the exception, or the connection leaks a ResourceWarning.
+        try:
+            if error.code in (401, 403):
+                raise _auth_rejected(url) from error
+            if 300 <= error.code < 400:
+                raise _redirect_refused(url, error.code) from error
+            raise
+        finally:
+            error.close()
     return _vectors_from(payload, len(texts))
 
 

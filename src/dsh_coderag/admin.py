@@ -23,13 +23,14 @@ import json
 import os
 import sqlite3
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO
+from typing import IO, Any, TextIO
 
 from dsh_coderag import vectors
 from dsh_coderag.config import (
@@ -49,10 +50,13 @@ from dsh_coderag.config import (
     load_semantic_config,
 )
 from dsh_coderag.embed import (
+    CHECKPOINT_FILENAME,
     DiskEmbeddingCache,
     SemanticError,
     Transport,
     _http_transport,
+    count_checkpoint_records,
+    open_without_redirects,
 )
 from dsh_coderag.log import log_event
 from dsh_coderag.types import ErrorCode
@@ -61,18 +65,33 @@ from dsh_coderag.vectors import EMBEDDINGS_FILENAME, MANIFEST_FILENAME
 EXIT_OK = 0
 EXIT_FAILED = 1
 HEALTH_TIMEOUT_S = 5.0
-"""Hard deadline for one health probe; the settings page must never hang on it."""
+"""Total deadline for one health probe; the settings page must never hang on it."""
+
+HEALTH_MAX_BODY_BYTES = 1024 * 1024
+"""Upper bound on a health response body; `/models` never needs more than this."""
+
+HEALTH_READ_CHUNK_BYTES = 64 * 1024
+"""Bytes read per call while enforcing the health body cap."""
 
 INDEX_SUBDIR = Path(".coderag")
 INDEX_FILENAME = "index.sqlite3"
 HEALTH_PATHS: dict[str, str] = {"ollama": "/api/tags", "openai": "/models"}
 """Endpoint appended to the configured base URL for each health check."""
 
+ENV_SEMANTIC_KEY_PRESENT = "CODERAG_SEMANTIC_KEY_PRESENT"
+"""Marker the Host sets for `status` so `key_present` needs no credential (T8-02)."""
+
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _REMOTE_NOT_ALLOWED = "REMOTE_NOT_ALLOWED"
 _HEALTH_REQUEST_FAILED = "HEALTH_REQUEST_FAILED"
 _HEALTH_INVALID_RESPONSE = "HEALTH_INVALID_RESPONSE"
+_HEALTH_REDIRECT_REFUSED = "HEALTH_REDIRECT_REFUSED"
+_HEALTH_TIMEOUT = "HEALTH_TIMEOUT"
+_HEALTH_RESPONSE_TOO_LARGE = "HEALTH_RESPONSE_TOO_LARGE"
 _VECTORIZE_FAILED = "VECTORIZE_FAILED"
+
+_monotonic: Callable[[], float] = time.monotonic
+"""Monotonic clock seam; tests replace it to prove the total health deadline."""
 
 
 class _AdminFailure(Exception):
@@ -273,10 +292,22 @@ def _reusable_pairs(manifest: _ManifestFacts, config: SemanticConfig) -> frozens
     return manifest.pairs
 
 
+def _checkpoint_path(root: Path, config: SemanticConfig) -> Path:
+    """Return one model's checkpoint file without opening or loading it."""
+    directory = vectors.vectors_dir(root) / vectors.CHECKPOINT_SUBDIR
+    return directory / vectors.checkpoint_slug(config.model) / CHECKPOINT_FILENAME
+
+
 def _checkpoint_vectors(root: Path, config: SemanticConfig) -> int:
-    """Count the vectors a resumed build would recover from the checkpoint."""
+    """Count checkpoint records read-only, never materializing their vectors.
+
+    `vectors.checkpoint_cache` is deliberately not used here: its `load` builds
+    the full in-memory vector dict and truncates a torn tail. A status poll can
+    run while `vectorize` is appending, so counting must neither allocate the
+    vectors nor write to the file being written (P1-3).
+    """
     try:
-        cache = vectors.checkpoint_cache(root, config)
+        return count_checkpoint_records(_checkpoint_path(root, config))
     except (OSError, SemanticError) as exc:
         log_event(
             "admin_checkpoint_unreadable",
@@ -284,10 +315,18 @@ def _checkpoint_vectors(root: Path, config: SemanticConfig) -> int:
             error=type(exc).__name__,
         )
         return 0
-    try:
-        return cache.records
-    finally:
-        cache.close()
+
+
+def _key_present(config: SemanticConfig) -> bool:
+    """Report credential presence without resolving or printing the credential.
+
+    The settings Host no longer passes the key to `status`; it passes the
+    `CODERAG_SEMANTIC_KEY_PRESENT=1` marker instead, so a configured key is still
+    visible in the panel while the secret stays out of the child process (S-05).
+    """
+    if config.api_key is not None:
+        return True
+    return _read_env(ENV_SEMANTIC_KEY_PRESENT) == "1"
 
 
 def _config_facts(config: SemanticConfig) -> dict[str, Any]:
@@ -298,7 +337,7 @@ def _config_facts(config: SemanticConfig) -> dict[str, Any]:
         "url": config.url,
         "model": config.model,
         "allow_remote": config.allow_remote,
-        "key_present": config.api_key is not None,
+        "key_present": _key_present(config),
     }
 
 
@@ -405,28 +444,83 @@ def _health_failure(config: SemanticConfig, code: str, message: str) -> dict[str
     return {**_health_base(config), "detail": safe, "code": code, "message": safe}
 
 
+def _read_bounded(response: IO[bytes], deadline: float) -> bytes:
+    """Read a health body within the size cap and the monotonic-clock deadline.
+
+    `urlopen`'s timeout applies to each blocking socket operation, so a
+    slow-dripping server could otherwise keep a probe alive indefinitely. The
+    deadline is re-checked around every chunk, and the accumulated body is
+    capped at HEALTH_MAX_BODY_BYTES.
+
+    Raises:
+        _AdminFailure: HEALTH_RESPONSE_TOO_LARGE past the cap, or HEALTH_TIMEOUT
+            once the deadline has passed; both are returned as structured JSON
+            codes by the health command instead of an exception traceback.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        if _monotonic() >= deadline:
+            raise _AdminFailure(
+                _HEALTH_TIMEOUT,
+                f"the health probe exceeded its {HEALTH_TIMEOUT_S:g}s deadline",
+            )
+        chunk = response.read(HEALTH_READ_CHUNK_BYTES)
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > HEALTH_MAX_BODY_BYTES:
+            raise _AdminFailure(
+                _HEALTH_RESPONSE_TOO_LARGE,
+                f"the health response exceeded {HEALTH_MAX_BODY_BYTES} bytes; refusing to read it",
+            )
+        chunks.append(chunk)
+
+
 def _fetch_models(config: SemanticConfig, path: str) -> list[str]:
     """GET one backend's model list, mapping every transport failure to a code.
 
     Only `openai` receives the credential, and only in the Authorization header;
-    a rejected credential is never retried and is never echoed back (S-05).
+    a rejected credential is never retried and is never echoed back (S-05). The
+    request is opened by `embed.open_without_redirects`, so a 3xx cannot forward
+    the header to the host named by its Location (T8-02).
     """
     url = config.url.rstrip("/") + path
     headers = {"Accept": "application/json"}
     if config.backend == "openai" and config.api_key is not None:
         headers["Authorization"] = f"Bearer {config.api_key}"
     request = urllib.request.Request(url, headers=headers)
+    deadline = _monotonic() + HEALTH_TIMEOUT_S
     try:
-        with urllib.request.urlopen(request, timeout=HEALTH_TIMEOUT_S) as response:
-            raw = response.read()
+        with open_without_redirects(request, HEALTH_TIMEOUT_S) as response:
+            raw = _read_bounded(response, deadline)
     except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            raise _AdminFailure(
-                ErrorCode.SEMANTIC_AUTH_REJECTED.value,
-                f"{url} rejected the credential (HTTP {exc.code}); the key is not retried",
-            ) from exc
-        raise _AdminFailure(_HEALTH_REQUEST_FAILED, f"{url} answered HTTP {exc.code}") from exc
-    except (urllib.error.URLError, OSError) as exc:
+        # The HTTPError owns the response socket; close it before the structured
+        # code replaces the exception, or the probe leaks a ResourceWarning.
+        try:
+            if exc.code in (401, 403):
+                raise _AdminFailure(
+                    ErrorCode.SEMANTIC_AUTH_REJECTED.value,
+                    f"{url} rejected the credential (HTTP {exc.code}); the key is not retried",
+                ) from exc
+            if 300 <= exc.code < 400:
+                raise _AdminFailure(
+                    _HEALTH_REDIRECT_REFUSED,
+                    f"{url} answered HTTP {exc.code}; redirects are refused so the "
+                    "credential cannot be forwarded to another host",
+                ) from exc
+            raise _AdminFailure(_HEALTH_REQUEST_FAILED, f"{url} answered HTTP {exc.code}") from exc
+        finally:
+            exc.close()
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            raise _AdminFailure(_HEALTH_TIMEOUT, f"the health probe to {url} timed out") from exc
+        raise _AdminFailure(
+            _HEALTH_REQUEST_FAILED, f"could not reach {url}: {type(exc).__name__}"
+        ) from exc
+    except TimeoutError as exc:
+        raise _AdminFailure(_HEALTH_TIMEOUT, f"the health probe to {url} timed out") from exc
+    except OSError as exc:
         raise _AdminFailure(
             _HEALTH_REQUEST_FAILED, f"could not reach {url}: {type(exc).__name__}"
         ) from exc
@@ -471,9 +565,11 @@ def health(root: Path, config: SemanticConfig | None = None) -> dict[str, Any]:
 
     Ollama is checked at `/api/tags` and the OpenAI-compatible backend at
     `/models` with a Bearer key when one is configured. The probe is allowed
-    only at a loopback URL or with `CODERAG_SEMANTIC_ALLOW_REMOTE=1` (S-01) and
-    times out after five seconds. This is a diagnostic probe, so it does not
-    require `CODERAG_SEMANTIC` to be on.
+    only at a loopback URL or with `CODERAG_SEMANTIC_ALLOW_REMOTE=1` (S-01), has
+    a five-second total deadline and a one-megabyte body cap, and refuses every
+    redirect so the credential cannot be forwarded to another host (T8-02).
+    This is a diagnostic probe, so it does not require `CODERAG_SEMANTIC` to be
+    on.
 
     `ok` reports reachability; `model_present` separately reports whether the
     configured model is listed. Failures carry `code` and `message` and never a
