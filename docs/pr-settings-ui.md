@@ -117,12 +117,15 @@ credentials/unset(fake)     → ok；describe configured=false；state.key_prese
 - 向量化停止/恢复：1526 pending → embed 16 → stop（checkpoint 16）→ resume → embed 32 →
   stop（checkpoint 32）；未跑完，root 与 key 均已恢复。
 - 竞态修复：停止后立刻启动第二个 job 时，旧 child 迟到的 close/error 不再改写新 job
-  （每次运行独立 handle + `active === handle` 闸门）；回归测试覆盖。
+  （每次运行独立 handle + `active === handle` 闸门）；回归测试覆盖。修复后复测：
+  `S16-vector-running-fixed.png`、`S14b-vector-stopped-fixed.png`、
+  `S17-vector-done-fixed.png`（276/276 完成、无 error）。
 - UI（Playwright + 276 chunk 的 `vector-demo`）：key 保存后「已配置（不可查看），来源 file」、
   输入框清空、页面无 key；删除后未配置且 `state.key_present=false`；本地 ollama 连通 bge-m3；
   云端缺 URL 返回可展示错误。截图：`S10-coderag-key-configured.png`、
   `S11-coderag-health-local.png`、`S12-vector-ready.png`、`S13-vector-running.png`、
-  `S14-vector-stopped.png`、`S15-vector-done.png`。
+  `S14-vector-stopped.png`、`S15-vector-done.png`、`S16-coderag-start-local-error.png`、
+  `S18-vector-incremental-ready.png`、`S19-vector-incremental-done.png`。
 
 
 ## 审阅者手工验收

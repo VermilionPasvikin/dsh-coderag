@@ -613,5 +613,10 @@ stop  → checkpoint_vectors 32
   `S15-vector-done.png`（均位于 `deliverables/screenshots/`；S15 抓到了修复前的
   「停止后立刻恢复 → 旧 close 把新 job 标 error」现象，用于定位竞态）。
 - 竞态修复：每次 vectorize 独立 handle + `active === handle` 闸门；回归测试
-  `late exits from a stopped job cannot clobber the next job`。修复后需重启 Host
-  再复测一次「stop → 立刻 start」路径（由 Lead 的下一轮 UI 验证确认）。
+  `late exits from a stopped job cannot clobber the next job`。
+- 修复后复测（Lead 重启 Host 后）：`S16-vector-running-fixed.png`、
+  `S14b-vector-stopped-fixed.png`、`S17-vector-done-fixed.png`（276/276、向量库存在、
+  模型 `bge-m3` 1024 维、检查点 276、状态「向量化完成」、无 error）；
+  `S18-vector-incremental-ready.png` / `S19-vector-incremental-done.png` 为
+  pending=0 后的增量入口；`S16-coderag-start-local-error.png` 为 start-local 失败弹窗
+  （显示可关闭的 error.message）。
