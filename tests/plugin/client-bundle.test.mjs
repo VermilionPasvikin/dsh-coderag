@@ -75,7 +75,7 @@ function loadClient() {
   return { loaded, module: loaded.factory(requireStub), requested, source }
 }
 
-/** Capture both slot contributions, with the shared configForms service stubbed. */
+/** Capture all three slot contributions, with the shared configForms service stubbed. */
 function contribute(module) {
   const registrations = new Map()
   const observable = {
@@ -92,7 +92,10 @@ function contribute(module) {
     },
     slots: {
       inject: (name, callback) => {
-        assert.ok(name === 'plugins.row.config' || name === 'plugins.bundle.config', name)
+        assert.ok(
+          name === 'settings.section' || name === 'plugins.row.config' || name === 'plugins.bundle.config',
+          name,
+        )
         callback()
       },
       register: (options, component) => {
@@ -125,10 +128,16 @@ test('only React is requested from the shell module table', () => {
   assert.deepEqual([...new Set(requested)].sort(), ['react', 'react/jsx-runtime'])
 })
 
-test('both the row page and the bundle page are registered', () => {
+test('the settings section, row page and bundle page are all registered', () => {
   const { module } = loadClient()
   const registrations = contribute(module)
-  assert.deepEqual([...registrations.keys()].sort(), ['plugins.bundle.config', 'plugins.row.config'])
+  assert.deepEqual([...registrations.keys()].sort(), [
+    'plugins.bundle.config', 'plugins.row.config', 'settings.section',
+  ])
+  assert.deepEqual(registrations.get('settings.section').options, {
+    name: 'settings.section', id: 'coderag', order: 30, label: registrations.get('settings.section').options.label,
+  })
+  assert.equal(registrations.get('settings.section').options.label(), 'CodeRAG')
   assert.deepEqual(registrations.get('plugins.row.config').options, {
     name: 'plugins.row.config', key: 'dsh-coderag#coderag',
   })
@@ -145,6 +154,20 @@ test('the summary view describes the row without a form', () => {
     assert.match(text, /CodeRAG/)
     assert.match(text, /同步到 MCP 行/)
   }
+})
+
+test('the Settings section renders the form from configForms', () => {
+  const { module } = loadClient()
+  const registrations = contribute(module)
+  const { markup, text } = render(registrations, 'settings.section', { close: () => {} })
+  for (const label of FIELD_LABELS) {
+    assert.match(text, new RegExp(label), `missing settings-page field label: ${label}`)
+  }
+  assert.match(text, /CodeRAG 参数设置/)
+  assert.match(text, /设置 → CodeRAG/)
+  assert.match(markup, /value="F:\\repo"/)
+  assert.match(markup, /value="5000"/)
+  assert.match(text, /保存/)
 })
 
 test('the bundle page renders the form from configForms without an owner form', () => {
