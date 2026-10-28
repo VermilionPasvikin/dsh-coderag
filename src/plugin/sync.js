@@ -14,6 +14,7 @@
  */
 
 import { MCP_ROW_ID, envPlan, mergeOwnedEnv } from './shared/settings.js'
+import { SEMANTIC_KEY_REF } from './shared/admin-protocol.js'
 
 /**
  * Find the MCP client row in the running Loader tree.
@@ -79,11 +80,18 @@ function screenEnv(env) {
  *
  * @param {object} entry - the MCP row's Loader entry.
  * @param {Record<string, unknown>} values - normalized settings values.
+ * @param {{ apiKey?: string }} [options] - resolved cloud key; omitted keeps the row's current value.
  * @returns {Promise<'unchanged' | 'synced' | 'forced'>} what happened.
  */
-export async function syncMCPRow(entry, values) {
+export async function syncMCPRow(entry, values, options = {}) {
   const plan = envPlan(values)
+  const apiKey = options.apiKey
+  // The key is not a schema field: it is resolved from the credentials service
+  // on every sync and only ever travels into the child environment. An absent
+  // lookup (provider missing/unset) leaves whatever the row already had.
+  if (typeof apiKey === 'string' && apiKey !== '') plan.set[SEMANTIC_KEY_REF] = apiKey
   const nextEnv = mergeOwnedEnv(rawEnv(entry.options?.config), values)
+  if (typeof apiKey === 'string' && apiKey !== '') nextEnv[SEMANTIC_KEY_REF] = apiKey
   const rawChanged = ownedEnvMismatch(rawEnv(entry.options?.config), plan)
   const liveEnv = () => (entry.fiber !== undefined ? entry.fiber.config?.env : undefined)
   const liveChanged = entry.fiber !== undefined && entry.fiber.config !== undefined
