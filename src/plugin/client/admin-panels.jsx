@@ -212,9 +212,13 @@ export function CredentialPanel({ remote }) {
         return
       }
       setDraft('')
-      setNotice('已配置，不可查看。Host 已把新 key 同步到 mcp-coderag 行。')
+      setNotice('已配置，不可查看。')
       await load()
+      // Clearing the spinner before the Host refresh keeps the card responsive
+      // even when the MCP row restart takes a moment; the refresh still runs.
+      setBusy(false)
       await refreshHostEnv()
+      setNotice('已配置，不可查看。Host 已把新 key 同步到 mcp-coderag 行。')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure))
     } finally {
@@ -235,6 +239,7 @@ export function CredentialPanel({ remote }) {
       setConfirming(false)
       setNotice('已删除云端 API Key。')
       await load()
+      setBusy(false)
       await refreshHostEnv()
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure))

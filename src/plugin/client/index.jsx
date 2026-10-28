@@ -212,8 +212,15 @@ function SettingsPage({ form, remote }) {
     if (validation.length > 0) return
     setSaving(true)
     setNotice(null)
+    let timer
     try {
-      const acceptedByHost = await form.mutate(buildSetOps(draft), state?.revision)
+      // A wedged settings request must not leave the button spinning forever.
+      const acceptedByHost = await Promise.race([
+        form.mutate(buildSetOps(draft), state?.revision),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('宿主 15 秒未响应')), 15000)
+        }),
+      ])
       if (acceptedByHost) {
         acceptNextEcho.current = true
         showNotice({ kind: 'saved' })
@@ -223,6 +230,7 @@ function SettingsPage({ form, remote }) {
     } catch (error) {
       showNotice({ kind: 'failed', message: `保存失败：${error instanceof Error ? error.message : String(error)}` })
     } finally {
+      clearTimeout(timer)
       setSaving(false)
     }
   }, [draft, form, showNotice, state?.revision])
