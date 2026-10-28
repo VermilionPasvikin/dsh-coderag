@@ -59,6 +59,39 @@ test('the settings row reads the shell environment as its defaults', () => {
   }
 })
 
+test('numeric defaults clamp bad shell values instead of failing Config mounting', () => {
+  const expression = key => {
+    const match = patch.match(new RegExp(`^\\s+${key}: !!js "(.+)"$`, 'm'))
+    assert.ok(match, `missing default expression for ${key}`)
+    return match[1]
+  }
+  const evaluate = (key, env) => new Function('process', `return (${expression(key)})`)({ env })
+  for (const key of ['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticTimeout', 'semanticBatch', 'semanticMaxChunks']) {
+    const variable = {
+      maxFiles: 'CODERAG_MAX_FILES',
+      maxFileBytes: 'CODERAG_MAX_FILE_BYTES',
+      maxTokens: 'CODERAG_MAX_TOKENS',
+      semanticTimeout: 'CODERAG_SEMANTIC_TIMEOUT',
+      semanticBatch: 'CODERAG_SEMANTIC_BATCH',
+      semanticMaxChunks: 'CODERAG_SEMANTIC_MAX_CHUNKS',
+    }[key]
+    assert.equal(evaluate(key, { [variable]: '-5' }), 0, `${key} must clamp negatives`)
+    assert.equal(evaluate(key, { [variable]: '3.9' }), 3, `${key} must truncate fractions`)
+    assert.equal(evaluate(key, { [variable]: 'many' }), 0, `${key} must fall back for NaN`)
+    assert.equal(evaluate(key, { [variable]: 'Infinity' }), 0, `${key} must reject non-finite values`)
+  }
+})
+
+test('the backend default is restricted to the form vocabulary', () => {
+  const match = patch.match(/^\s+semanticBackend: !!js "(.+)"$/m)
+  assert.ok(match)
+  const evaluate = env => new Function('process', `return (${match[1]})`)({ env })
+  assert.equal(evaluate({ CODERAG_SEMANTIC_BACKEND: 'ollama' }), 'ollama')
+  assert.equal(evaluate({ CODERAG_SEMANTIC_BACKEND: 'openai' }), 'openai')
+  assert.equal(evaluate({ CODERAG_SEMANTIC_BACKEND: 'weird' }), '')
+  assert.equal(evaluate({}), '')
+})
+
 test('owned variables are not duplicated on the MCP row', () => {
   const mcpRow = patch.slice(patch.indexOf('- id: mcp-coderag'))
     // Comments carry the security warning and mention the removed names; only

@@ -494,8 +494,9 @@ $ python -m pytest
 
 ## 9. M5+ 增量：API key、后端健康与向量库运维（T7-02，2026-10-28）
 
-设置页在 13 字段表单下新增三块运维区。数据面由 T7-01 的
-`python -m dsh_coderag.admin` 提供；控制面是 Host 插件，浏览器只经过鉴权路由。
+设置页在 13 字段表单下新增三块运维区。数据面由 T7-01 的 admin CLI
+（`dsh_coderag.admin`，Host 用私有 cwd + `-c` 启动器调用）提供；控制面是 Host 插件，
+浏览器只经过鉴权路由。
 
 ### 9.1 凭据边界
 

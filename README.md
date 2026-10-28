@@ -391,7 +391,8 @@ key 继续写在 patch 的 `env:` 或启动 dsh 的 shell 里（`RL-02`/`S-05`�
 
 3. **向量数据库**
    - 状态卡显示：索引/向量库存在性、模型与维度、总 chunk、已向量化、待向量化、过期 chunk、
-     检查点数量、生成时间；数据来自 `python -m dsh_coderag.admin status --root <已保存的 root>`。
+     检查点数量、生成时间；数据来自 admin CLI（`python -c` 启动器加载 `dsh_coderag.admin`）
+  的 `status --root <已保存的 root>`。
    - 「向量化增量」/「开始向量化」启动 admin `vectorize` 子进程；运行中显示进度条与
      `embedded/total` 数字，可「停止」（SIGTERM，检查点保留，下次从检查点恢复）。
    - 完成后自动刷新状态卡；有未保存的参数改动时提示先保存（任务使用已保存的 root）。
@@ -753,7 +754,7 @@ $env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
 | **运维路由只在 Web profile 注册** | 需要 `webServer` + `connection` 服务，并用 `connection.requestRejection` 鉴权；headless 只有 env/patch 配置，没有运维面板 | 「运维面板」 |
 | **向量化 job 状态只存在于 Host 内存** | DSH 重启会丢失进度视图，但检查点（`.coderag/vectors/`）保留，重跑会从检查点恢复；停止不会删除检查点 | 「运维面板」 |
 | **一键启动只支持本机 `ollama serve`** | 只自动拉起 Ollama；其它本地服务或云端需要用户先启动/配置 | 「运维面板」 |
-| **运维面板依赖 admin CLI** | 需要 `python -m dsh_coderag.admin`（T7-01）在 MCP 同一解释器里可用；缺失/失败时面板显示可关闭的结构化错误 | 「运维面板」 |
+| **运维面板依赖 admin CLI** | 需要 `dsh_coderag.admin`（T7-01）在 MCP 同一解释器里可用；Host 用私有 cwd + `-c` 启动器调用（防 cwd 注入），缺失/失败时面板显示可关闭的结构化错误 | 「运维面板」 |
 | **带环境默认值启动时 MCP 子进程可能启动两次** | 先按启动环境起一次，设置同步后再以同一/新环境重启一次；之后的保存都是即时热重载（实测 1.5–2 秒） | `docs/settings-ui-plan.md` §4.3 |
 
 ## 文档

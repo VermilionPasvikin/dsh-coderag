@@ -169,12 +169,22 @@ test('the resolved cloud key is merged into the MCP env', async () => {
   assert.equal(entry.options.config.env.KEEP, '1')
 })
 
-test('an unavailable credentials lookup keeps the row key the child already has', async () => {
+test('a provider that is unavailable keeps the row key the child already has', async () => {
   const entry = fakeEntry({ env: { CODERAG_SEMANTIC_API_KEY: 'sk-existing' } })
   const outcome = await syncMCPRow(entry, { ...SETTINGS, maxFiles: 0 })
   assert.equal(outcome, 'synced')
   assert.equal(entry.options.config.env.CODERAG_SEMANTIC_API_KEY, 'sk-existing')
   assert.equal(entry.options.config.env.CODERAG_MAX_FILES, undefined)
+})
+
+test('a provider that reports the key unset clears the stale row key', async () => {
+  const entry = fakeEntry({ env: { CODERAG_SEMANTIC_API_KEY: 'sk-deleted', KEEP: '1' } })
+  const outcome = await syncMCPRow(entry, SETTINGS, { clearKey: true })
+  assert.equal(outcome, 'synced')
+  assert.equal(entry.options.config.env.CODERAG_SEMANTIC_API_KEY, undefined)
+  assert.equal(entry.options.config.env.KEEP, '1')
+  // The live fiber must observe the removal too, not just the entry options.
+  assert.equal(entry.fiber.config.env.CODERAG_SEMANTIC_API_KEY, undefined)
 })
 
 test('a rotated key alone restarts the row', async () => {

@@ -56,25 +56,25 @@
       name: dsh-coderag
       config:
         # Settings defaults mirror the shell environment, exactly like the old
-        # `config.env` entries did. Values are validated by the plugin Config
-        # before the row mounts; malformed numbers fall back to 0 (engine
-        # default) instead of failing the whole settings page.
+        # `config.env` entries did. Numeric values are clamped to a finite
+        # non-negative integer so a bad shell value cannot fail Config mounting;
+        # the backend is restricted to the form's two values.
         #
         # CODERAG_ROOT has no fallback on purpose: the shipped bundle must never
         # guess a workspace (T6-26). An empty value makes the engine report
         # WORKSPACE_INVALID with the directory it would have used.
         root: !!js "process.env.CODERAG_ROOT ?? ''"
-        maxFiles: !!js "Number(process.env.CODERAG_MAX_FILES ?? 0) || 0"
-        maxFileBytes: !!js "Number(process.env.CODERAG_MAX_FILE_BYTES ?? 0) || 0"
-        maxTokens: !!js "Number(process.env.CODERAG_MAX_TOKENS ?? 0) || 0"
+        maxFiles: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_MAX_FILES ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
+        maxFileBytes: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_MAX_FILE_BYTES ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
+        maxTokens: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_MAX_TOKENS ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
         extraExtensions: !!js "process.env.CODERAG_EXTRA_EXTENSIONS ?? ''"
         semantic: !!js "(process.env.CODERAG_SEMANTIC ?? '') === 'on'"
-        semanticBackend: !!js "process.env.CODERAG_SEMANTIC_BACKEND ?? ''"
+        semanticBackend: !!js "['ollama', 'openai'].includes(process.env.CODERAG_SEMANTIC_BACKEND ?? '') ? process.env.CODERAG_SEMANTIC_BACKEND : ''"
         semanticUrl: !!js "process.env.CODERAG_SEMANTIC_URL ?? ''"
         semanticModel: !!js "process.env.CODERAG_SEMANTIC_MODEL ?? ''"
-        semanticTimeout: !!js "Number(process.env.CODERAG_SEMANTIC_TIMEOUT ?? 0) || 0"
-        semanticBatch: !!js "Number(process.env.CODERAG_SEMANTIC_BATCH ?? 0) || 0"
-        semanticMaxChunks: !!js "Number(process.env.CODERAG_SEMANTIC_MAX_CHUNKS ?? 0) || 0"
+        semanticTimeout: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_SEMANTIC_TIMEOUT ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
+        semanticBatch: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_SEMANTIC_BATCH ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
+        semanticMaxChunks: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_SEMANTIC_MAX_CHUNKS ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
         semanticAllowRemote: !!js "(process.env.CODERAG_SEMANTIC_ALLOW_REMOTE ?? '') === '1'"
 
     - id: mcp-coderag

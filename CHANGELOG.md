@@ -58,12 +58,22 @@
 - **`cordis.patch.yml`**：新增 `coderag` 设置行（13 个 `!!js` 默认值）；`mcp-coderag` 行只保留
   解释器与 `CODERAG_SEMANTIC_API_KEY`。原先的 12 个管理型 env 改由设置行
   （`!!js` 读同名 shell 变量作默认值）→ Host 同步提供，避免两份真相互相覆盖。
-- **运维面板依赖 `python -m dsh_coderag.admin`**（T7-01）：状态、健康、可恢复向量化都由它提供；
-  缺失或失败时页面显示可关闭的结构化错误，不影响参数表单本身。
+- **运维面板依赖 `dsh_coderag.admin`**（T7-01）：状态、健康、可恢复向量化都由它提供；
+  Host 以私有 0700 cwd + `-c` 启动器调用（去掉 cwd/sys.path[0] 防影子模块）；缺失或失败时
+  页面显示可关闭的结构化错误，不影响参数表单本身。
 - **README**：新增「运维面板」章节（key/后端/向量库、路由与安全边界）与相应已知限制。
 
 ### 修复
 
+- **admin 子进程可被共享临时目录里的影子模块劫持并读到云端 key**：改为在私有 0700 cwd
+  中运行，并使用 `python -c` 启动器（导入前从 `sys.path` 去掉 `''`/cwd）；`status` 不再
+  接收 key，只接收 `CODERAG_SEMANTIC_KEY_PRESENT=1` 标记，`health`/`vectorize` 才注入 key。
+- **并发 `vectorize()` 可在凭据 await 期间双 spawn/双写**：加入同步 `starting` 占位，
+  第二个请求立即拒绝；失败回滚该占位。
+- **删除 key 后 MCP 行仍保留旧值**：凭据 provider 明确返回未配置时同步删除
+  `CODERAG_SEMANTIC_API_KEY`；只有 provider 不可用/故障才保留旧值。
+- **admin 服务无 dispose**：插件卸载时终止 vectorize 子进程并删除私有 cwd；
+  `start-local` 的异步 ENOENT 立即失败、相对 root 转绝对路径、`normalizeHealth` 透传 code。
 - **旧 `vectorize` 子进程迟到的 close/error 会把新 job 标成 error**：每次运行改用独立
   `handle{child,stopRequested,key}`；close/error 只在 `active === handle` 时生效，
   `stop` 与 5 秒 SIGKILL 兜底也只操作自己的 handle；有 handle 存活时拒绝新任务。

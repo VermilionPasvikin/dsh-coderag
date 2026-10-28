@@ -25,7 +25,7 @@ import {
 } from './shared/settings.js'
 import { findMCPEntry, syncMCPRow } from './sync.js'
 import { createAdminService } from './host/admin.js'
-import { resolveApiKey } from './host/credentials.js'
+import { resolveCredential } from './host/credentials.js'
 import { registerAdminRoutes } from './host/routes.js'
 
 /** Loader row id and browser plugin id must stay the package name. */
@@ -80,16 +80,12 @@ function createSyncQueue(ctx, read) {
       const loader = ctx.get('loader')
       const entry = findMCPEntry(loader)
       if (entry === undefined) return 'missing'
-      let apiKey
-      try {
-        apiKey = await resolveApiKey(ctx)
-      } catch (error) {
-        // No credentials provider (or a provider refusal) means "keep the key
-        // the row already has"; it must not fail the whole settings sync.
-        ctx.logger?.warn('coderag: could not resolve the cloud API key; keeping the current env value')
-        ctx.logger?.warn(error)
-      }
-      const outcome = await syncMCPRow(entry, read(), { apiKey })
+      // Three credential states: configured (set), provider answered "unset"
+      // (clear the stale row key), provider unavailable (leave it alone).
+      const credential = await resolveCredential(ctx)
+      const apiKey = credential.available ? credential.value : undefined
+      const clearKey = credential.available && credential.value === undefined
+      const outcome = await syncMCPRow(entry, read(), { apiKey, clearKey })
       if (outcome !== 'unchanged') {
         ctx.logger?.info('coderag: settings synced to the mcp-coderag row (%s)', outcome)
       }
@@ -125,10 +121,12 @@ export function apply(ctx, config) {
   // request passes the same trust fence as the rest of the Web UI.
   const admin = createAdminService({
     readValues: read,
-    resolveApiKey: () => resolveApiKey(ctx),
+    resolveKey: () => resolveCredential(ctx),
     python: () => interpreterOf(ctx),
     logger: ctx.logger,
   })
+  // HMR/unload must not leave a vectorize child (or its private cwd) behind.
+  ctx.effect(() => () => admin.dispose(), 'coderag: dispose admin service')
   registerAdminRoutes(ctx, { admin, syncNow: () => queue.run() })
 
   // A saved settings row arrives as a volatile-only commit: no remount, and the
@@ -155,11 +153,19 @@ export function apply(ctx, config) {
       let disposed = false
       const tick = async () => {
         if (disposed) return
-        const entry = findMCPEntry(ctx.get('loader'))
-        if (entry !== undefined) {
-          if (entry.fiber !== undefined) await entry.fiber.await()
-          const outcome = await queue.run()
-          if (outcome !== 'missing') return
+        try {
+          const entry = findMCPEntry(ctx.get('loader'))
+          if (entry !== undefined) {
+            if (entry.fiber !== undefined) await entry.fiber.await()
+            const outcome = await queue.run()
+            if (outcome !== 'missing') return
+          }
+        } catch (error) {
+          // A row that failed to mount must not turn into an unhandled
+          // rejection; report once and stop retrying.
+          ctx.logger?.warn('coderag: initial settings sync stopped after an error')
+          ctx.logger?.warn(error)
+          return
         }
         attempts += 1
         if (attempts >= INITIAL_SYNC_ATTEMPTS) {

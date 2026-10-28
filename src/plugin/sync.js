@@ -80,18 +80,29 @@ function screenEnv(env) {
  *
  * @param {object} entry - the MCP row's Loader entry.
  * @param {Record<string, unknown>} values - normalized settings values.
- * @param {{ apiKey?: string }} [options] - resolved cloud key; omitted keeps the row's current value.
+ * @param {{ apiKey?: string, clearKey?: boolean }} [options] - resolved cloud key fact:
+ *   `apiKey` sets it, `clearKey` removes a stale value because the credentials
+ *   provider explicitly reported it unset; neither leaves the row unchanged.
  * @returns {Promise<'unchanged' | 'synced' | 'forced'>} what happened.
  */
 export async function syncMCPRow(entry, values, options = {}) {
   const plan = envPlan(values)
   const apiKey = options.apiKey
   // The key is not a schema field: it is resolved from the credentials service
-  // on every sync and only ever travels into the child environment. An absent
-  // lookup (provider missing/unset) leaves whatever the row already had.
-  if (typeof apiKey === 'string' && apiKey !== '') plan.set[SEMANTIC_KEY_REF] = apiKey
+  // on every sync and only ever travels into the child environment. A provider
+  // that is missing/failed is represented by neither option and preserves the
+  // row; `clearKey` is only for a provider that answered "not configured".
+  if (options.clearKey === true && !(typeof apiKey === 'string' && apiKey !== '')) {
+    plan.remove.push(SEMANTIC_KEY_REF)
+  } else if (typeof apiKey === 'string' && apiKey !== '') {
+    plan.set[SEMANTIC_KEY_REF] = apiKey
+  }
   const nextEnv = mergeOwnedEnv(rawEnv(entry.options?.config), values)
-  if (typeof apiKey === 'string' && apiKey !== '') nextEnv[SEMANTIC_KEY_REF] = apiKey
+  if (options.clearKey === true && !(typeof apiKey === 'string' && apiKey !== '')) {
+    delete nextEnv[SEMANTIC_KEY_REF]
+  } else if (typeof apiKey === 'string' && apiKey !== '') {
+    nextEnv[SEMANTIC_KEY_REF] = apiKey
+  }
   const rawChanged = ownedEnvMismatch(rawEnv(entry.options?.config), plan)
   const liveEnv = () => (entry.fiber !== undefined ? entry.fiber.config?.env : undefined)
   const liveChanged = entry.fiber !== undefined && entry.fiber.config !== undefined

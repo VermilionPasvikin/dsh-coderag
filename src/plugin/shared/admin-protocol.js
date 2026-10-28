@@ -12,6 +12,12 @@
 /** The credential the settings page stores the cloud API key under. */
 export const SEMANTIC_KEY_REF = 'CODERAG_SEMANTIC_API_KEY'
 
+/**
+ * Environment marker for commands that must know whether a key exists without
+ * receiving it. The admin CLI reads this instead of the key for `status`.
+ */
+export const SEMANTIC_KEY_PRESENT_ENV = 'CODERAG_SEMANTIC_KEY_PRESENT'
+
 /** Host admin route paths, relative to the Web origin. */
 export const ADMIN_STATE_PATH = '/coderag-admin/state'
 export const ADMIN_ACTION_PATH = '/coderag-admin/action'
@@ -97,6 +103,7 @@ export function normalizeHealth(raw) {
     model: text(source.model) ?? '',
     model_present: source.model_present === true,
     detail: text(source.detail) ?? '',
+    code: text(source.code) ?? '',
     models: Array.isArray(source.models)
       ? source.models.flatMap(entry =>
         typeof entry === 'string' && entry.length > 0

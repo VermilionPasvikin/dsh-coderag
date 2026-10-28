@@ -59,8 +59,9 @@
   state/错误/日志中永远没有 key 值（`RL-02`/`S-05`）。
 - **运维路由只在 Web profile 注册**（需要 `webServer` + `connection`，并用
   `connection.requestRejection` 鉴权）；headless 仍可用 env / patch。
-- **admin CLI 依赖**：向量库/健康检查需要 T7-01 的 `python -m dsh_coderag.admin`
-  在 MCP 同一解释器可用；缺失或失败时面板显示可关闭的结构化错误。
+- **admin CLI 依赖**：向量库/健康检查需要 T7-01 的 `dsh_coderag.admin`
+  在 MCP 同一解释器可用（Host 以私有 0700 cwd + `-c` 启动器调用，防 cwd 影子模块）；
+  缺失或失败时面板显示可关闭的结构化错误。
 - **首次保存前**，profile 里已有 `mcp-coderag` env 不受影响（设置全空时不做启动同步）；
   **首次保存后**，13 个纳管变量以设置页为唯一来源；credentials 缺失时保留行里已有的 key。
 - 启动时若设置来自 shell 环境变量，MCP 子进程可能先以旧环境启动一次、再被同步重启一次；
