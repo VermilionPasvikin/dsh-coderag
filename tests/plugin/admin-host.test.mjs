@@ -133,6 +133,20 @@ test('admin failures are structured and scrub the resolved key', async () => {
   assert.match(result.error.message, /\[redacted\]/)
 })
 
+test('a non-zero exit preserves the CLI structured error', async () => {
+  const { value, recorder } = service()
+  const pending = value.state()
+  await tick()
+  finish(recorder.calls[0], {
+    stdout: JSON.stringify({ ok: false, code: 'CONFIG_INVALID', message: '缺少 CODERAG_ROOT' }),
+    code: 1,
+  })
+  const result = await pending
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'CONFIG_INVALID')
+  assert.match(result.error.message, /CODERAG_ROOT/)
+})
+
 test('health overrides the backend and normalizes the probe result', async () => {
   const { value, recorder } = service()
   const pending = value.health('openai')

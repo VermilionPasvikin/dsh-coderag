@@ -223,8 +223,24 @@ export function createAdminService(options) {
         if (stderr.length < STDERR_LIMIT) stderr += chunk.toString('utf8')
       })
       child.on('close', code => {
-        if (code === 0) finish({ ok: true })
-        else finish({ ok: false, error: { code: 'admin-failed', message: stderr || `admin 退出码 ${String(code)}` } })
+        if (code === 0) {
+          finish({ ok: true })
+          return
+        }
+        // The CLI reports domain failures as one JSON object on stdout with a
+        // non-zero exit; preserve its code/message instead of a generic exit.
+        const reported = parseJsonOutput(stdout)
+        if (reported !== null && typeof reported === 'object' && reported.ok === false) {
+          finish({
+            ok: false,
+            error: {
+              code: typeof reported.code === 'string' ? reported.code : 'admin-failed',
+              message: typeof reported.message === 'string' ? reported.message : (stderr || `admin 退出码 ${String(code)}`),
+            },
+          })
+          return
+        }
+        finish({ ok: false, error: { code: 'admin-failed', message: stderr || `admin 退出码 ${String(code)}` } })
       })
     })
   }
