@@ -201,6 +201,37 @@ test('a vectorize error event stays structured and scrubbed', async () => {
   assert.equal(job.error.message.includes('sk-test-secret'), false)
 })
 
+test('late exits from a stopped job cannot clobber the next job', async () => {
+  const { value, recorder } = service()
+  await value.vectorize()
+  const first = recorder.calls[0].child
+  assert.equal((await value.vectorize()).ok, false, 'a second job is refused while the first handle lives')
+  value.stop()
+  first.emit('close', 0)
+  await tick()
+  assert.equal(value.job().status, 'stopped')
+
+  const second = await value.vectorize()
+  assert.equal(second.ok, true)
+  assert.equal(recorder.calls.length, 2)
+  const current = recorder.calls[1].child
+  // The old child reports a late error/close after the new job is active.
+  first.emit('error', new Error('late stop noise'))
+  first.emit('close', 1)
+  await tick()
+  assert.equal(value.job().status, 'running')
+  assert.equal(value.job().error, null)
+
+  value.stop()
+  assert.equal(current.killed, true)
+  current.stdout.write('{"event":"done","chunks":1,"model":"m","generated_at":"x"}\n')
+  current.stdout.end()
+  current.stderr.end()
+  current.emit('close', 0)
+  await tick()
+  assert.equal(value.job().status, 'done')
+})
+
 test('stop asks the child to terminate and keeps the checkpoint state', async () => {
   const { value, recorder } = service()
   await value.vectorize()

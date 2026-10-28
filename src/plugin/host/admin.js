@@ -349,7 +349,9 @@ export function createAdminService(options) {
     async vectorize() {
       const required = requireRoot()
       if (required.ok === false) return required
-      if (job.status === 'running' || job.status === 'stopping') {
+      // A stopped job's child may still be closing; never let a new job start
+      // while a previous handle is alive, even if the UI already saw 'stopped'.
+      if (active !== undefined || job.status === 'running' || job.status === 'stopping') {
         return { ok: false, error: adminError('job-running', '已有向量化任务在运行') }
       }
       const key = await currentKey()
@@ -372,7 +374,8 @@ export function createAdminService(options) {
         job = { ...job, status: 'error', finishedAt: now(), error: adminError('admin-spawn-failed', excerpt(error?.message ?? error)) }
         return { ok: true, value: snapshot() }
       }
-      active = { child, stopRequested: false, key }
+      const handle = { child, stopRequested: false, key }
+      active = handle
       let stderr = ''
       const applyEvent = line => {
         let event
@@ -428,6 +431,8 @@ export function createAdminService(options) {
         if (stderr.length < STDERR_LIMIT) stderr += chunk.toString('utf8')
       })
       child.on('error', error => {
+        // A late error from a stopped handle must not touch the current job.
+        if (active !== handle) return
         if (job.status === 'done') return
         job = {
           ...job,
@@ -437,7 +442,10 @@ export function createAdminService(options) {
         }
       })
       child.on('close', code => {
-        const stopped = active?.stopRequested === true
+        // Identity guard: a previous child's close may arrive after a new job
+        // has started. It owns neither the job nor the active handle anymore.
+        if (active !== handle) return
+        const stopped = handle.stopRequested
         active = undefined
         if (job.status === 'done') return
         if (stopped) {
@@ -461,18 +469,21 @@ export function createAdminService(options) {
       if (active === undefined || job.status !== 'running' && job.status !== 'stopping') {
         return { ok: true, value: snapshot() }
       }
-      active.stopRequested = true
+      const handle = active
+      handle.stopRequested = true
       job = { ...job, status: 'stopping' }
       try {
-        active.child.kill('SIGTERM')
+        handle.child.kill('SIGTERM')
       } catch (error) {
         logger?.warn?.('coderag: could not stop the vectorize child')
         logger?.warn?.(error)
       }
       // A child that ignores SIGTERM must not leave the job 'stopping' forever.
+      // The timer only touches the handle it was created for.
       const force = setTimeout(() => {
+        if (active !== handle) return
         try {
-          active?.child.kill('SIGKILL')
+          handle.child.kill('SIGKILL')
         } catch {
           // The child already exited; nothing left to terminate.
         }
