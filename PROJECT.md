@@ -1661,8 +1661,9 @@ T6-31  ← T6-29
 >
 > 提交规范见 `AGENTS.md` §7.0–§7.2：**开工前 `git status --short` 必须为空**，一个任务至少一个提交，主题行 ≤72 字符并带 `Refs: <任务ID>`。
 >
-> **DeepForge M5 支线（`T5-01`…`T5-06`）不在本表**：那是根仓库 `docs/03-milestones.md` 的任务编号，
-> 与本仓库自己的 `T5-xx`（向量后端）不是同一套编号。支线的命令、原始输出、提交列表与未验证事项见
+> **支线任务不在本表**：DeepForge M5 设置页支线（`T5-01`…`T5-07`）与 M5+ 运维支线（`T7-xx`/`T8-xx`）
+> 沿用根仓库 `docs/03-milestones.md` 的任务编号，与本仓库主表的 `T5-xx`（向量后端）**不是同一套**。
+> 这些编号的登记、状态与证据位置统一见 **§6.9**；设置页支线的命令、原始输出与提交列表见
 > [`docs/settings-ui-plan.md`](docs/settings-ui-plan.md) §7。
 
 | ID | 状态 | 验收输出（粘贴实际结果） | 提交（短 SHA） | 备注 |
@@ -1878,7 +1879,37 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 >
 > 更新计划后请**两个都跑**。改动任务表后如果 `C5` 失败，用 `python3 scripts/verify-plan.py . --emit-graph` 重新生成 §6.6。
 
+### 6.9 支线任务登记（`T5-xx` 支线 / `T7` / `T8`，**独立编号域**）
 
+> **为什么单独一张表**：设置页支线（2026-10-27 起）与 M5+ 运维支线（2026-10-28）沿用根仓库的任务编号，
+> 与本仓库 §6.1–§6.5 的主表**同号不同义**。这些任务一度只存在于提交信息与
+> [`docs/settings-ui-plan.md`](docs/settings-ui-plan.md) 里，`Refs:` 无处可查。本节把它们一次性登记；
+> `scripts/verify-plan.py` 在 `### 6.9` 处停止解析 §6.8（`scripts/verify-plan.py:141`），
+> 因此**本节不参与**依赖图（§6.6）、覆盖矩阵（§6.8）与那 29 项检查——它只回答"这个编号指向什么"。
+>
+> **编号域约定**
+>
+> 1. **主表** = §6.1–§6.5 的 `T1-xx`…`T6-xx`，进 §6.7 进度表，受 `verify-plan.py` 全量校验。
+> 2. **支线** = `T5-01`…`T5-07`（设置页）、`T7-xx`（运维面）、`T8-xx`（复核加固），只在本节登记，
+>    命令与原始输出留在各自的 plan / PR / 提交正文里。
+> 3. **引用规则**：提交信息的 `Refs:` 只能引用主表 ID 或**本节已登记的** ID；新增支线任务先加行，再写代码。
+> 4. **同号消歧**：主表 `T5-07` 是"§1.4 增加 `S5`/`S6`"（见 §6.5 任务表），支线 `T5-07` 是"用户 + Lead
+>    黑盒验收"；`T7-01`/`T7-02`/`T8-02` 在主表**从未出现**。
+
+| ID | 定义 | 主要提交（短 SHA） | 状态 | 证据位置 |
+|---|---|---|---|---|
+| `T5-01`（支线） | 方案验证探针：实测 DSH Loader 的条目更新接口、volatile Config 与设置页数据通路（真实 `app.asar`，20/20 通过），据此定稿方案 | `32f5a97` | 已完成 | [`docs/settings-ui-plan.md`](docs/settings-ui-plan.md) §1–§4 |
+| `T5-02`（支线） | bundle 构建管线：`scripts/build-plugin.mjs` 产出 Host 的 `lib/index.js` 与 Client 的 `lib/client.js` | `24b2911` | 已完成 | plan §7.2 |
+| `T5-03`（支线） | Host 插件接管 CodeRAG 设置，把 13 个字段映射为 `CODERAG_*` 并合并进 `mcp-coderag` 行 env | `316675d` | 已完成 | plan §7.3 |
+| `T5-04`（支线） | Client 设置表单：三入口（`settings.section` / `plugins.row.config` / `plugins.bundle.config`）共用一个 `SettingsPage` | `fa37c51`、`a4e4cf0`、`5398104`、`7298196` | 已完成 | plan §7.4、§8 |
+| `T5-05`（支线） | Node 测试：13 字段映射、表单行为、三入口注册 | `38ba0c7`、`1f86856`、`ab4ac5a` | 已完成 | plan §7.5 |
+| `T5-06`（支线） | README 的原生设置页文档、热重载实测记录与占位符清理 | `789b79a`、`292ec62`、`dd8c6e3` | 已完成 | plan §7.6、`README.md` |
+| `T5-07`（支线） | 用户 + Lead 的黑盒验收（bundle 页可见表单、保存后 1.5–2 s 热重载）；**不是**主表 `T5-07` | —（人工） | 待用户 | [`docs/pr-settings-ui.md`](docs/pr-settings-ui.md)「审阅者手工验收」 |
+| `T7-01` | admin CLI：`dsh_coderag.admin` 的 `status` / `health` / `vectorize`，JSON 行协议，由 Host 以私有 cwd + `-c` 启动 | `4fd52c6` | 已完成 | `README.md` 已知限制；`CHANGELOG.md` `[Unreleased]` |
+| `T7-02` | 运维面板：云端 key 走 DSH credentials、`/coderag-admin/{state,action,job}` 鉴权路由、`start-local` / `vectorize` / `stop`、三块 UI 与测试 | `0b8e2d0`、`d516255`、`fb6f846`、`a302a42`、`03da264`、`c28f492`、`1c40442`、`0bb8928`、`69471fe`、`7c90096` | 已完成 | plan §9；`docs/pr-settings-ui.md`「验证」 |
+| `T8-01` | 未使用（仓库内无任何引用；不要新开同号任务，除非先改写本行） | — | 未分配 | — |
+| `T8-02` | 复核加固：admin 子进程私有 `0700` cwd + `-c` 启动器、key 生命周期、健康探测不落盘开关、结构化失败码、向量 job 竞态与停止后退出、设置保存 spinner、测试支撑、文档占位符清理 | `df9d9fa`、`afe29f3`、`1228133`、`fffb0af`、`dd8c6e3` | 已完成 | 各提交正文 |
+| `T8-03` | **支线登记对齐**：新增本节、把 §6.7 的支线声明指向本节、在 plan 头块声明编号域并回填 `T5-06` 的提交 | `git log --grep 'Refs: T8-03'` | 已完成 | 本节 |
 
 ---
 

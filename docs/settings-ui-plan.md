@@ -2,7 +2,10 @@
 
 - 状态：已完成（2026-10-27）
 - 负责人：coderag-ui
-- 分支：`feat/settings-ui`
+- 编号域：本文的 `T5-01`…`T5-06` 是 **DeepForge M5 支线编号**，与
+  [`PROJECT.md`](../PROJECT.md) §6.5 主表的 `T5-xx`（向量后端）**同号不同义**；
+  `T7-01` / `T7-02` / `T8-02` 的登记与状态见 `PROJECT.md` §6.9。
+- 分支：`main`（本文所述提交均直接落在 `main`；计划中的 `feat/settings-ui` 分支从未创建）
 - 目标仓库版本：`dsh-coderag` 2.1.1
 - 实测对象：本机安装的 DeepSeek Harness 桌面版 **0.2.1-rc.3**
   （`F:\dsh\resources\app.asar`，内嵌 cordis 4.0.5 / cordis-plugin-loader 1.0.6 /
@@ -290,7 +293,11 @@ return module.exports; } });
 | T5-03 | `316675d` | `feat(plugin): own coderag settings and sync the mcp row` |
 | T5-04 | `fa37c51` | `feat(ui): render the coderag settings form` |
 | T5-05 | `38ba0c7` | `test(plugin): cover settings mapping and form behavior` |
-| T5-06 | 本次提交 | `docs(readme): document the native settings page` |
+| T5-06 | `789b79a` | `docs(readme): document the native settings page` |
+
+`T5-06` 的 SHA 原写「本次提交」，2026-10-30 按 `git log --grep 'Refs: T5-06'` 回填为 `789b79a`
+（同一任务后续还有 `292ec62`）；`T5-04` 的后续修正是 `a4e4cf0` / `5398104` / `7298196`，
+`T5-05` 是 `1f86856` / `ab4ac5a`。各任务的完整状态见 `PROJECT.md` §6.9。
 
 每次提交前 `pytest` 全绿、提交后 `git status --short` 为空。
 
