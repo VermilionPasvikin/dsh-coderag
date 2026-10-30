@@ -708,3 +708,20 @@
   但用 CLI 排查时，向量层超时/失败/索引缺失都表现为"检索正常"，与 `RL-06`「让降级可见」的精神相悖。
 - **建议修法**：在 `_run_search` 里把 `result.semantic` 用 `render._format_semantic_notice` 打到 stderr
   （stdout 保持纯结果）；或至少把 `status` 打到 stderr。属独立小改动，需所有者裁决。
+
+## Host admin 测试假设 Windows 路径语义，在 POSIX 上恒红（发现于 `T8-07`，2026-10-30）
+
+- **事实（实测，macOS，`pnpm install --ignore-scripts` 后 `node --test "tests/plugin/*.test.mjs"`）**：
+  `tests/plugin/admin-host.test.mjs` 有 2 条失败：
+  - `state runs the -c launcher with the private cwd and no key`（`:113`）断言
+    `call.args[4] === 'F:\\workspace'`，实际得到 `process.cwd() + '/F:\\workspace'`；
+  - `a relative root is resolved once in the Host`（`:151`）断言 `args[4]` 以 `F:\\` 开头或含 `:`，
+    在 POSIX 上同样拿不到盘符。
+  根因在 `src/plugin/host/admin.js:223` 的 `resolve(root.trim())`：POSIX 的 `path.resolve`
+  不把 `F:\workspace` 当绝对路径，于是把它拼到 cwd 后面。
+- **影响**：本机（macOS）Node 测试恒有 2 条红，容易被误读成"设置页改动引入了回归"；本次只改了
+  字段名，`src/plugin/host/admin.js` 未动，确认与 `T8-07` 无关。Windows 上这两条应是绿的（盘符被
+  `resolve` 认作绝对路径），因此 CI 若只在 Windows 跑 Node 测试就永远发现不了。
+- **建议修法**（二选一，需所有者裁决）：(a) 测试显式使用 Windows 语义（`path.win32.resolve` 或
+  按 `process.platform` 分支断言）；(b) Host 先识别盘符再决定是否 `resolve`。属独立小改动，
+  改完必须重跑 `node --test "tests/plugin/*.test.mjs"` 并把证据记进提交正文。
