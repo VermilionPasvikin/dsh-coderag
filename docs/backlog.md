@@ -678,3 +678,19 @@
   重跑时先加载检查点；② 或把 `EmbeddingCache` 变成落盘/落库缓存（按 `(model, sha256(text))` 建表），
   使重跑只补缺失；③ 至少让进度可被外部观察——当前 `semantic_index_progress` 只报累计批次数，**不含总量**，
   24 小时的运行无法从日志判断「还剩多久」。
+
+## `tests/test_cli.py` 的文件上限断言只在 Windows 成立（发现于 `T8-03`，2026-10-30，**未顺手修**）
+
+- **事实（实测，macOS / Python 3.10.21，`110ab5a`）**：`python -m pytest -q` 有 1 条红——
+  `tests/test_cli.py::test_index_reports_the_file_limit_with_its_own_code` 断言
+  `assert "'2'" in payload["hint"]`（`tests/test_cli.py:423`），而 POSIX 上
+  `_as_too_many_files`（`src/dsh_coderag/__main__.py:755-780`）产出的 hint 是
+  `把 CODERAG_MAX_FILES 设到 2 或更高再重跑（export CODERAG_MAX_FILES=2），或只索引子目录。`——没有引号。
+  带引号的写法只出现在 Windows 分支（`$env:CODERAG_MAX_FILES = '2'`，`__main__.py:769-772`）。
+- **根因**：`51acb5d`（`T6-22`，2026-09-30）同时改 hint 与这条测试，测试按 Windows 形态写死；
+  `docs/m6-macos-verification.md` 记录的全绿跑在该提交之前，所以「macOS 567 passed」早于这条用例的诞生。
+- **影响**：POSIX 上 `pytest` 永远红，`AGENTS.md` §5.1 DoD 第 5 条无法满足；按「红 = 有回归」读门禁的人
+  会在每个改动上看到一条与改动无关的失败。其余 679 passed / 5 skipped 是绿的（`--deselect` 该条实测）。
+- **建议修法**（二选一，需所有者裁决）：(a) 测试按平台断言——Windows 断 `'2'`、POSIX 断 `=2`；
+  (b) hint 两侧统一加引号（`export CODERAG_MAX_FILES='2'`），让断言真正与平台无关。
+  属独立小改动；改完必须重跑 `tests/test_cli.py` 并把证据记进 `PROJECT.md` §6.7 或本文件。
