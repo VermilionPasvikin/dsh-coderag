@@ -769,7 +769,7 @@ def _as_too_many_files(error: Exception) -> CliError | None:
     assignment = (
         f"$env:{ENV_MAX_FILES} = '{error.actual_count}'"
         if platform.system() == "Windows"
-        else f"export {ENV_MAX_FILES}={error.actual_count}"
+        else f"export {ENV_MAX_FILES}='{error.actual_count}'"
     )
     return CliError(
         error.code.value,

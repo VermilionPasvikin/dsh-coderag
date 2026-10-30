@@ -1910,6 +1910,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-01` | 未使用（仓库内无任何引用；不要新开同号任务，除非先改写本行） | — | 未分配 | — |
 | `T8-02` | 复核加固：admin 子进程私有 `0700` cwd + `-c` 启动器、key 生命周期、健康探测不落盘开关、结构化失败码、向量 job 竞态与停止后退出、设置保存 spinner、测试支撑、文档占位符清理 | `df9d9fa`、`afe29f3`、`1228133`、`fffb0af`、`dd8c6e3` | 已完成 | 各提交正文 |
 | `T8-03` | **支线登记对齐**：新增本节、把 §6.7 的支线声明指向本节、在 plan 头块声明编号域并回填 `T5-06` 的提交 | `git log --grep 'Refs: T8-03'` | 已完成 | 本节 |
+| `T8-04` | 修 `T6-22` 的 hint 在 POSIX 上缺引号：`export CODERAG_MAX_FILES='2'` 与 Windows 的 `$env:… = '2'` 同形；测试按平台精确断言整条赋值串 | `git log --grep 'Refs: T8-04'` | 已完成 | 本节；`docs/backlog.md` 对应条目 |
 
 ---
 

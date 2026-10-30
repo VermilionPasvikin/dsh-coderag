@@ -419,8 +419,12 @@ def test_index_reports_the_file_limit_with_its_own_code(
     # diagnostics); the user-facing object must not carry it (D-02).
     assert "TooManyFilesError" not in payload["message"]
     assert "2 indexable files" in payload["message"]
-    assert "CODERAG_MAX_FILES" in payload["hint"]
-    assert "'2'" in payload["hint"], "the hint must show a value that actually works"
+    assignment = (
+        "$env:CODERAG_MAX_FILES = '2'"
+        if sys.platform == "win32"
+        else "export CODERAG_MAX_FILES='2'"
+    )
+    assert assignment in payload["hint"], "the hint must show a value that actually works"
 
 
 def test_search_uses_the_token_budget_from_the_environment(

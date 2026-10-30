@@ -679,11 +679,11 @@
   使重跑只补缺失；③ 至少让进度可被外部观察——当前 `semantic_index_progress` 只报累计批次数，**不含总量**，
   24 小时的运行无法从日志判断「还剩多久」。
 
-## `tests/test_cli.py` 的文件上限断言只在 Windows 成立（发现于 `T8-03`，2026-10-30，**未顺手修**）
+## ✅ 已解决：`tests/test_cli.py` 的文件上限断言只在 Windows 成立（发现于 `T8-03`，2026-10-30，`T8-04` 修复）
 
 - **事实（实测，macOS / Python 3.10.21，`110ab5a`）**：`python -m pytest -q` 有 1 条红——
   `tests/test_cli.py::test_index_reports_the_file_limit_with_its_own_code` 断言
-  `assert "'2'" in payload["hint"]`（`tests/test_cli.py:423`），而 POSIX 上
+  `assert "'2'" in payload["hint"]`（修复前位于 `tests/test_cli.py:423`），而 POSIX 上
   `_as_too_many_files`（`src/dsh_coderag/__main__.py:755-780`）产出的 hint 是
   `把 CODERAG_MAX_FILES 设到 2 或更高再重跑（export CODERAG_MAX_FILES=2），或只索引子目录。`——没有引号。
   带引号的写法只出现在 Windows 分支（`$env:CODERAG_MAX_FILES = '2'`，`__main__.py:769-772`）。
@@ -694,3 +694,7 @@
 - **建议修法**（二选一，需所有者裁决）：(a) 测试按平台断言——Windows 断 `'2'`、POSIX 断 `=2`；
   (b) hint 两侧统一加引号（`export CODERAG_MAX_FILES='2'`），让断言真正与平台无关。
   属独立小改动；改完必须重跑 `tests/test_cli.py` 并把证据记进 `PROJECT.md` §6.7 或本文件。
+- **已修复（`T8-04`，2026-10-30）**：采用 (b)，POSIX 分支改为 `export CODERAG_MAX_FILES='2'`
+  （`src/dsh_coderag/__main__.py:769-773`）；测试改成按平台断言整条赋值串、不再只查 `'2'`
+  （`tests/test_cli.py:422-427`）。证据：`.venv/bin/python -m pytest` → `680 passed, 5 skipped`；
+  `ruff check src tests` → `All checks passed!`；`mypy --strict src` → `Success: no issues found in 27 source files`。
