@@ -21,6 +21,8 @@ function fakeAdmin() {
     health: async backend => { calls.push(['health', backend]); return { ok: true, value: { ok: true, backend } } },
     startLocal: async () => { calls.push(['start-local']); return { ok: true, value: { url: 'http://127.0.0.1:11434' } } },
     vectorize: async () => { calls.push(['vectorize']); return { ok: true, value: { status: 'running' } } },
+    buildIndex: async () => { calls.push(['index']); return { ok: true, value: { files: 2, chunks: 3 } } },
+    removeVectors: async () => { calls.push(['remove-vectors']); return { ok: true, value: { removed: true } } },
     stop: () => { calls.push(['stop']); return { ok: true, value: { status: 'stopped' } } },
   }
 }
@@ -77,7 +79,7 @@ test('state and job answer GET and refuse other methods', async () => {
   assert.equal(JSON.parse(job.body).value.status, 'idle')
 })
 
-test('action dispatch covers health, start-local, vectorize, stop and refresh', async () => {
+test('action dispatch covers health, start-local, vectorize, index, remove-vectors, stop and refresh', async () => {
   const admin = fakeAdmin()
   let synced = 0
   const http = createAdminHttp(admin, { syncNow: async () => { synced += 1 } })
@@ -85,6 +87,8 @@ test('action dispatch covers health, start-local, vectorize, stop and refresh', 
     [{ action: 'health', backend: 'openai' }, ['health', 'openai']],
     [{ action: 'start-local' }, ['start-local']],
     [{ action: 'vectorize' }, ['vectorize']],
+    [{ action: 'index' }, ['index']],
+    [{ action: 'remove-vectors' }, ['remove-vectors']],
     [{ action: 'stop' }, ['stop']],
   ]) {
     const res = response()

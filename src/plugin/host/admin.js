@@ -39,6 +39,8 @@ import { envPlan } from '../shared/settings.js'
 
 /** Bounded wait for one status/health invocation. */
 const COMMAND_TIMEOUT_MS = 30_000
+/** Bounded wait for a full lexical index build (large repositories take minutes). */
+const INDEX_TIMEOUT_MS = 10 * 60_000
 /** Bounded wait for `ollama serve` to answer /api/tags. */
 const LOCAL_START_TIMEOUT_MS = 15_000
 /** Poll cadence while waiting for ollama. */
@@ -259,6 +261,14 @@ export function createAdminService(options) {
   }
 
   /**
+   * Whether a vectorize child (or the window where one is being started) owns
+   * the workspace. Index/write actions must not race it: a rebuild would swap
+   * chunks under the embedding job that is reading them.
+   */
+  const jobBusy = () =>
+    active !== undefined || starting || job.status === 'running' || job.status === 'stopping'
+
+  /**
    * Run one admin command to completion and parse its JSON object.
    * @param {string[]} args - CLI arguments after the launcher.
    * @param {{ timeoutMs: number, apiKey?: string, backend?: string, forceSemantic?: boolean, keyPresent?: boolean }} config - invocation facts.
@@ -348,6 +358,41 @@ export function createAdminService(options) {
       return { ok: true, value: normalizeAdminStatus(result.value) }
     },
 
+    /**
+     * Build or refresh the lexical index without touching the vector store.
+     * The Python command passes `build_vectors=False`, so it never contacts the
+     * embedding backend even when the semantic switch is on (T8-08).
+     */
+    async buildIndex() {
+      const required = requireRoot()
+      if (required.ok === false) return required
+      if (jobBusy()) return { ok: false, error: adminError('job-running', '已有向量化任务在运行') }
+      return runOnce(['index', '--root', required.root], { timeoutMs: INDEX_TIMEOUT_MS })
+    },
+
+    /**
+     * Delete `<root>/.coderag/vectors` and keep the lexical index. The Python
+     * command owns the path checks (symlink, containment, missing store) and
+     * reports `removed` accordingly.
+     */
+    async removeVectors() {
+      const required = requireRoot()
+      if (required.ok === false) return required
+      if (jobBusy()) return { ok: false, error: adminError('job-running', '已有向量化任务在运行') }
+      const result = await runOnce(['remove-vectors', '--root', required.root], {
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      })
+      if (result.ok === false) return result
+      const value = result.value !== null && typeof result.value === 'object' ? result.value : {}
+      return {
+        ok: true,
+        value: {
+          removed: value.removed === true,
+          path: typeof value.path === 'string' ? value.path : '',
+        },
+      }
+    },
+
     /** Probe the embedding backend; `backend` overrides the saved one. */
     async health(backend) {
       const root = rootOf()
@@ -435,7 +480,7 @@ export function createAdminService(options) {
       // while a previous handle is alive. The `starting` flag closes the same
       // window while the credentials lookup is in flight, before a spawn
       // exists — otherwise two concurrent calls both spawn a child.
-      if (active !== undefined || starting || job.status === 'running' || job.status === 'stopping') {
+      if (jobBusy()) {
         return { ok: false, error: adminError('job-running', '已有向量化任务在运行') }
       }
       starting = true

@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
+import { resolve as resolvePath } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { test } from 'node:test'
 import {
@@ -156,6 +157,52 @@ test('a relative root is resolved once in the Host', async () => {
   await pending
   assert.equal(recorder.calls[0].args[4].startsWith('F:\\') || recorder.calls[0].args[4].includes(':'), true)
   assert.equal(recorder.calls[0].args[4].includes('relative\\ws'), true)
+})
+
+test('buildIndex runs the index command without a key', async () => {
+  const { value, recorder } = service()
+  const pending = value.buildIndex()
+  await tick()
+  const call = recorder.calls[0]
+  assert.deepEqual(call.args.slice(0, 4), ['-c', ADMIN_LAUNCHER, 'index', '--root'])
+  assert.equal(call.args[4], resolvePath('F:\\workspace'))
+  assert.equal(call.options.cwd, 'F:\\private-admin-cwd')
+  assert.equal(call.options.env.CODERAG_SEMANTIC_API_KEY, undefined)
+  assert.equal(call.options.env[SEMANTIC_KEY_PRESENT_ENV], undefined)
+  finish(call, {
+    stdout: JSON.stringify({ ok: true, files: 3, chunks: 9, seen_files: 4, other_extensions: 1 }),
+  })
+  const result = await pending
+  assert.equal(result.ok, true)
+  assert.equal(result.value.files, 3)
+  assert.equal(result.value.chunks, 9)
+})
+
+test('removeVectors runs the remove-vectors command and keeps its report', async () => {
+  const { value, recorder } = service()
+  const pending = value.removeVectors()
+  await tick()
+  const call = recorder.calls[0]
+  assert.deepEqual(call.args.slice(0, 4), ['-c', ADMIN_LAUNCHER, 'remove-vectors', '--root'])
+  assert.equal(call.args[4], resolvePath('F:\\workspace'))
+  finish(call, {
+    stdout: JSON.stringify({ ok: true, removed: true, path: 'F:\\workspace\\.coderag\\vectors' }),
+  })
+  const result = await pending
+  assert.deepEqual(result, {
+    ok: true,
+    value: { removed: true, path: 'F:\\workspace\\.coderag\\vectors' },
+  })
+})
+
+test('index and remove-vectors are refused while a vectorize job owns the workspace', async () => {
+  const { value, recorder } = service()
+  const running = value.vectorize()
+  await tick()
+  assert.equal((await value.buildIndex()).error.code, 'job-running')
+  assert.equal((await value.removeVectors()).error.code, 'job-running')
+  finish(recorder.calls[0], { stdout: JSON.stringify({ event: 'done', chunks: 1 }) })
+  await running
 })
 
 test('health failures are structured and scrub the resolved key', async () => {

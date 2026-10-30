@@ -386,6 +386,8 @@ export function VectorPanel({ dirty }) {
   const [state, setState] = useState({ phase: 'loading' })
   const [job, setJob] = useState(normalizeJob(undefined))
   const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState(null)
+  const [notice, setNotice] = useState(null)
   const [error, setError] = useState(null)
   const previousStatus = useRef(job.status)
 
@@ -432,17 +434,28 @@ export function VectorPanel({ dirty }) {
 
   const act = useCallback(async action => {
     if (busy) return
+    if (action === 'remove-vectors' && !window.confirm('删除向量库索引？代码索引会保留，下次向量化需要重建。')) return
     setBusy(true)
+    setPending(action)
     setError(null)
+    setNotice(null)
     try {
       const value = await runAdminAction(action)
-      if (action === 'stop') setJob(normalizeJob(value))
-      else if (action === 'vectorize') setJob(normalizeJob(value))
-      else await refresh()
+      if (action === 'stop' || action === 'vectorize') {
+        setJob(normalizeJob(value))
+      } else {
+        if (action === 'index') {
+          setNotice(`已建索引：${formatCount(value?.files)} 个文件，${formatCount(value?.chunks)} 个 chunk。`)
+        } else if (action === 'remove-vectors') {
+          setNotice(value?.removed === true ? '已删除向量库索引，代码索引保留。' : '当前没有向量库索引，无需删除。')
+        }
+        await refresh()
+      }
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure))
     } finally {
       setBusy(false)
+      setPending(null)
     }
   }, [busy, refresh])
 
@@ -450,6 +463,8 @@ export function VectorPanel({ dirty }) {
   const running = jobActive(job)
   const percent = jobPercent(job)
   const actionDisabled = dirty || busy
+  const noIndex = value !== undefined && value.index_exists !== true
+  const noVectors = value !== undefined && value.vector_exists !== true
   const primaryLabel = running
     ? null
     : value?.vector_exists === true && value?.pending_chunks > 0
@@ -460,7 +475,7 @@ export function VectorPanel({ dirty }) {
       title="向量数据库"
       description="使用已保存的工作区根；索引与检查点都在 <root>/.coderag/ 下，停止不会删除检查点。"
     >
-      {dirty ? <p style={{ ...styles.status, ...styles.bad }}>有未保存的设置改动，请先保存再操作向量库（避免用旧根跑任务）。</p> : null}
+      {dirty ? <p style={{ ...styles.status, ...styles.bad }}>有未保存的设置改动，请先保存再操作索引或向量库（避免用旧根跑任务）。</p> : null}
       {state.phase === 'loading' ? <p style={styles.hint}>正在读取向量库状态…</p> : null}
       {state.phase === 'error' ? <p style={{ ...styles.status, ...styles.bad }}>{state.message}</p> : null}
       {value === undefined ? null : (
@@ -478,15 +493,35 @@ export function VectorPanel({ dirty }) {
       )}
       <div style={styles.row}>
         <button type="button" style={styles.button} disabled={busy} onClick={() => { void refresh(); void loadJob() }}>刷新</button>
+        <button
+          type="button"
+          style={styles.button}
+          disabled={actionDisabled || running}
+          onClick={() => { void act('index') }}
+        >
+          {pending === 'index' ? '建索引中…' : '建索引'}
+        </button>
         {running ? (
-          <button type="button" style={styles.danger} disabled={busy} onClick={() => { void act('stop') }}>停止</button>
+          <button type="button" style={styles.danger} disabled={busy} onClick={() => { void act('stop') }}>
+            {pending === 'stop' ? '停止中…' : '停止'}
+          </button>
         ) : (
-          <button type="button" style={styles.primary} disabled={actionDisabled} onClick={() => { void act('vectorize') }}>
+          <button type="button" style={styles.primary} disabled={actionDisabled || noIndex} onClick={() => { void act('vectorize') }}>
             {primaryLabel}
           </button>
         )}
+        <button
+          type="button"
+          style={styles.button}
+          disabled={actionDisabled || running || noVectors}
+          onClick={() => { void act('remove-vectors') }}
+        >
+          {pending === 'remove-vectors' ? '删除中…' : '删除向量库索引'}
+        </button>
         <span style={styles.hint}>{jobLabel(job.status)}</span>
       </div>
+      {noIndex ? <p style={styles.hint}>当前工作区还没有代码索引：先点「建索引」完成后再向量化。</p> : null}
+      {notice === null ? null : <p style={{ ...styles.status, ...styles.ok }} role="status">{notice}</p>}
       {running || job.embedded > 0 || job.status === 'done' ? (
         <div style={styles.column}>
           <div style={styles.bar}><div style={{ ...styles.barFill, width: `${percent ?? 5}%` }} /></div>

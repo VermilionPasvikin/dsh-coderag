@@ -188,6 +188,8 @@ test('the Settings section renders the operations panels', () => {
   assert.match(text, /已配置（不可查看）|未配置|读取中/)
   assert.match(text, /检查本地连通性/)
   assert.match(text, /一键启动本地后端/)
+  assert.match(text, /建索引/)
+  assert.match(text, /删除向量库索引/)
 })
 
 test('the bundle page renders the form from configForms without an owner form', () => {

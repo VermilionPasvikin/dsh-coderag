@@ -130,6 +130,12 @@ export function createAdminHttp(admin, hooks = {}) {
           case 'vectorize':
             sendJson(res, 200, await admin.vectorize())
             return
+          case 'index':
+            sendJson(res, 200, await admin.buildIndex())
+            return
+          case 'remove-vectors':
+            sendJson(res, 200, await admin.removeVectors())
+            return
           case 'stop':
             sendJson(res, 200, admin.stop())
             return

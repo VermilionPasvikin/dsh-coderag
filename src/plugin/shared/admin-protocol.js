@@ -24,7 +24,7 @@ export const ADMIN_ACTION_PATH = '/coderag-admin/action'
 export const ADMIN_JOB_PATH = '/coderag-admin/job'
 
 /** Every action the POST route accepts. */
-export const ADMIN_ACTIONS = Object.freeze(['health', 'start-local', 'vectorize', 'stop', 'refresh'])
+export const ADMIN_ACTIONS = Object.freeze(['health', 'start-local', 'vectorize', 'stop', 'refresh', 'index', 'remove-vectors'])
 
 /** Backends a health check can target (the form's own vocabulary). */
 export const HEALTH_BACKENDS = Object.freeze(['ollama', 'openai'])
