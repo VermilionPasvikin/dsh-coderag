@@ -44,6 +44,16 @@ from dsh_coderag.types import ErrorCode
 RETRY_LIMIT = 2
 """Extra attempts after the first one; retries are always bounded (ADR-16 6)."""
 
+QUERY_HTTP_TIMEOUT_S = 120.0
+"""Transport bound of the query path's background request (T8-07, ADR-16 12).
+
+Deliberately independent from `CODERAG_SEMANTIC_TIMEOUT`: the caller stops
+waiting at the query budget while this request keeps loading the model, so the
+socket must outlive any budget. A saved transport timeout shorter than a cold
+load must not abort the warm-up (measured: an aborted request also aborts
+Ollama's model load).
+"""
+
 _ENDPOINT_PATHS: dict[str, str] = {"ollama": "/api/embed", "openai": "/embeddings"}
 """Request path per backend, appended to the configured URL."""
 
@@ -706,9 +716,10 @@ def embed_query(
     The request runs in a daemon thread, so the caller stops waiting when the
     budget expires even if DNS resolution or a cold model load is blocking. The
     request itself is *not* cancelled: it keeps running and finishes loading the
-    model, so the next query is fast. The HTTP timeout stays `config.timeout_s`
-    on purpose -- it is larger than the budget, because cutting the socket at
-    the budget would abort exactly the load the warm-up exists to finish.
+    model, so the next query is fast. The HTTP timeout is the fixed
+    `QUERY_HTTP_TIMEOUT_S`, not `config.timeout_s` on purpose: it must outlive
+    any budget, and an older profile's small transport timeout must not abort
+    exactly the load the warm-up exists to finish (T8-07, ADR-16 12).
 
     Exactly one request is made. Retrying belongs to indexing, not to an
     interactive query that already has a caller-facing deadline.
@@ -756,7 +767,7 @@ def embed_query(
     def request() -> None:
         nonlocal vectors, failure
         try:
-            vectors = post(url, config.model, [text], float(config.timeout_s))
+            vectors = post(url, config.model, [text], QUERY_HTTP_TIMEOUT_S)
         except Exception as exc:  # noqa: BLE001 - carried to the waiting caller
             failure = exc
         finally:

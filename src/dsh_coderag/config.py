@@ -61,7 +61,7 @@ SEMANTIC_BACKEND_OPENAI = "openai"
 DEFAULT_SEMANTIC_BACKEND = SEMANTIC_BACKEND_OLLAMA
 DEFAULT_SEMANTIC_URL = "http://127.0.0.1:11434"
 DEFAULT_SEMANTIC_MODEL = "bge-m3"
-DEFAULT_SEMANTIC_TIMEOUT = 30
+DEFAULT_SEMANTIC_TIMEOUT = 60
 DEFAULT_SEMANTIC_QUERY_TIMEOUT = 10
 DEFAULT_SEMANTIC_BATCH = 16
 DEFAULT_SEMANTIC_MAX_CHUNKS = 100000
@@ -81,11 +81,14 @@ class SemanticConfig:
     of guessing (ADR-16 4). Required settings that are missing raise
     ConfigError rather than falling back to a guessed value.
 
-    `timeout_s` is the HTTP timeout for one embedding request, sized for
-    indexing batches. `query_timeout_s` is a separate wall-clock budget for the
-    interactive search path: a query must answer well inside the host's
-    tool-call budget even when the backend is still loading a model (ADR-16 11),
-    so the two numbers are not the same knob and default differently.
+    `timeout_s` is the HTTP timeout for one indexing batch request. The query
+    path does not use it: a query's background request is bounded by a fixed
+    transport limit (`embed.QUERY_HTTP_TIMEOUT_S`), so a small saved value can
+    never abort a cold model load. `query_timeout_s` is the separate wall-clock
+    budget of the interactive search path: a query must answer well inside the
+    host's tool-call budget even when the backend is still loading a model
+    (ADR-16 11/12), so the two numbers are not the same knob and default
+    differently.
 
     SECURITY WARNING - enabling the cloud (`openai`) backend sends part of
     your source text off this machine:

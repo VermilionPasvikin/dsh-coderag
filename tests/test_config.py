@@ -57,7 +57,7 @@ def test_semantic_defaults_keep_the_backend_off() -> None:
     assert config.backend == "ollama"
     assert config.url == "http://127.0.0.1:11434"
     assert config.model == "bge-m3"
-    assert config.timeout_s == 30
+    assert config.timeout_s == 60
     assert config.query_timeout_s == 10
     assert config.batch == 16
     assert config.max_chunks == 100000
@@ -89,7 +89,7 @@ def test_blank_values_count_as_unset_so_defaults_survive() -> None:
         }
     )
     assert config.model == "bge-m3"
-    assert config.timeout_s == 30
+    assert config.timeout_s == 60
     assert config.query_timeout_s == 10
     assert config.batch == 16
     assert config.enabled is True

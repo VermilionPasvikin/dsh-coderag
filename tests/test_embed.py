@@ -26,6 +26,7 @@ from dsh_coderag.config import SemanticConfig, load_semantic_config
 from dsh_coderag.embed import (
     CHECKPOINT_FILENAME,
     CHECKPOINT_MAGIC,
+    QUERY_HTTP_TIMEOUT_S,
     RETRY_LIMIT,
     SEMANTIC_TIMEOUT,
     DiskEmbeddingCache,
@@ -638,14 +639,24 @@ def test_the_transport_refuses_a_redirect_without_forwarding_the_key() -> None:
     assert "sk-redirect-secret" not in (caught.value.hint or "")
 
 
-def test_embed_query_returns_the_single_vector_and_uses_the_http_timeout() -> None:
-    """T8-05: one request, with the configured HTTP timeout (not the budget)."""
+def test_embed_query_returns_the_single_vector_and_ignores_the_index_timeout() -> None:
+    """T8-07: one request at the fixed query transport bound, not `timeout_s`.
+
+    The config below carries `timeout_s=5`; a saved small value must not shrink
+    the background request, because that request is what warms the model.
+    """
     recorder = _Recorder()
     vector = embed_query(_config(), "question", budget_s=2, transport=recorder)
     assert vector == [8.0, 0.0]
     assert recorder.calls == [
-        ("http://127.0.0.1:11434/api/embed", "bge-m3", ["question"], 5.0)
+        (
+            "http://127.0.0.1:11434/api/embed",
+            "bge-m3",
+            ["question"],
+            QUERY_HTTP_TIMEOUT_S,
+        )
     ]
+    assert _config().timeout_s < QUERY_HTTP_TIMEOUT_S
 
 
 def test_embed_query_does_not_retry() -> None:
