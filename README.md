@@ -402,6 +402,13 @@ DSH **0.1.7-rc.1 起**（本仓库在 **0.2.1-rc.3** 上实测）插件可以在
   的 `status --root <已保存的 root>`。
    - 「向量化增量」/「开始向量化」启动 admin `vectorize` 子进程；运行中显示进度条与
      `embedded/total` 数字，可「停止」（SIGTERM，检查点保留，下次从检查点恢复）。
+   - 「建索引」只建/更新代码索引（admin `index`，内部等价 `index_sync(build_vectors=False)`）：
+     即使语义开关是开的也**不联系 embedding 后端**，适合新仓库先备好索引。工作区还没有
+     代码索引时，「开始向量化」会禁用并提示先点「建索引」（此前直接点击会得到
+     `no code index … index the workspace before vectorizing`）。
+   - 「删除向量库索引」删除 `<root>/.coderag/vectors/`（含检查点与缓存），**保留**
+     `.coderag/index.sqlite3`；需要二次确认，没有向量库时是 no-op。删除后重新向量化会从头构建，
+     代码索引与 BM25 检索不受影响。
    - 完成后自动刷新状态卡；有未保存的参数改动时提示先保存（任务使用已保存的 root）。
    - 依赖 T7-01 的 admin CLI（`src/dsh_coderag/admin.py`）；进程退出码/错误事件会变成
      可关闭的错误弹窗，不会把 key 放进消息。

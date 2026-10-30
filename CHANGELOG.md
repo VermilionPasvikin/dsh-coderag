@@ -29,10 +29,17 @@
   不进 state/错误/日志**。Host 在同步 MCP 行和启动 admin 子进程时用 `credentials.resolve` 取它；
   key 变更后页面调用 `refresh` 动作让 MCP env 立即更新。
 - **Host 运维路由（仅 Web profile）**：`GET /coderag-admin/state`、`POST /coderag-admin/action`
-  （`health` / `start-local` / `vectorize` / `stop` / `refresh`）、`GET /coderag-admin/job`；
+  （`health` / `start-local` / `vectorize` / `stop` / `refresh` / `index` / `remove-vectors`）、
+  `GET /coderag-admin/job`；
   全部经过 `connection.requestRejection` 鉴权，响应固定为 `{ok,value}` / `{ok:false,error}`。
   `start-local` detached 启动 `ollama serve` 并轮询 `/api/tags` ≤15 秒；`vectorize` 流式解析
   admin CLI 的 JSON 行，job 存内存，`stop` 杀子进程但保留检查点。
+- **设置页新增「建索引」与「删除向量库索引」（`T8-08`）**：建索引调用 admin `index`
+  （`index_sync(build_vectors=False)`，即使语义开关打开也不联系 embedding 后端）；代码索引
+  缺失时「开始向量化」禁用并提示先建索引（修复直接点击时报
+  `no code index … index the workspace before vectorizing` 的入口）；删除向量库只删
+  `<root>/.coderag/vectors/`（含检查点与缓存），保留 `.coderag/index.sqlite3`，二次确认，
+  没有向量库时是 no-op。
 - **设置页运维面板**：云端 Key（状态/保存/删除）、语义后端（本地/云端连通性检查、一键启动本地、
   可关闭错误弹窗）、向量数据库（存在性/模型/维度/chunk 计数/检查点/生成时间、刷新、增量向量化、
   开始/停止、进度条、完成后自动刷新）；有未保存参数改动时提示先保存。

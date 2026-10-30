@@ -1914,6 +1914,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-05` | 查询路径的预算与预热：向量查询只尝试一次、先校验后加载索引、受 `CODERAG_SEMANTIC_QUERY_TIMEOUT`（默认 10 s）约束；超时返回扩展码 `SEMANTIC_TIMEOUT` 且不取消后台加载；`call_tool` 走 `asyncio.to_thread` | `git log --grep 'Refs: T8-05'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §11；`CHANGELOG.md` `[Unreleased]` |
 | `T8-06` | CLI `search` 不呈现 `semantic` notice（越界缺陷，仅登记）；MCP 路径不受影响 | — | 未修 | `docs/backlog.md`「静默丢弃语义降级通知」 |
 | `T8-07` | 超时墙分层收敛：设置页字段 `semanticTimeout` → `semanticQueryTimeout`（`CODERAG_SEMANTIC_QUERY_TIMEOUT`，默认 10 s）；`CODERAG_SEMANTIC_TIMEOUT` 移出表单、降级为**建索引批次**的传输上限（默认 60 s，最多重试 2 次）；查询线程固定 120 s 传输上限，与前者解耦 | `git log --grep 'Refs: T8-07'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §12；`README.md` 字段表 |
+| `T8-08` | 设置页新增两个运维按钮：**建索引**（admin `index` → `index_sync(build_vectors=False)`，不联系后端；索引缺失时禁用「开始向量化」并提示）与**删除向量库索引**（只删 `<root>/.coderag/vectors/`，保留 `index.sqlite3`；二次确认；无库 no-op）。同时补 admin `index`/`remove-vectors` 子命令、Host 动作与路由白名单、运行中拒绝与测试 | `git log --grep 'Refs: T8-08'` | 已完成 | 本节；`README.md`「运维面板」；`CHANGELOG.md` `[Unreleased]` |
 
 ---
 
