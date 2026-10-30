@@ -698,3 +698,13 @@
   （`src/dsh_coderag/__main__.py:769-773`）；测试改成按平台断言整条赋值串、不再只查 `'2'`
   （`tests/test_cli.py:422-427`）。证据：`.venv/bin/python -m pytest` → `680 passed, 5 skipped`；
   `ruff check src tests` → `All checks passed!`；`mypy --strict src` → `Success: no issues found in 27 source files`。
+
+## `dsh-coderag search`（CLI）静默丢弃语义降级通知（发现于 `T8-05`，2026-10-30）
+
+- **事实（实测，macOS，`12dabf6`）**：`CODERAG_SEMANTIC=on CODERAG_SEMANTIC_QUERY_TIMEOUT=2 .venv/bin/python -m dsh_coderag search "<中文疑问句>"`
+  只打印命中行，未打印 `semantic: BM25 only (SEMANTIC_TIMEOUT) ...`；`src/dsh_coderag/__main__.py` 的 `_run_search`
+  （`:498-510`）只取 `result.hits`，整个 CLI 文件没有任何 `semantic` 引用。
+- **影响**：模型侧的 MCP 路径不受影响（`server._dispatch` 走 `render._format_search_result`，带 notice），
+  但用 CLI 排查时，向量层超时/失败/索引缺失都表现为"检索正常"，与 `RL-06`「让降级可见」的精神相悖。
+- **建议修法**：在 `_run_search` 里把 `result.semantic` 用 `render._format_semantic_notice` 打到 stderr
+  （stdout 保持纯结果）；或至少把 `status` 打到 stderr。属独立小改动，需所有者裁决。
