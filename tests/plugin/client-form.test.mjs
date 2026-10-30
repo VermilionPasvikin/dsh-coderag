@@ -18,7 +18,7 @@ const ACCEPTED = {
   semanticBackend: 'ollama',
   semanticUrl: 'http://127.0.0.1:11434',
   semanticModel: 'bge-m3',
-  semanticTimeout: 0,
+  semanticQueryTimeout: 0,
   semanticBatch: 0,
   semanticMaxChunks: 50000,
   semanticAllowRemote: true,
@@ -36,7 +36,7 @@ test('a draft strings every number and keeps the switches boolean', () => {
   assert.deepEqual(Object.keys(draft), FIELDS.map(field => field.key))
   assert.deepEqual(toDraft(undefined), toDraft({
     root: '', maxFiles: 0, maxFileBytes: 0, maxTokens: 0, extraExtensions: '', semantic: false,
-    semanticBackend: '', semanticUrl: '', semanticModel: '', semanticTimeout: 0, semanticBatch: 0,
+    semanticBackend: '', semanticUrl: '', semanticModel: '', semanticQueryTimeout: 0, semanticBatch: 0,
     semanticMaxChunks: 0, semanticAllowRemote: false,
   }))
 })

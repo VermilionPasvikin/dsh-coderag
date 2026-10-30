@@ -32,7 +32,7 @@ const OLLAMA = {
   semanticBackend: 'ollama',
   semanticUrl: 'http://127.0.0.1:11434',
   semanticModel: 'bge-m3',
-  semanticTimeout: 5,
+  semanticQueryTimeout: 5,
   semanticBatch: 4,
   semanticMaxChunks: 50000,
   semanticAllowRemote: false,
@@ -51,7 +51,7 @@ test('the field table covers all thirteen owned environment variables', () => {
     [
       'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_MAX_TOKENS',
       'CODERAG_EXTRA_EXTENSIONS', 'CODERAG_SEMANTIC', 'CODERAG_SEMANTIC_BACKEND',
-      'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT',
+      'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_QUERY_TIMEOUT',
       'CODERAG_SEMANTIC_BATCH', 'CODERAG_SEMANTIC_MAX_CHUNKS', 'CODERAG_SEMANTIC_ALLOW_REMOTE',
     ],
   )
@@ -69,7 +69,7 @@ test('every field carries a label and a one-line hint', () => {
 test('normalization trims strings and clamps bad numbers to the engine default', () => {
   const values = normalizeValues({
     root: '  /workspace  ', maxFiles: '12', maxFileBytes: -1, maxTokens: 'abc',
-    extraExtensions: ' .mxml ', semantic: 1, semanticTimeout: Number.NaN,
+    extraExtensions: ' .mxml ', semantic: 1, semanticQueryTimeout: Number.NaN,
     semanticMaxChunks: '9000', semanticAllowRemote: 1,
   })
   assert.equal(values.root, '/workspace')
@@ -78,7 +78,7 @@ test('normalization trims strings and clamps bad numbers to the engine default',
   assert.equal(values.maxTokens, 0)
   assert.equal(values.extraExtensions, '.mxml')
   assert.equal(values.semantic, false)
-  assert.equal(values.semanticTimeout, 0)
+  assert.equal(values.semanticQueryTimeout, 0)
   assert.equal(values.semanticModel, '')
   assert.equal(values.semanticMaxChunks, 9000)
   assert.equal(values.semanticAllowRemote, false)
@@ -107,7 +107,7 @@ test('the env plan exports strings and marks cleared fields for removal', () => 
     CODERAG_SEMANTIC_BACKEND: 'ollama',
     CODERAG_SEMANTIC_URL: 'http://127.0.0.1:11434',
     CODERAG_SEMANTIC_MODEL: 'bge-m3',
-    CODERAG_SEMANTIC_TIMEOUT: '5',
+    CODERAG_SEMANTIC_QUERY_TIMEOUT: '5',
     CODERAG_SEMANTIC_BATCH: '4',
     CODERAG_SEMANTIC_MAX_CHUNKS: '50000',
   })
@@ -149,7 +149,7 @@ test('merging preserves the API key and unrelated variables', () => {
 test('validation accepts the documented values and the empty integer shorthand', () => {
   assert.deepEqual(validateValues(OLLAMA), [])
   assert.deepEqual(validateValues({
-    ...OLLAMA, maxFiles: '', maxTokens: '', semanticTimeout: '0', semanticBatch: '2048', semanticMaxChunks: '',
+    ...OLLAMA, maxFiles: '', maxTokens: '', semanticQueryTimeout: '0', semanticBatch: '2048', semanticMaxChunks: '',
   }), [])
 })
 

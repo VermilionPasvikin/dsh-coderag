@@ -87,7 +87,7 @@ const volatileFields = Object.entries(rehydrated.dict).filter(([, schema]) => sc
 check('all thirteen setting fields are volatile in the schema JSON', volatileFields.sort(), [
   'extraExtensions', 'maxFileBytes', 'maxFiles', 'maxTokens', 'root', 'semantic',
   'semanticAllowRemote', 'semanticBackend', 'semanticBatch', 'semanticMaxChunks',
-  'semanticModel', 'semanticTimeout', 'semanticUrl',
+  'semanticModel', 'semanticQueryTimeout', 'semanticUrl',
 ])
 check('the settings namespace is the row id', host.inject, ['loader'])
 check('the plugin exports the row name', host.name, 'dsh-coderag')
@@ -109,7 +109,7 @@ const boot = await mount({
     root: '/ws-one', maxFiles: 100, maxFileBytes: 2048, maxTokens: 6000,
     extraExtensions: '.mxml,.as',
     semantic: true, semanticBackend: 'ollama', semanticUrl: 'http://127.0.0.1:11434',
-    semanticModel: 'bge-m3', semanticTimeout: 5, semanticBatch: 4,
+    semanticModel: 'bge-m3', semanticQueryTimeout: 5, semanticBatch: 4,
     semanticMaxChunks: 30000, semanticAllowRemote: true,
   },
   mcpEnv: {
@@ -122,7 +122,7 @@ const bootEnv = boot.applies.at(-1)
 check('boot settings export root', bootEnv.CODERAG_ROOT, '/ws-one')
 check('boot settings export numeric fields as strings', [
   bootEnv.CODERAG_MAX_FILES, bootEnv.CODERAG_MAX_FILE_BYTES, bootEnv.CODERAG_MAX_TOKENS,
-  bootEnv.CODERAG_SEMANTIC_TIMEOUT, bootEnv.CODERAG_SEMANTIC_MAX_CHUNKS,
+  bootEnv.CODERAG_SEMANTIC_QUERY_TIMEOUT, bootEnv.CODERAG_SEMANTIC_MAX_CHUNKS,
 ], ['100', '2048', '6000', '5', '30000'])
 check('boot settings export the semantic switch as on', bootEnv.CODERAG_SEMANTIC, 'on')
 check('boot settings export the remote opt-in as 1', bootEnv.CODERAG_SEMANTIC_ALLOW_REMOTE, '1')
@@ -136,7 +136,7 @@ await boot.settings.update({
     ...boot.settings.options.config,
     root: '/ws-two', maxFiles: 0, maxFileBytes: 0, maxTokens: 0, extraExtensions: '',
     semantic: false, semanticBackend: '', semanticUrl: '', semanticModel: '',
-    semanticTimeout: 0, semanticBatch: 0, semanticMaxChunks: 0, semanticAllowRemote: false,
+    semanticQueryTimeout: 0, semanticBatch: 0, semanticMaxChunks: 0, semanticAllowRemote: false,
   },
 })
 const restarted = await waitFor(() => {
@@ -147,7 +147,7 @@ check('a volatile-only save restarts the MCP row', restarted, true)
 const savedEnv = boot.applies.at(-1)
 check('the save removes settings that were cleared', [
   savedEnv.CODERAG_MAX_FILES, savedEnv.CODERAG_MAX_TOKENS, savedEnv.CODERAG_SEMANTIC,
-  savedEnv.CODERAG_SEMANTIC_TIMEOUT, savedEnv.CODERAG_SEMANTIC_MAX_CHUNKS,
+  savedEnv.CODERAG_SEMANTIC_QUERY_TIMEOUT, savedEnv.CODERAG_SEMANTIC_MAX_CHUNKS,
   savedEnv.CODERAG_SEMANTIC_ALLOW_REMOTE, savedEnv.CODERAG_EXTRA_EXTENSIONS,
 ], [undefined, undefined, undefined, undefined, undefined, undefined, undefined])
 check('the save keeps unrelated env', savedEnv.KEEP, '1')

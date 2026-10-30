@@ -32,7 +32,7 @@ export const DEFAULT_VALUES = Object.freeze({
   semanticBackend: '',
   semanticUrl: '',
   semanticModel: '',
-  semanticTimeout: 0,
+  semanticQueryTimeout: 0,
   semanticBatch: 0,
   semanticMaxChunks: 0,
   semanticAllowRemote: false,
@@ -46,7 +46,7 @@ export const ENGINE_DEFAULTS = Object.freeze({
   maxFiles: 20000,
   maxFileBytes: 1048576,
   maxTokens: 4000,
-  semanticTimeout: 30,
+  semanticQueryTimeout: 10,
   semanticBatch: 16,
   semanticMaxChunks: 100000,
   semanticUrl: 'http://127.0.0.1:11434',
@@ -143,12 +143,12 @@ export const FIELDS = Object.freeze([
     hint: '本地默认 bge-m3；云端后端必须显式给出。',
   }),
   Object.freeze({
-    key: 'semanticTimeout',
+    key: 'semanticQueryTimeout',
     group: 'semantic',
     kind: 'integer',
-    label: '语义请求超时（秒）',
-    env: 'CODERAG_SEMANTIC_TIMEOUT',
-    hint: `0 = 引擎默认（${ENGINE_DEFAULTS.semanticTimeout} 秒）。`,
+    label: '语义查询超时（秒）',
+    env: 'CODERAG_SEMANTIC_QUERY_TIMEOUT',
+    hint: `0 = 引擎默认（${ENGINE_DEFAULTS.semanticQueryTimeout} 秒）。超时后先用 BM25 返回、后台继续加载；建议明显小于 DSH 的工具调用超时。`,
   }),
   Object.freeze({
     key: 'semanticBatch',
@@ -188,7 +188,7 @@ export const GROUPS = Object.freeze([
 const EXTENSION_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_+-]*$/
 
 const FIELD_BY_KEY = new Map(FIELDS.map(field => [field.key, field]))
-const INTEGER_KEYS = new Set(['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticTimeout', 'semanticBatch', 'semanticMaxChunks'])
+const INTEGER_KEYS = new Set(['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticQueryTimeout', 'semanticBatch', 'semanticMaxChunks'])
 
 /**
  * Coerce one accepted Host value into the shape this module and env mapping use.
@@ -251,7 +251,7 @@ export function isEmptySettings(values) {
     && normalized.semanticBackend === ''
     && normalized.semanticUrl === ''
     && normalized.semanticModel === ''
-    && normalized.semanticTimeout === 0
+    && normalized.semanticQueryTimeout === 0
     && normalized.semanticBatch === 0
     && normalized.semanticMaxChunks === 0
     && !normalized.semanticAllowRemote
@@ -303,7 +303,7 @@ export function validateValues(values) {
   const errors = []
   const reject = (field, message) => errors.push({ field, message })
 
-  for (const key of ['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticTimeout', 'semanticBatch', 'semanticMaxChunks']) {
+  for (const key of ['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticQueryTimeout', 'semanticBatch', 'semanticMaxChunks']) {
     const raw = Object.hasOwn(draft, key) ? draft[key] : DEFAULT_VALUES[key]
     const text = typeof raw === 'string' ? raw.trim() : String(raw)
     // An empty input means "engine default" (0), matching the placeholder.

@@ -29,7 +29,7 @@ const VALUES = {
   semanticBackend: 'ollama',
   semanticUrl: '',
   semanticModel: '',
-  semanticTimeout: 0,
+  semanticQueryTimeout: 0,
   semanticBatch: 0,
   semanticMaxChunks: 0,
   semanticAllowRemote: false,

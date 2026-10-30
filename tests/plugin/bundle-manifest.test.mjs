@@ -52,7 +52,7 @@ test('the settings row reads the shell environment as its defaults', () => {
   for (const variable of [
     'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_MAX_TOKENS',
     'CODERAG_EXTRA_EXTENSIONS', 'CODERAG_SEMANTIC', 'CODERAG_SEMANTIC_BACKEND',
-    'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT',
+    'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_QUERY_TIMEOUT',
     'CODERAG_SEMANTIC_BATCH', 'CODERAG_SEMANTIC_MAX_CHUNKS', 'CODERAG_SEMANTIC_ALLOW_REMOTE',
   ]) {
     assert.match(patch, new RegExp(`!!js[^\\n]*process\\.env\\.${variable}`), `missing default expression for ${variable}`)
@@ -66,12 +66,12 @@ test('numeric defaults clamp bad shell values instead of failing Config mounting
     return match[1]
   }
   const evaluate = (key, env) => new Function('process', `return (${expression(key)})`)({ env })
-  for (const key of ['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticTimeout', 'semanticBatch', 'semanticMaxChunks']) {
+  for (const key of ['maxFiles', 'maxFileBytes', 'maxTokens', 'semanticQueryTimeout', 'semanticBatch', 'semanticMaxChunks']) {
     const variable = {
       maxFiles: 'CODERAG_MAX_FILES',
       maxFileBytes: 'CODERAG_MAX_FILE_BYTES',
       maxTokens: 'CODERAG_MAX_TOKENS',
-      semanticTimeout: 'CODERAG_SEMANTIC_TIMEOUT',
+      semanticQueryTimeout: 'CODERAG_SEMANTIC_QUERY_TIMEOUT',
       semanticBatch: 'CODERAG_SEMANTIC_BATCH',
       semanticMaxChunks: 'CODERAG_SEMANTIC_MAX_CHUNKS',
     }[key]
@@ -102,7 +102,7 @@ test('owned variables are not duplicated on the MCP row', () => {
   for (const owned of [
     'CODERAG_ROOT', 'CODERAG_MAX_FILES', 'CODERAG_MAX_FILE_BYTES', 'CODERAG_MAX_TOKENS',
     'CODERAG_EXTRA_EXTENSIONS', 'CODERAG_SEMANTIC:', 'CODERAG_SEMANTIC_BACKEND',
-    'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_TIMEOUT',
+    'CODERAG_SEMANTIC_URL', 'CODERAG_SEMANTIC_MODEL', 'CODERAG_SEMANTIC_QUERY_TIMEOUT',
     'CODERAG_SEMANTIC_BATCH', 'CODERAG_SEMANTIC_MAX_CHUNKS', 'CODERAG_SEMANTIC_ALLOW_REMOTE',
   ]) {
     assert.equal(mcpRow.includes(owned), false, `the MCP row must not set ${owned}`)
@@ -131,7 +131,7 @@ test('the built Host bundle exports a function plugin with an all-volatile Confi
   assert.equal(root.type, 'object')
   const expected = [
     'root', 'maxFiles', 'maxFileBytes', 'maxTokens', 'extraExtensions', 'semantic',
-    'semanticBackend', 'semanticUrl', 'semanticModel', 'semanticTimeout', 'semanticBatch',
+    'semanticBackend', 'semanticUrl', 'semanticModel', 'semanticQueryTimeout', 'semanticBatch',
     'semanticMaxChunks', 'semanticAllowRemote',
   ]
   assert.deepEqual(Object.keys(root.dict).sort(), expected.sort())

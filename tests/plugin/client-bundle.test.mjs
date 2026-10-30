@@ -23,7 +23,7 @@ const BANNER = 'window.__ModuleLoader__.load({ id: "dsh-coderag", factory: (requ
 
 const FIELD_LABELS = [
   '工作区根', '文件数量上限', '单文件字节上限', '检索 token 预算', '额外文件扩展名',
-  '启用语义检索', '语义后端', '语义服务 URL', '语义模型', '语义请求超时（秒）',
+  '启用语义检索', '语义后端', '语义服务 URL', '语义模型', '语义查询超时（秒）',
   '语义批量大小', '向量化 chunk 上限', '允许非 loopback 云端地址',
 ]
 
@@ -37,7 +37,7 @@ const READY_VALUES = {
   semanticBackend: 'ollama',
   semanticUrl: 'http://127.0.0.1:11434',
   semanticModel: 'bge-m3',
-  semanticTimeout: 0,
+  semanticQueryTimeout: 0,
   semanticBatch: 0,
   semanticMaxChunks: 50000,
   semanticAllowRemote: false,
@@ -49,7 +49,7 @@ const form = {
     value: READY_VALUES,
     base: {
       root: '', maxFiles: 0, maxFileBytes: 0, maxTokens: 0, extraExtensions: '', semantic: false,
-      semanticBackend: '', semanticUrl: '', semanticModel: '', semanticTimeout: 0, semanticBatch: 0,
+      semanticBackend: '', semanticUrl: '', semanticModel: '', semanticQueryTimeout: 0, semanticBatch: 0,
       semanticMaxChunks: 0, semanticAllowRemote: false,
     },
     user: { root: 'F:\\repo' },

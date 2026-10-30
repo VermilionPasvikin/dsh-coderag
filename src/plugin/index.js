@@ -51,7 +51,7 @@ export const Config = z.object({
     .volatile(),
   semanticUrl: z.string().default(DEFAULT_VALUES.semanticUrl).description('Embedding service URL.').volatile(),
   semanticModel: z.string().default(DEFAULT_VALUES.semanticModel).description('Embedding model name.').volatile(),
-  semanticTimeout: z.natural().default(DEFAULT_VALUES.semanticTimeout).description('Request timeout in seconds; 0 uses the default.').volatile(),
+  semanticQueryTimeout: z.natural().default(DEFAULT_VALUES.semanticQueryTimeout).description('Query wall-clock budget in seconds; 0 uses the default (10).').volatile(),
   semanticBatch: z.natural().default(DEFAULT_VALUES.semanticBatch).description('Embedding batch size; 0 uses the default.').volatile(),
   semanticMaxChunks: z.natural().default(DEFAULT_VALUES.semanticMaxChunks).description('Embedding chunk cap; 0 uses the engine default.').volatile(),
   semanticAllowRemote: z.boolean().default(DEFAULT_VALUES.semanticAllowRemote)

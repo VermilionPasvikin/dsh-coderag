@@ -35,11 +35,15 @@
 # MCP row: CODERAG_ROOT, CODERAG_MAX_FILES, CODERAG_MAX_FILE_BYTES,
 # CODERAG_MAX_TOKENS, CODERAG_EXTRA_EXTENSIONS, CODERAG_SEMANTIC,
 # CODERAG_SEMANTIC_BACKEND, CODERAG_SEMANTIC_URL, CODERAG_SEMANTIC_MODEL,
-# CODERAG_SEMANTIC_TIMEOUT, CODERAG_SEMANTIC_BATCH, CODERAG_SEMANTIC_MAX_CHUNKS,
-# CODERAG_SEMANTIC_ALLOW_REMOTE.
+# CODERAG_SEMANTIC_QUERY_TIMEOUT, CODERAG_SEMANTIC_BATCH,
+# CODERAG_SEMANTIC_MAX_CHUNKS, CODERAG_SEMANTIC_ALLOW_REMOTE.
 #
-# The one variable the settings page deliberately does NOT own is the cloud API
-# key: it stays on the MCP row (or the launching shell) and is never rendered in
+# CODERAG_SEMANTIC_TIMEOUT is deliberately NOT owned: it is the per-request
+# transport bound of indexing batches (ADR-16 12), an advanced knob set through
+# the launching shell or the profile patch. The query path does not read it.
+#
+# The other variable the settings page deliberately does NOT own is the cloud
+# API key: it stays on the MCP row (or the launching shell) and is never rendered in
 # the browser form, so a secret cannot be written into a settings document, a
 # log or a screenshot (RL-02 / S-05).
 #
@@ -72,7 +76,7 @@
         semanticBackend: !!js "['ollama', 'openai'].includes(process.env.CODERAG_SEMANTIC_BACKEND ?? '') ? process.env.CODERAG_SEMANTIC_BACKEND : ''"
         semanticUrl: !!js "process.env.CODERAG_SEMANTIC_URL ?? ''"
         semanticModel: !!js "process.env.CODERAG_SEMANTIC_MODEL ?? ''"
-        semanticTimeout: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_SEMANTIC_TIMEOUT ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
+        semanticQueryTimeout: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_SEMANTIC_QUERY_TIMEOUT ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
         semanticBatch: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_SEMANTIC_BATCH ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
         semanticMaxChunks: !!js "(() => { const n = Math.trunc(Number(process.env.CODERAG_SEMANTIC_MAX_CHUNKS ?? 0)); return Number.isFinite(n) && n > 0 ? n : 0 })()"
         semanticAllowRemote: !!js "(process.env.CODERAG_SEMANTIC_ALLOW_REMOTE ?? '') === '1'"
