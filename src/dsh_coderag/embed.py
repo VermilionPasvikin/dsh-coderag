@@ -8,9 +8,10 @@ fallback are T3-10, and the cloud backend is T5-20.
 When CODERAG_SEMANTIC is not `on` nothing here runs, so importing this module
 must never touch the network, never require numpy and never block startup
 (RL-10). Failures are raised as SemanticError carrying a stable code -- one of
-the frozen ErrorCode values, or the redirect refusal added for T8-02 -- so the
-caller can report a structured status and keep serving BM25 instead of turning
-it into an MCP isError (RL-06, RL-09).
+the frozen ErrorCode values, or an extension code added for T8-02 (redirect
+refusal) or T8-05 (query timeout) -- so the caller can report a structured
+status and keep serving BM25 instead of turning it into an MCP isError
+(RL-06, RL-09).
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ import hashlib
 import json
 import os
 import struct
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -29,7 +32,12 @@ from functools import partial
 from pathlib import Path
 from typing import IO, cast
 
-from dsh_coderag.config import ENV_SEMANTIC, ENV_SEMANTIC_API_KEY, SemanticConfig
+from dsh_coderag.config import (
+    ENV_SEMANTIC,
+    ENV_SEMANTIC_API_KEY,
+    ENV_SEMANTIC_QUERY_TIMEOUT,
+    SemanticConfig,
+)
 from dsh_coderag.log import log_event
 from dsh_coderag.types import ErrorCode
 
@@ -89,15 +97,34 @@ class _RedirectRefusedCode(str, Enum):
 
 _REDIRECT_REFUSED_CODE = cast(ErrorCode, _RedirectRefusedCode.SEMANTIC_REDIRECT_REFUSED)
 
+SEMANTIC_TIMEOUT = "SEMANTIC_TIMEOUT"
+"""Stable code for a query that missed its wall-clock budget (T8-05).
+
+Like the redirect refusal above, this is an extension rather than a frozen
+`ErrorCode` member: ADR-16 11 adds it on the same `SemanticError` seam, and
+every consumer reads `.value`, so it renders as `SEMANTIC_TIMEOUT` without
+extending the contract frozen by ADR-16 6 / ADR-17 6.
+"""
+
+
+class _QueryTimeoutCode(str, Enum):
+    """The timeout code as an Enum so `SemanticError.code.value` keeps working."""
+
+    SEMANTIC_TIMEOUT = SEMANTIC_TIMEOUT
+
+
+_QUERY_TIMEOUT_CODE = cast(ErrorCode, _QueryTimeoutCode.SEMANTIC_TIMEOUT)
+
 
 class SemanticError(Exception):
     """An optional-backend failure carrying one stable code.
 
     Mostly a frozen `ErrorCode`; a redirect refusal carries
-    `SEMANTIC_REDIRECT_REFUSED` because the ADR contract did not reserve a
-    member for it (T8-02). Callers read `.value`, so both forms render without
-    a special case. They turn this into a structured status and keep serving
-    BM25; it must never reach the MCP layer as an isError (RL-09).
+    `SEMANTIC_REDIRECT_REFUSED` (T8-02) and a query budget overrun carries
+    `SEMANTIC_TIMEOUT` (T8-05), because the ADR contract did not reserve members
+    for them. Callers read `.value`, so all forms render without a special case.
+    They turn this into a structured status and keep serving BM25; it must never
+    reach the MCP layer as an isError (RL-09).
     """
 
     def __init__(self, code: ErrorCode, message: str, hint: str | None = None) -> None:
@@ -346,6 +373,24 @@ def _require_credentials(config: SemanticConfig) -> None:
         f"set {ENV_SEMANTIC_API_KEY} (in the environment, or in the profile's "
         f"cordis.patch.yml for the desktop app) and retry",
     )
+
+
+def validate_embedding_backend(config: SemanticConfig) -> str:
+    """Validate the backend settings and return the request URL.
+
+    Runs every check that needs no I/O — loopback-only local backend, cloud
+    credential presence, known endpoint — so the search path can report an
+    unsupported backend or a missing credential *before* it looks for a vector
+    index (T8-05). `embed_texts` and `embed_query` both call this, which keeps
+    one definition of "the configuration is usable".
+
+    Raises:
+        SemanticError: SEMANTIC_BACKEND_UNSUPPORTED, SEMANTIC_BACKEND_NOT_LOCAL
+            or SEMANTIC_AUTH_MISSING.
+    """
+    validate_local_backend(config)
+    _require_credentials(config)
+    return endpoint_for(config)
 
 
 def _auth_rejected(url: str) -> SemanticError:
@@ -622,9 +667,7 @@ def embed_texts(
             f"{ENV_SEMANTIC} is not 'on', so no embedding backend is configured",
             "enable the optional backend explicitly, or keep using BM25",
         )
-    validate_local_backend(config)
-    _require_credentials(config)
-    url = endpoint_for(config)
+    url = validate_embedding_backend(config)
     post = (
         transport
         if transport is not None
@@ -640,6 +683,151 @@ def embed_texts(
             for index in indices:
                 vectors[index] = embedded[text]
     return _require_complete(vectors)
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    """Whether exc means the request ran out of time rather than failed outright."""
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        return isinstance(exc.reason, TimeoutError)
+    return False
+
+
+def embed_query(
+    config: SemanticConfig,
+    text: str,
+    *,
+    budget_s: float | None = None,
+    transport: Transport | None = None,
+) -> list[float]:
+    """Embed one query within a wall-clock budget (T8-05, ADR-16 11).
+
+    The request runs in a daemon thread, so the caller stops waiting when the
+    budget expires even if DNS resolution or a cold model load is blocking. The
+    request itself is *not* cancelled: it keeps running and finishes loading the
+    model, so the next query is fast. The HTTP timeout stays `config.timeout_s`
+    on purpose -- it is larger than the budget, because cutting the socket at
+    the budget would abort exactly the load the warm-up exists to finish.
+
+    Exactly one request is made. Retrying belongs to indexing, not to an
+    interactive query that already has a caller-facing deadline.
+
+    Args:
+        config: Settings from `load_semantic_config`.
+        text: The query text.
+        budget_s: Wall-clock budget in seconds; defaults to
+            `config.query_timeout_s`.
+        transport: HTTP seam; defaults to the urllib implementation.
+
+    Returns:
+        One vector for the query text.
+
+    Raises:
+        SemanticError: SEMANTIC_BACKEND_UNAVAILABLE when the backend is off,
+            SEMANTIC_TIMEOUT when the budget or the HTTP timeout expires,
+            SEMANTIC_EMBED_FAILED for every other failure.
+    """
+    if not config.enabled:
+        raise SemanticError(
+            ErrorCode.SEMANTIC_BACKEND_UNAVAILABLE,
+            f"{ENV_SEMANTIC} is not 'on', so no embedding backend is configured",
+            "enable the optional backend explicitly, or keep using BM25",
+        )
+    url = validate_embedding_backend(config)
+    post = (
+        transport
+        if transport is not None
+        else partial(_http_transport, api_key=config.api_key)
+    )
+    budget = float(config.query_timeout_s if budget_s is None else budget_s)
+    if budget <= 0:
+        raise SemanticError(
+            _QUERY_TIMEOUT_CODE,
+            f"no query budget was left for model {config.model}",
+            f"raise {ENV_SEMANTIC_QUERY_TIMEOUT}, or retry now that the backend is warm",
+        )
+    done = threading.Event()
+    state = {"abandoned": False}
+    vectors: list[list[float]] | None = None
+    failure: Exception | None = None
+    started = time.monotonic()
+
+    def request() -> None:
+        nonlocal vectors, failure
+        try:
+            vectors = post(url, config.model, [text], float(config.timeout_s))
+        except Exception as exc:  # noqa: BLE001 - carried to the waiting caller
+            failure = exc
+        finally:
+            done.set()
+            if state["abandoned"]:
+                elapsed_ms = (time.monotonic() - started) * 1000
+                if failure is None and vectors is not None and len(vectors) == 1:
+                    log_event(
+                        "semantic_query_warmup_completed",
+                        url=url,
+                        model=config.model,
+                        duration_ms=elapsed_ms,
+                    )
+                else:
+                    log_event(
+                        "semantic_query_warmup_failed",
+                        level="warning",
+                        url=url,
+                        model=config.model,
+                        error=type(failure).__name__ if failure else "shape",
+                        duration_ms=elapsed_ms,
+                    )
+
+    thread = threading.Thread(target=request, name="coderag-embed-query", daemon=True)
+    thread.start()
+    if not done.wait(budget):
+        state["abandoned"] = True
+        elapsed_ms = (time.monotonic() - started) * 1000
+        log_event(
+            "semantic_query_timeout",
+            level="warning",
+            url=url,
+            model=config.model,
+            budget_s=budget,
+            duration_ms=elapsed_ms,
+        )
+        raise SemanticError(
+            _QUERY_TIMEOUT_CODE,
+            f"the query embedding to {url} (model {config.model}) did not answer "
+            f"within {budget:g} s",
+            "the backend may still be loading; the request continues in the "
+            "background, so retrying shortly should be faster -- or raise "
+            f"{ENV_SEMANTIC_QUERY_TIMEOUT}",
+        )
+    if failure is not None:
+        if isinstance(failure, SemanticError):
+            raise failure
+        elapsed_ms = (time.monotonic() - started) * 1000
+        code = _QUERY_TIMEOUT_CODE if _is_timeout(failure) else ErrorCode.SEMANTIC_EMBED_FAILED
+        log_event(
+            "semantic_query_failed",
+            level="warning",
+            url=url,
+            model=config.model,
+            error=type(failure).__name__,
+            duration_ms=elapsed_ms,
+        )
+        raise SemanticError(
+            code,
+            f"the query embedding to {url} (model {config.model}) failed: "
+            f"{type(failure).__name__}",
+            "check that the backend is running and the model is pulled; the "
+            "search falls back to BM25",
+        ) from failure
+    if vectors is None or len(vectors) != 1:
+        count = 0 if vectors is None else len(vectors)
+        raise SemanticError(
+            ErrorCode.SEMANTIC_EMBED_FAILED,
+            f"transport returned {count} vectors for one query",
+        )
+    return vectors[0]
 
 
 def _fill_from_cache(

@@ -58,6 +58,7 @@ def test_semantic_defaults_keep_the_backend_off() -> None:
     assert config.url == "http://127.0.0.1:11434"
     assert config.model == "bge-m3"
     assert config.timeout_s == 30
+    assert config.query_timeout_s == 10
     assert config.batch == 16
     assert config.max_chunks == 100000
     assert config.api_key is None
@@ -83,11 +84,13 @@ def test_blank_values_count_as_unset_so_defaults_survive() -> None:
             "CODERAG_SEMANTIC": "on",
             "CODERAG_SEMANTIC_MODEL": "   ",
             "CODERAG_SEMANTIC_TIMEOUT": "",
+            "CODERAG_SEMANTIC_QUERY_TIMEOUT": "",
             "CODERAG_SEMANTIC_BATCH": "",
         }
     )
     assert config.model == "bge-m3"
     assert config.timeout_s == 30
+    assert config.query_timeout_s == 10
     assert config.batch == 16
     assert config.enabled is True
 
@@ -96,16 +99,27 @@ def test_semantic_numeric_overrides_are_read() -> None:
     config = load_semantic_config(
         {
             "CODERAG_SEMANTIC_TIMEOUT": "5",
+            "CODERAG_SEMANTIC_QUERY_TIMEOUT": "3",
             "CODERAG_SEMANTIC_BATCH": "4",
             "CODERAG_SEMANTIC_MAX_CHUNKS": "77",
         }
     )
-    assert (config.timeout_s, config.batch, config.max_chunks) == (5, 4, 77)
+    assert (config.timeout_s, config.query_timeout_s, config.batch, config.max_chunks) == (
+        5,
+        3,
+        4,
+        77,
+    )
 
 
 def test_malformed_semantic_number_is_a_config_error() -> None:
     with pytest.raises(ConfigError, match="CODERAG_SEMANTIC_BATCH"):
         load_semantic_config({"CODERAG_SEMANTIC_BATCH": "lots"})
+
+
+def test_query_timeout_must_be_a_positive_integer() -> None:
+    with pytest.raises(ConfigError, match="CODERAG_SEMANTIC_QUERY_TIMEOUT"):
+        load_semantic_config({"CODERAG_SEMANTIC_QUERY_TIMEOUT": "0"})
 
 
 def test_allow_remote_needs_the_exact_value_one() -> None:

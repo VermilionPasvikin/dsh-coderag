@@ -47,6 +47,7 @@ ENV_SEMANTIC_BACKEND = "CODERAG_SEMANTIC_BACKEND"
 ENV_SEMANTIC_URL = "CODERAG_SEMANTIC_URL"
 ENV_SEMANTIC_MODEL = "CODERAG_SEMANTIC_MODEL"
 ENV_SEMANTIC_TIMEOUT = "CODERAG_SEMANTIC_TIMEOUT"
+ENV_SEMANTIC_QUERY_TIMEOUT = "CODERAG_SEMANTIC_QUERY_TIMEOUT"
 ENV_SEMANTIC_BATCH = "CODERAG_SEMANTIC_BATCH"
 ENV_SEMANTIC_MAX_CHUNKS = "CODERAG_SEMANTIC_MAX_CHUNKS"
 ENV_SEMANTIC_API_KEY = "CODERAG_SEMANTIC_API_KEY"
@@ -61,6 +62,7 @@ DEFAULT_SEMANTIC_BACKEND = SEMANTIC_BACKEND_OLLAMA
 DEFAULT_SEMANTIC_URL = "http://127.0.0.1:11434"
 DEFAULT_SEMANTIC_MODEL = "bge-m3"
 DEFAULT_SEMANTIC_TIMEOUT = 30
+DEFAULT_SEMANTIC_QUERY_TIMEOUT = 10
 DEFAULT_SEMANTIC_BATCH = 16
 DEFAULT_SEMANTIC_MAX_CHUNKS = 100000
 
@@ -78,6 +80,12 @@ class SemanticConfig:
     `switch_value` so the structured status can name the invalid value instead
     of guessing (ADR-16 4). Required settings that are missing raise
     ConfigError rather than falling back to a guessed value.
+
+    `timeout_s` is the HTTP timeout for one embedding request, sized for
+    indexing batches. `query_timeout_s` is a separate wall-clock budget for the
+    interactive search path: a query must answer well inside the host's
+    tool-call budget even when the backend is still loading a model (ADR-16 11),
+    so the two numbers are not the same knob and default differently.
 
     SECURITY WARNING - enabling the cloud (`openai`) backend sends part of
     your source text off this machine:
@@ -102,6 +110,7 @@ class SemanticConfig:
     url: str = DEFAULT_SEMANTIC_URL
     model: str = DEFAULT_SEMANTIC_MODEL
     timeout_s: int = DEFAULT_SEMANTIC_TIMEOUT
+    query_timeout_s: int = DEFAULT_SEMANTIC_QUERY_TIMEOUT
     batch: int = DEFAULT_SEMANTIC_BATCH
     max_chunks: int = DEFAULT_SEMANTIC_MAX_CHUNKS
     api_key: str | None = None
@@ -336,6 +345,9 @@ def load_semantic_config(environ: Mapping[str, str] | None = None) -> SemanticCo
         url=url if url is not None else DEFAULT_SEMANTIC_URL,
         model=model if model is not None else DEFAULT_SEMANTIC_MODEL,
         timeout_s=_read_positive_int(env, ENV_SEMANTIC_TIMEOUT, DEFAULT_SEMANTIC_TIMEOUT),
+        query_timeout_s=_read_positive_int(
+            env, ENV_SEMANTIC_QUERY_TIMEOUT, DEFAULT_SEMANTIC_QUERY_TIMEOUT
+        ),
         batch=_read_positive_int(env, ENV_SEMANTIC_BATCH, DEFAULT_SEMANTIC_BATCH),
         max_chunks=_read_positive_int(
             env, ENV_SEMANTIC_MAX_CHUNKS, DEFAULT_SEMANTIC_MAX_CHUNKS

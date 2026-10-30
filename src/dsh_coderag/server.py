@@ -161,7 +161,8 @@ def build_server(root: Path | None = None) -> Server:
 
     @server.call_tool()  # type: ignore[untyped-decorator]
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-        return [TextContent(type="text", text=_dispatch(name, arguments, workspace_root))]
+        text = await asyncio.to_thread(_dispatch, name, arguments, workspace_root)
+        return [TextContent(type="text", text=text)]
 
     return server
 

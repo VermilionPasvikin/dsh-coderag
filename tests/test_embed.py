@@ -27,10 +27,12 @@ from dsh_coderag.embed import (
     CHECKPOINT_FILENAME,
     CHECKPOINT_MAGIC,
     RETRY_LIMIT,
+    SEMANTIC_TIMEOUT,
     DiskEmbeddingCache,
     EmbeddingCache,
     SemanticError,
     count_checkpoint_records,
+    embed_query,
     embed_texts,
     endpoint_for,
     validate_local_backend,
@@ -634,3 +636,107 @@ def test_the_transport_refuses_a_redirect_without_forwarding_the_key() -> None:
     assert _RedirectHandler.requests == [("/embeddings", "Bearer sk-redirect-secret")]
     assert "sk-redirect-secret" not in str(caught.value)
     assert "sk-redirect-secret" not in (caught.value.hint or "")
+
+
+def test_embed_query_returns_the_single_vector_and_uses_the_http_timeout() -> None:
+    """T8-05: one request, with the configured HTTP timeout (not the budget)."""
+    recorder = _Recorder()
+    vector = embed_query(_config(), "question", budget_s=2, transport=recorder)
+    assert vector == [8.0, 0.0]
+    assert recorder.calls == [
+        ("http://127.0.0.1:11434/api/embed", "bge-m3", ["question"], 5.0)
+    ]
+
+
+def test_embed_query_does_not_retry() -> None:
+    """T8-05: a deadline-bearing query makes exactly one attempt."""
+    calls: list[int] = []
+
+    def failing(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        calls.append(1)
+        raise OSError("connection refused")
+
+    with pytest.raises(SemanticError) as caught:
+        embed_query(_config(), "q", budget_s=2, transport=failing)
+    assert caught.value.code is ErrorCode.SEMANTIC_EMBED_FAILED
+    assert len(calls) == 1
+
+
+def test_embed_query_reports_a_budget_overrun_as_semantic_timeout() -> None:
+    """T8-05: the caller stops waiting, but the request keeps warming the model."""
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def slow(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        started.set()
+        release.wait(5)
+        finished.set()
+        return [[1.0, 2.0]]
+
+    with pytest.raises(SemanticError) as caught:
+        embed_query(_config(), "q", budget_s=0.05, transport=slow)
+    assert caught.value.code.value == SEMANTIC_TIMEOUT
+    assert "background" in (caught.value.hint or "")
+
+    assert started.is_set()
+    release.set()
+    assert finished.wait(2), "the abandoned request must keep running, not be cancelled"
+
+
+def test_embed_query_maps_a_request_timeout_to_semantic_timeout() -> None:
+    """T8-05: an HTTP timeout is a budget failure, not a generic embed failure."""
+
+    def timed_out(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        raise TimeoutError("timed out")
+
+    with pytest.raises(SemanticError) as caught:
+        embed_query(_config(), "q", budget_s=2, transport=timed_out)
+    assert caught.value.code.value == SEMANTIC_TIMEOUT
+
+
+def test_embed_query_keeps_structured_backend_errors_intact() -> None:
+    """T8-05: a credential rejection stays SEMANTIC_AUTH_REJECTED."""
+
+    def rejected(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        raise SemanticError(ErrorCode.SEMANTIC_AUTH_REJECTED, "rejected", "check the key")
+
+    with pytest.raises(SemanticError) as caught:
+        embed_query(_config(), "q", budget_s=2, transport=rejected)
+    assert caught.value.code is ErrorCode.SEMANTIC_AUTH_REJECTED
+
+
+def test_embed_query_validates_the_backend_before_any_request() -> None:
+    """T8-05: an unsupported backend is reported even without a vector index."""
+    recorder = _Recorder()
+    with pytest.raises(SemanticError) as caught:
+        embed_query(_config(backend="acme"), "q", transport=recorder)
+    assert caught.value.code is ErrorCode.SEMANTIC_BACKEND_UNSUPPORTED
+    assert recorder.calls == []
+
+
+def test_embed_query_refuses_the_off_switch_without_a_request() -> None:
+    recorder = _Recorder()
+    with pytest.raises(SemanticError) as caught:
+        embed_query(_config(enabled=False), "q", transport=recorder)
+    assert caught.value.code is ErrorCode.SEMANTIC_BACKEND_UNAVAILABLE
+    assert recorder.calls == []
+
+
+def test_embed_query_rejects_more_than_one_vector() -> None:
+    def two(
+        url: str, model: str, texts: Sequence[str], timeout: float
+    ) -> list[list[float]]:
+        return [[1.0], [2.0]]
+
+    with pytest.raises(SemanticError) as caught:
+        embed_query(_config(), "q", budget_s=2, transport=two)
+    assert caught.value.code is ErrorCode.SEMANTIC_EMBED_FAILED

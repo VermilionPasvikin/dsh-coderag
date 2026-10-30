@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -289,3 +290,27 @@ async def test_code_index_refuses_a_workspace_inside_dsh_home(
 
     assert "code: WORKSPACE_INVALID" in text
     assert not (tmp_path / ".coderag").exists(), "nothing may be created there"
+
+
+@pytest.mark.anyio
+async def test_call_tool_runs_dispatch_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T8-05: a slow search must not freeze every other tool call in the session."""
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+
+    def fake_dispatch(name: str, arguments: dict[str, Any], root: object) -> str:
+        seen.append(threading.get_ident())
+        return "{}"
+
+    monkeypatch.setattr("dsh_coderag.server._dispatch", fake_dispatch)
+    server = build_server(root=tmp_path)
+    async with create_connected_server_and_client_session(
+        server, raise_exceptions=True
+    ) as session:
+        result = await session.call_tool("index_status", {})
+
+    assert result.content[0].text == "{}"
+    assert seen, "the patched dispatch must run"
+    assert seen[0] != loop_thread, "dispatch must not block the event loop"

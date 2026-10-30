@@ -123,7 +123,10 @@ def test_unreachable_backend_leaves_the_bm25_index_ready(
     assert result.status is SearchStatus.READY
     assert result.hits, "BM25 indexing must still work (RL-10)"
     assert result.semantic is not None, "a degraded optional path must say so"
-    assert result.semantic.code is ErrorCode.SEMANTIC_EMBED_FAILED
+    # The query path checks the vector index before it contacts the backend
+    # (T8-05), so a build that failed leaves "no index" rather than spending
+    # another request on an unreachable backend.
+    assert result.semantic.code is ErrorCode.SEMANTIC_INDEX_MISSING
 
 
 def test_a_failing_vector_build_never_fails_indexing(

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ from dsh_coderag.config import (
     SemanticConfig,
     load_semantic_config,
 )
-from dsh_coderag.embed import SemanticError, embed_texts
+from dsh_coderag.embed import SemanticError, embed_query, validate_embedding_backend
 from dsh_coderag.indexer import connect
 from dsh_coderag.log import log_event
 from dsh_coderag.parser import detect_language, get_parser
@@ -390,15 +391,26 @@ def _resolve_semantic(
 def _semantic_candidates(
     base: Path, query: str, config: SemanticConfig, k: int
 ) -> list[Hit]:
-    """Embed the query and return the vector index's nearest chunks.
+    """Return the vector index's nearest chunks, inside the query budget (T8-05).
+
+    Order matters. The configuration is validated first, so an unsupported
+    backend still reports SEMANTIC_BACKEND_UNSUPPORTED rather than an index
+    problem; the vector index is loaded next, so a missing index never pays for
+    an embedding request; only then is the query embedded, with whatever is
+    left of `config.query_timeout_s` as its wall-clock budget. A slow backend
+    therefore yields SEMANTIC_TIMEOUT and a BM25 answer instead of blocking the
+    tool call past the host's budget.
 
     Raises:
-        SemanticError: Whatever the embedding client or the vector index raises;
-            the caller converts it into a notice and keeps serving BM25.
+        SemanticError: Whatever the backend validation, the vector index or the
+            embedding client raises; the caller turns it into a notice and keeps
+            serving BM25.
     """
-    query_vectors = embed_texts(config, [query])
+    validate_embedding_backend(config)
+    deadline = time.monotonic() + float(config.query_timeout_s)
     index = vectors.load_index(base, config)
-    return vector_candidates(base, index, query_vectors[0], k)
+    query_vector = embed_query(config, query, budget_s=deadline - time.monotonic())
+    return vector_candidates(base, index, query_vector, k)
 
 
 def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:

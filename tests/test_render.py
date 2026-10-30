@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from pathlib import Path
+from typing import cast
 
 import pytest
 from inline_snapshot import snapshot
@@ -167,6 +169,41 @@ hits: 1 (sorted by source order)
 skipped: 0
 
 semantic: BM25 only (SEMANTIC_EMBED_FAILED) — embedding request failed — start Ollama
+
+── pkg/a.py:1-2  (chunk 0)
+def a():
+    ...
+""")
+
+
+def test_render_search_result_shows_the_query_budget_notice() -> None:
+    """T8-05: a query that missed its budget renders like any other extension code."""
+
+    class _TimeoutCode(str, Enum):
+        SEMANTIC_TIMEOUT = "SEMANTIC_TIMEOUT"
+
+    out = render_search_result(
+        SearchResult(
+            status=SearchStatus.READY,
+            query="alpha",
+            hits=[_hit("pkg/a.py", 0, 1, 2, "def a():\n    ...")],
+            scanned_files=1,
+            scanned_chunks=2,
+            semantic=SemanticNotice(
+                code=cast(ErrorCode, _TimeoutCode.SEMANTIC_TIMEOUT),
+                message="query budget exceeded",
+                hint="retry shortly",
+            ),
+        )
+    )
+    assert out == snapshot("""\
+status: ready
+query: "alpha"
+scanned: 1 files / 2 chunks
+hits: 1 (sorted by source order)
+skipped: 0
+
+semantic: BM25 only (SEMANTIC_TIMEOUT) — query budget exceeded — retry shortly
 
 ── pkg/a.py:1-2  (chunk 0)
 def a():

@@ -160,8 +160,12 @@ def test_search_is_byte_identical_while_the_switch_is_off(
 
 
 def test_search_falls_back_cleanly_when_the_backend_is_unreachable(
-    workspace: Path,
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """T8-05: with an index present, a dead backend still degrades to BM25."""
+    monkeypatch.setattr(
+        "dsh_coderag.searcher.vectors.load_index", lambda base, config: object()
+    )
     baseline = search(workspace, "alpha", k=5, semantic=_disabled())
     enabled = SemanticConfig(
         enabled=True, backend="ollama", url="http://127.0.0.1:1", timeout_s=1
@@ -172,6 +176,26 @@ def test_search_falls_back_cleanly_when_the_backend_is_unreachable(
     assert degraded.hits, "a clean fallback must not become an empty result (RL-06)"
     assert degraded.semantic is not None
     assert degraded.semantic.code is ErrorCode.SEMANTIC_EMBED_FAILED
+
+
+def test_search_reports_a_missing_vector_index_without_contacting_the_backend(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T8-05: the index is checked before the query is embedded."""
+    calls: list[int] = []
+
+    def must_not_run(*args: object, **kwargs: object) -> list[float]:
+        calls.append(1)
+        raise AssertionError("embedding must not run without a vector index")
+
+    monkeypatch.setattr("dsh_coderag.searcher.embed_query", must_not_run)
+    enabled = SemanticConfig(
+        enabled=True, backend="ollama", url="http://127.0.0.1:1", timeout_s=1
+    )
+    degraded = search(workspace, "alpha", k=5, semantic=enabled)
+    assert degraded.semantic is not None
+    assert degraded.semantic.code is ErrorCode.SEMANTIC_INDEX_MISSING
+    assert calls == []
 
 
 def test_search_reports_an_unknown_backend_as_a_notice(workspace: Path) -> None:
