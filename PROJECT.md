@@ -1911,6 +1911,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-02` | 复核加固：admin 子进程私有 `0700` cwd + `-c` 启动器、key 生命周期、健康探测不落盘开关、结构化失败码、向量 job 竞态与停止后退出、设置保存 spinner、测试支撑、文档占位符清理 | `df9d9fa`、`afe29f3`、`1228133`、`fffb0af`、`dd8c6e3` | 已完成 | 各提交正文 |
 | `T8-03` | **支线登记对齐**：新增本节、把 §6.7 的支线声明指向本节、在 plan 头块声明编号域并回填 `T5-06` 的提交 | `git log --grep 'Refs: T8-03'` | 已完成 | 本节 |
 | `T8-04` | 修 `T6-22` 的 hint 在 POSIX 上缺引号：`export CODERAG_MAX_FILES='2'` 与 Windows 的 `$env:… = '2'` 同形；测试按平台精确断言整条赋值串 | `git log --grep 'Refs: T8-04'` | 已完成 | 本节；`docs/backlog.md` 对应条目 |
+| `T8-05` | 查询路径的预算与预热：向量查询只尝试一次、先校验后加载索引、受 `CODERAG_SEMANTIC_QUERY_TIMEOUT`（默认 10 s）约束；超时返回扩展码 `SEMANTIC_TIMEOUT` 且不取消后台加载；`call_tool` 走 `asyncio.to_thread` | `git log --grep 'Refs: T8-05'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §11；`CHANGELOG.md` `[Unreleased]` |
 
 ---
 

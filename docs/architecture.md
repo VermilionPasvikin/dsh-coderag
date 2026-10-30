@@ -166,7 +166,8 @@ render.render_search_result → 模型可见文本（status / query / scanned / 
 
 工具描述面向**模型**编写（`AGENTS.md` D-02）：不含 UI、传输层、实现机制词汇。
 所有异常都在 `server._dispatch` 里转成带 `status`/`code` 的结构化返回值，**不让内部异常冒泡成
-MCP 的 `isError`**（RL-09）。
+MCP 的 `isError`**（RL-09）。`call_tool` 用 `asyncio.to_thread` 调 `_dispatch`，所以一次慢检索
+（如冷启动的向量查询）不会冻结同一 MCP 会话里的其它工具调用（`ADR-16` §11）。
 
 ## 7. 安全模型
 
@@ -197,6 +198,7 @@ MCP 的 `isError`**（RL-09）。
 | 单文件大小 | `walker.walk_with_report` | 超过 `max_file_bytes`（默认 1 MiB）在读内容前跳过并计入 `too_large` |
 | 取消 | `taskman.cancel` + `index_sync(should_cancel=)` | 边界轮询，取消后不写库、不标 ready |
 | 检索预算 | `searcher.search(max_tokens=)` | 默认 4000，裁剪并报告 `omitted` |
+| 查询墙钟预算 | `searcher._semantic_candidates` → `embed.embed_query` | 默认 10 s（`CODERAG_SEMANTIC_QUERY_TIMEOUT`）；超时返回 `SEMANTIC_TIMEOUT` 并保留 BM25，请求不取消、后台继续加载（ADR-16 §11） |
 
 ## 9. 可观测性
 

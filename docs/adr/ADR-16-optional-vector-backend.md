@@ -136,12 +136,13 @@ semantic = ["numpy>=1.26"]
 | `CODERAG_SEMANTIC_URL` | `http://127.0.0.1:11434` | Ollama 基址 | **必须是 loopback**（`127.0.0.1` / `::1` / `localhost`）；非本机地址**拒绝启用**（§6、§8） |
 | `CODERAG_SEMANTIC_MODEL` | `bge-m3` | embedding 模型名 | 需与用户 `ollama pull` 的名字一致 |
 | `CODERAG_SEMANTIC_TIMEOUT` | `30` | 单次 HTTP 请求超时（秒） | 后端卡住时必须**超时**而不是永久阻塞（`E-01`：工具调用总预算 60 s） |
+| `CODERAG_SEMANTIC_QUERY_TIMEOUT` | `10` | 交互查询路径的**墙钟预算**（秒） | 超时返回 `SEMANTIC_TIMEOUT` 并保留 BM25；必须明显小于宿主的工具调用预算，给模型留一次重试的机会（§11，2026-10-30 增补） |
 | `CODERAG_SEMANTIC_BATCH` | `16` | 单次 embedding 请求的文本条数 | 可覆盖（`RL-07`） |
 | `CODERAG_SEMANTIC_MAX_CHUNKS` | `100000` | 参与向量化的 chunk 上限 | 超过时**显式失败并报实际数量**，**绝不静默截断**（`RL-08`） |
 
 **配置落点**：`src/dsh_coderag/config.py` 增加一个**独立的** `SemanticConfig`；它**不参与** BM25 路径的任何必填校验，因此默认安装下缺少它不会让引擎启动失败。
 
-> **形状冻结（不冻结实现细节）**：字段名与上表一一对应（`enabled` / `backend` / `url` / `model` / `timeout_s` / `batch` / `max_chunks`）。实现方式（dataclass / 校验顺序 / 错误类型）留给 `T3-08`。
+> **形状冻结（不冻结实现细节）**：字段名与上表一一对应（`enabled` / `backend` / `url` / `model` / `timeout_s` / `query_timeout_s` / `batch` / `max_chunks`；其中 `query_timeout_s` 按 §11 于 2026-10-30 增补，其余七个保持 2.0.0 的语义）。实现方式（dataclass / 校验顺序 / 错误类型）留给 `T3-08`。
 
 ---
 
@@ -180,9 +181,11 @@ semantic = ["numpy>=1.26"]
 | `SEMANTIC_INDEX_MISSING` | 已启用但 `vectors/` 不存在 | 提示先跑 `code_index`；本次仍用 BM25 返回结果 |
 | `SEMANTIC_MODEL_MISMATCH` | `manifest.json` 的模型/维度与当前配置不一致 | 提示需要重建向量索引；本次仍用 BM25 |
 
-**这些 code 的登记方式**：`ADR-16` 是它们的**唯一权威**（名字与语义以上表为准）。把它们同步进 `PROJECT.md` §5.6 的错误码表与 `src/dsh_coderag/types.py` 的 `ErrorCode`，由实现任务（`T3-08`–`T3-11`）完成——那会同时改动 `tests/test_types.py` 里对 10 个码的逐项断言。**`T5-05` 不改 §5.6 与 `types.py`**，以免在实现落地前制造文档/代码不一致。
+**这些 code 的登记方式**：`ADR-16` 是它们的**唯一权威**（名字与语义以上表为准）。这七个码已由实现任务 `T3-08`–`T3-11` 同步进 `src/dsh_coderag/types.py` 的 `ErrorCode` 与 `tests/test_types.py` 的逐项断言；`T5-05` 不改 `PROJECT.md` §5.6 与 `types.py`，以免在实现落地前制造文档/代码不一致。后续新增的码（如 §11 的 `SEMANTIC_TIMEOUT`）不改这十个码，见 §6 末段的增补说明。
 
 **重试与超时**：任何重试都**有上限**（最多 2 次），且诊断信息必须可操作（哪个 URL、哪个模型、超时多少秒）。
+
+**查询路径的增补（2026-10-30，§11 / `T8-05`）**：交互检索**不重试**——它已经有面向调用方的墙钟预算（默认 `CODERAG_SEMANTIC_QUERY_TIMEOUT=10` 秒），重试只会把"慢"变成"更慢"。预算耗尽时返回**扩展码** `SEMANTIC_TIMEOUT`，与上面的七个冻结码一样走 `SemanticError` → `SemanticNotice` → 回退 BM25 的通道；它**不**写进 `types.py` 的 `ErrorCode` 枚举（与 `T8-02` 的 `SEMANTIC_REDIRECT_REFUSED` 同一手法：`str` Enum + `cast`，消费方只读 `.value`），因此 §6 的十个码不被改动。`SEMANTIC_EMBED_FAILED` 仍然覆盖**非预算**的失败（连接被拒、非 2xx、响应非法）。
 
 ---
 
@@ -241,7 +244,9 @@ T5-14 天花板探针（go/no-go）
 4. **向量只影响 L1（静态检索质量），不影响端到端的主要瓶颈。** `ADR-14` §10.5 已指出端到端最大的可改进项是**工具采纳（R5）**，与向量正交。
 5. **`natural` 桶只有 7 条**，`S@5` 的 Wilson 区间很宽；任何"提升 X%"的表述都必须带区间（`EVAL.md` §2.6）。
 6. **本 ADR 不改变 `S1`/`S2` 当前未达标的事实**（`= 0.433` / `= 0.313`）；它只冻结"补齐路径怎么进、什么时候不进"。
-7. **`SEMANTIC_*` 的 code 尚未进入 `ErrorCode`**（见 §6 的登记说明）——在 `T3-08`–`T3-11` 落地前，§6 的表是**契约先行**，与 `PROJECT.md` §5.6 的既有说法一致。
+7. **`SEMANTIC_*` 的 code 已进入 `ErrorCode`**（`T3-08`–`T3-11` 已落地，见 §6）；后续新增码（如 §11 的 `SEMANTIC_TIMEOUT`）按 §6 的扩展手法处理——`str` Enum + `cast`，不改那十个冻结码。
+8. **查询预算换来的是"慢而不超时"，不是"快"**（§11）：冷启动的首次查询仍会花掉预算（默认 10 s）并只拿到 BM25 结果；预热只在**同一进程**内有效（CLI 每次都是新进程），而且后台加载仍受 `CODERAG_SEMANTIC_TIMEOUT` 约束——把它设得比模型冷加载时间还短时，预热永远完不成。
+
 
 ---
 
@@ -257,3 +262,76 @@ T5-14 天花板探针（go/no-go）
 | `RL-06` / `RL-08` / `RL-09` | §6 逐条落地：不空列表、不静默截断、不冒泡 `isError` |
 | `RL-07` | §4 的可覆盖默认值（不硬编码批大小与规模上限） |
 | `S5` / `S6` | 由 `T5-07` 登记进 `PROJECT.md` §1.4：`S5` = 开启时 `natural` 桶 `S@5` 阈值，`S6` = 默认路径零回归 |
+| `E-01`（工具调用 60 s 预算） | §11 增补：查询路径的墙钟预算（默认 10 s）必须明显小于宿主预算；`call_tool` 走 `asyncio.to_thread`，一次慢检索不再冻结整个 MCP 会话 |
+
+---
+
+## 11. 2026-10-30 增补：查询路径的预算与预热（`T8-05`）
+
+### 11.1 触发事实
+
+用户报告：在 Windows + RTX 3070 + 本地 Ollama + `bge-m3` 的机器上，通过设置页开启向量化后，**中文自然语言/疑问句检索**频繁收到 DSH 的 `tool call timed out`（该机器的 `toolCallTimeoutMs = 30`），且响应里**没有** `semantic: {code: ...}`——说明调用方在服务端给出结构化 notice 之前就放弃了。两个对照查询：
+
+| 查询 | 纯 BM25 | 开启向量层 |
+|---|---|---|
+| `向量增强层未开启，自动回退BM25` | 快速命中 | — |
+| `决定向量增强层关闭时的自动回退行为代码在哪？` | — | **大概率超时** |
+
+### 11.2 取证与实测（本机 macOS 26.4 / Ollama 0.34.3 / `bge-m3` 1.2 GB）
+
+| # | 观察 | 数值 |
+|---|---|---|
+| 1 | 冷加载 embedding（首次请求；`ollama ps`：673 MB / 100% GPU / context 4096） | **15.94 s** |
+| 2 | 冷启动后的第一条 `search()` | **16.48 s** |
+| 3 | 热查询（模型已加载） | **0.32–0.38 s**（walk 0.28 s + embed 0.02 s + `load_index` 0.001 s） |
+| 4 | 建 1,705 chunk 的向量索引（batch 16） | **138.5 s**（≈81 ms/chunk） |
+| 5 | `CODERAG_SEMANTIC_TIMEOUT=5` + 模型已卸载：每条查询 | **15.3 s**（3 × 5 s），连跑 3 条后 `ollama ps` 仍为空 |
+| 6 | 构建期间并发查询 | 0.5–2.7 s，无超时 |
+| 7 | 本次修复后（模型已卸载，单进程连跑 3 次） | 10.32 s（`SEMANTIC_TIMEOUT`）→ 6.28 s（无 notice）→ 0.35 s（无 notice） |
+
+第 5 行是根因的决定性证据：旧的 `_post_with_retry` 把**冷加载**当成可重试失败，最多 3 次 × 单次超时（默认 30 s = 90 s），而每次超时都会取消正在进行的加载——**模型永远预热不起来**。客户端预算（30 s）通常在服务端第 2–3 次尝试之间到期，于是用户看到的是传输层超时，而不是结构化的 `SEMANTIC_*`。第 7 行是修复后的同一实验：第一次用完预算后**不取消**请求，后台加载完成后第二次查询即转为热路径。
+
+### 11.3 决策（`T8-05`）
+
+查询路径与索引路径**分开**处理：
+
+1. **只尝试一次**：查询有面向调用方的截止时间，重试只会更慢（索引路径保持 §6 的最多 2 次重试）。
+2. **先验索引，再发请求**：`validate_embedding_backend` → `load_index` → `embed_query`。配置错误仍先于索引错误报告（`SEMANTIC_BACKEND_UNSUPPORTED` 不被 `SEMANTIC_INDEX_MISSING` 掩盖），而没有向量索引时**不再**先付一次 embedding 请求。
+3. **墙钟预算**：`CODERAG_SEMANTIC_QUERY_TIMEOUT`（默认 10 s，正整数，可覆盖）从进入语义分支起计时（包含 `load_index`）；HTTP 层仍用 `CODERAG_SEMANTIC_TIMEOUT`（默认 30 s），**必须大于**预算——否则预算到点会切断正在加载的请求，预热失效。
+4. **超时不取消，后台继续**：`embed_query` 在 daemon 线程里跑请求；预算到点的主线程抛 `SEMANTIC_TIMEOUT` 并回退 BM25，线程继续直到加载完成（日志 `semantic_query_warmup_completed`）。选择这一条而不是取消，是因为"取消"正是旧行为永远预热不起来的原因。
+5. **不阻塞事件循环**：`server.call_tool` 用 `asyncio.to_thread` 调 `_dispatch`，一次慢检索不会冻结同一 MCP 会话里的其它工具调用。
+
+### 11.4 验收（可复现）
+
+```console
+$ /opt/homebrew/bin/ollama stop bge-m3          # 确保模型未加载
+$ CODERAG_SEMANTIC=on CODERAG_SEMANTIC_QUERY_TIMEOUT=10 .venv/bin/python -
+# 同一进程内连续三次 search()，同一句中文疑问句
+run=1 elapsed=10.32s hits=5 semantic=SEMANTIC_TIMEOUT
+run=2 elapsed=6.28s hits=5 semantic=None
+run=3 elapsed=0.35s hits=5 semantic=None
+{"level": "warning", "event": "semantic_query_timeout", "duration_ms": 9982.25, "url": "http://127.0.0.1:11434/api/embed", "model": "bge-m3", "budget_s": 9.973115083000266}
+{"level": "info", "event": "semantic_query_warmup_completed", "duration_ms": 16224.08, "url": "http://127.0.0.1:11434/api/embed", "model": "bge-m3"}
+```
+
+第 1 次用完预算即返回（BM25 结果照常、带 `SEMANTIC_TIMEOUT`），后台加载在 16.2 s 完成；第 2 次赶在加载完成时命中（6.28 s），第 3 次为热路径 0.35 s。单元测试覆盖单次尝试、预算映射、后台线程不被取消、事件循环不被阻塞（`tests/test_embed.py` / `tests/test_rrf.py` / `tests/test_server.py` / `tests/test_render.py`）。
+
+### 11.5 被否决的方案
+
+| 方案 | 否决理由 |
+|---|---|
+| 只把 `_dispatch` 放进线程 | 解决级联，不解决单次查询 90 s 与冷启动永远失败 |
+| 只加预算并取消请求 | 每次冷启动都从头开始，用户永远等不到一次成功 |
+| 把 `CODERAG_SEMANTIC_TIMEOUT` 默认值降到 10 s | 索引批次需要 30 s 级余量；冷加载 16 s 也会被这个值切断 |
+| 查询向量缓存 | 实测收益 < 0.2 s，且不解决冷加载（`T3-12` 的缓存只服务索引批次） |
+| 强制 `keep_alive` 常驻模型 | 把约 673 MB 显存常驻强加给所有用户；Ollama 自带的 5 分钟 keep-alive 已足够 |
+
+### 11.6 回滚
+
+删除 `config.py` 的 `query_timeout_s` / `ENV_SEMANTIC_QUERY_TIMEOUT`，把 `searcher._semantic_candidates` 恢复为"先 `embed_texts` 再 `load_index`"，删除 `embed.embed_query` 与 `SEMANTIC_TIMEOUT`，把 `server.call_tool` 改回同步调用；测试与本节一起删除，`ADR-16` §4/§6 的增补段落同步撤回。默认路径（`CODERAG_SEMANTIC` 未设）的行为不受影响。
+
+### 11.7 仍未验证
+
+- **Windows 现场**：本节数值全部来自 macOS；用户环境的 `toolCallTimeoutMs = 30`、Windows 上的 `load_index` / `walk_with_report` 开销与 Ollama 冷加载时间尚未测量。
+- **多客户端并发**：同一进程内多个并发查询会各自启动一个加载请求，Ollama 的排队行为未测量。
+- **模型侧呈现**：目前只验证了 `render._format_semantic_notice` 的文本与 MCP 的返回值；在真实 DSH 会话里模型读到该 notice 后的重试行为未复跑。

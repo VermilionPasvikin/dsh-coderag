@@ -339,6 +339,11 @@ key 继续写在 patch 的 `env:` 或启动 dsh 的 shell 里（`RL-02`/`S-05`�
 不入库、不入日志、不进浏览器表单）。表单对「语义检索 + openai + 非 loopback URL」会强制要求打开
 `semanticAllowRemote`，与引擎的 `ALLOW_REMOTE=1` 双重开关一致（`ADR-17` §1.3）。
 
+**`CODERAG_SEMANTIC_QUERY_TIMEOUT` 也不在设置页里**（13 个字段是冻结的表单形状）：它是交互查询的
+墙钟预算（默认 10 秒），按需写在启动 shell 或 patch 的 `env:` 里。预算耗尽时这一次查询返回
+`SEMANTIC_TIMEOUT` 并保留 BM25 结果，但请求**不会被取消**——后台继续加载模型，同一进程的下一次查询
+即可走热路径（`ADR-16` §11）。保存设置不会冲掉这个变量。
+
 **行为与边界**：
 
 - **保存**把 13 个字段一起写进 `coderag` 行（包括打开页面时显示的环境默认值），所以 bundle 里
@@ -748,6 +753,7 @@ $env:CODERAG_SEMANTIC_API_KEY      = "<你的 API key>"
 | **大文件默认跳过** | 超过 `CODERAG_MAX_FILE_BYTES`（1 MiB）的文件不入库，只在 `skipped.too_large` 里计数 | 配置章节 |
 | **云端后端对超长 chunk 无能为力** | 代码原样发送 chunk 文本、**不截断**；实测一份含几何数据的 89.5 万 chunk 索引里有 **8,270 个超过 3.2 万字符**（≈8k token，多数模型的上限），这些会被服务商拒绝。云端向量化前需先把这类大块从索引里排除 | 配置章节 ③ |
 | **可选向量后端默认关闭，且不声称检索质量** | 本地后端只允许 loopback；按 `ADR-14` §10.4 的 `V4`，`natural` 桶 `S@5 = 0.300 < 0.40` | 「② 本地 embedding 后端」 |
+| **冷启动的首次语义查询会等满查询预算** | 模型未加载时，第一次查询约 10 秒后只返回 BM25 + `SEMANTIC_TIMEOUT`；后台继续加载，**同一进程**的第二次查询才走热路径。CLI 每次都是新进程，拿不到预热收益 | `ADR-16` §11 |
 | **设置页需要 DSH 支持 `settings.section` / `plugins.row.config` / `plugins.bundle.config`** | 0.1.7-rc.1 起提供（本仓库在 0.2.1-rc.3 实测）；旧版 DSH 里没有这些入口，但 env / patch 配置仍照旧生效 | README「原生设置页」、`docs/settings-ui-plan.md` |
 | **首次保存后，设置页接管 13 个变量** | 旧 `mcp-coderag` 行 `env` 里的同名项会被覆盖/删除；只有 `CODERAG_SEMANTIC_API_KEY` 始终原样保留 | `docs/settings-ui-plan.md` §4.3 |
 | **设置页把 API key 存在 DSH credentials，而不是设置/patch** | 页面只显示「已配置/未配置」；值由 Host 在同步 MCP 行与 admin 子进程时读取，永不出现在 state/错误/日志里（`RL-02`/`S-05`） | 「运维面板」 |

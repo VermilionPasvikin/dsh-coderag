@@ -84,6 +84,11 @@
   `CODERAG_MAX_TOKENS` / `CODERAG_MAX_FILE_BYTES` / `CODERAG_EXTRA_EXTENSIONS` 在 CLI 路径上
   都被忽略（`T6-07` 当时只把配置接进了 MCP 那条路径）。现在 CLI 与 MCP 共用
   `config.load_config_for(root)`，两条路径读同一份配置。
+- **开启向量层后中文模糊/疑问查询频繁 `tool call timed out`**（`T8-05`）：查询路径现在只尝试一次、
+  先校验配置再加载向量索引、并受 `CODERAG_SEMANTIC_QUERY_TIMEOUT`（默认 10 秒）的墙钟预算约束；
+  预算耗尽返回扩展码 `SEMANTIC_TIMEOUT` 并保留 BM25。请求不会被取消——后台继续加载模型，
+  同一进程的下一次查询走热路径（冷启动实测 10.32 s → 6.28 s → 0.35 s）。MCP 的 `call_tool`
+  改走 `asyncio.to_thread`，一次慢检索不再冻结同一会话里的其它工具调用（`ADR-16` §11）。
 
 ## [2.1.1] - 2026-09-30
 
