@@ -701,7 +701,7 @@ CODERAG_SEMANTIC_API_KEY="$CODERAG_SEMANTIC_API_KEY" \
 | **无 key** | `env -u CODERAG_SEMANTIC_API_KEY`（或设成空串——**空串 = 未设**，`ADR-17` §4） | `SEMANTIC_AUTH_MISSING`；**零请求**（桩上收到 0 次连接）；回退 BM25 |
 | **401 / 403** | URL 指向 loopback 桩，桩返回 `401`（403 同理）；key 用假值 | `SEMANTIC_AUTH_REJECTED`；**不重试**（重试不会变好）；回退 BM25 |
 | **429** | 桩返回 `429` | `SEMANTIC_RATE_LIMITED`；**重试上限仍为 2**；回退 BM25 |
-| **超时** | 桩接受连接但不回包，且 `CODERAG_SEMANTIC_TIMEOUT=1` | `SEMANTIC_EMBED_FAILED`；不拖过 60 s 的工具预算（`E-01`）；回退 BM25 |
+| **超时** | 桩接受连接但不回包，且 `CODERAG_SEMANTIC_QUERY_TIMEOUT=1`（查询墙钟预算；`CODERAG_SEMANTIC_TIMEOUT` 不再影响查询路径） | `SEMANTIC_TIMEOUT`（扩展码，`ADR-16` §11–§12）；在预算内返回、不拖过 60 s 的工具预算（`E-01`）；回退 BM25，后台线程继续到固定传输上限 |
 
 **四种失败共同的断言**（缺一不可）：
 

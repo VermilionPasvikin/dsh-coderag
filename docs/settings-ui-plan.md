@@ -202,6 +202,11 @@ return module.exports; } });
 **唯一不纳管**：`CODERAG_SEMANTIC_API_KEY`（`!!js process.env.…` 表达式，仓库内不留值，RL-02）。
 **任何 key 都不进设置表单、不进设置 Config、不进日志。**
 
+> **2026-10-30 更新（`T8-07`）**：`semanticTimeout` 已替换为 `semanticQueryTimeout`
+> （`CODERAG_SEMANTIC_QUERY_TIMEOUT`，默认 10 秒）；`CODERAG_SEMANTIC_TIMEOUT` 不再纳管，
+> 降级为**建索引批次**的高级传输上限（默认 60 秒，最多重试 2 次）。表单仍是 13 字段，
+> 见 [`docs/adr/ADR-16-optional-vector-backend.md`](adr/ADR-16-optional-vector-backend.md) §12。
+
 ### 4.3 同步策略（避免误伤既有配置）
 
 - **`apply` 时**：读 13 个字段的当前值；**全部为空就不动 mcp 行**。

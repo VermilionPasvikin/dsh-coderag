@@ -135,14 +135,14 @@ semantic = ["numpy>=1.26"]
 | `CODERAG_SEMANTIC_BACKEND` | `ollama` | 后端 id | 2.0.0 **唯一**支持的取值；其他取值 → 结构化失败（§6） |
 | `CODERAG_SEMANTIC_URL` | `http://127.0.0.1:11434` | Ollama 基址 | **必须是 loopback**（`127.0.0.1` / `::1` / `localhost`）；非本机地址**拒绝启用**（§6、§8） |
 | `CODERAG_SEMANTIC_MODEL` | `bge-m3` | embedding 模型名 | 需与用户 `ollama pull` 的名字一致 |
-| `CODERAG_SEMANTIC_TIMEOUT` | `30` | 单次 HTTP 请求超时（秒） | 后端卡住时必须**超时**而不是永久阻塞（`E-01`：工具调用总预算 60 s） |
-| `CODERAG_SEMANTIC_QUERY_TIMEOUT` | `10` | 交互查询路径的**墙钟预算**（秒） | 超时返回 `SEMANTIC_TIMEOUT` 并保留 BM25；必须明显小于宿主的工具调用预算，给模型留一次重试的机会（§11，2026-10-30 增补） |
+| `CODERAG_SEMANTIC_TIMEOUT` | `60` | **建索引批次**的单次 HTTP 请求超时（秒） | 高级项，**不在设置页**；查询路径不读它（§12）。后端卡住时必须**超时**而不是永久阻塞（`E-01`），重试上限 2 次（§6） |
+| `CODERAG_SEMANTIC_QUERY_TIMEOUT` | `10` | 交互查询路径的**墙钟预算**（秒） | 超时返回 `SEMANTIC_TIMEOUT` 并保留 BM25；必须明显小于宿主的工具调用预算，给模型留一次重试的机会（§11 增补，§12 收敛为设置页字段 `semanticQueryTimeout`） |
 | `CODERAG_SEMANTIC_BATCH` | `16` | 单次 embedding 请求的文本条数 | 可覆盖（`RL-07`） |
 | `CODERAG_SEMANTIC_MAX_CHUNKS` | `100000` | 参与向量化的 chunk 上限 | 超过时**显式失败并报实际数量**，**绝不静默截断**（`RL-08`） |
 
 **配置落点**：`src/dsh_coderag/config.py` 增加一个**独立的** `SemanticConfig`；它**不参与** BM25 路径的任何必填校验，因此默认安装下缺少它不会让引擎启动失败。
 
-> **形状冻结（不冻结实现细节）**：字段名与上表一一对应（`enabled` / `backend` / `url` / `model` / `timeout_s` / `query_timeout_s` / `batch` / `max_chunks`；其中 `query_timeout_s` 按 §11 于 2026-10-30 增补，其余七个保持 2.0.0 的语义）。实现方式（dataclass / 校验顺序 / 错误类型）留给 `T3-08`。
+> **形状冻结（不冻结实现细节）**：字段名与上表一一对应（`enabled` / `backend` / `url` / `model` / `timeout_s` / `query_timeout_s` / `batch` / `max_chunks`；其中 `query_timeout_s` 按 §11 于 2026-10-30 增补，`timeout_s` 按 §12 收敛为**仅索引批次**的超时，其余七个保持 2.0.0 的语义）。实现方式（dataclass / 校验顺序 / 错误类型）留给 `T3-08`。
 
 ---
 
@@ -245,7 +245,7 @@ T5-14 天花板探针（go/no-go）
 5. **`natural` 桶只有 7 条**，`S@5` 的 Wilson 区间很宽；任何"提升 X%"的表述都必须带区间（`EVAL.md` §2.6）。
 6. **本 ADR 不改变 `S1`/`S2` 当前未达标的事实**（`= 0.433` / `= 0.313`）；它只冻结"补齐路径怎么进、什么时候不进"。
 7. **`SEMANTIC_*` 的 code 已进入 `ErrorCode`**（`T3-08`–`T3-11` 已落地，见 §6）；后续新增码（如 §11 的 `SEMANTIC_TIMEOUT`）按 §6 的扩展手法处理——`str` Enum + `cast`，不改那十个冻结码。
-8. **查询预算换来的是"慢而不超时"，不是"快"**（§11）：冷启动的首次查询仍会花掉预算（默认 10 s）并只拿到 BM25 结果；预热只在**同一进程**内有效（CLI 每次都是新进程），而且后台加载仍受 `CODERAG_SEMANTIC_TIMEOUT` 约束——把它设得比模型冷加载时间还短时，预热永远完不成。
+8. **查询预算换来的是"慢而不超时"，不是"快"**（§11）：冷启动的首次查询仍会花掉预算（默认 10 s）并只拿到 BM25 结果；预热只在**同一进程**内有效（CLI 每次都是新进程），而后台加载受**固定的 120 s 传输上限**约束（§12 起不再读 `CODERAG_SEMANTIC_TIMEOUT`）——因此把索引超时设得再短也不会打断预热。
 
 
 ---
@@ -285,7 +285,7 @@ T5-14 天花板探针（go/no-go）
 | 2 | 冷启动后的第一条 `search()` | **16.48 s** |
 | 3 | 热查询（模型已加载） | **0.32–0.38 s**（walk 0.28 s + embed 0.02 s + `load_index` 0.001 s） |
 | 4 | 建 1,705 chunk 的向量索引（batch 16） | **138.5 s**（≈81 ms/chunk） |
-| 5 | `CODERAG_SEMANTIC_TIMEOUT=5` + 模型已卸载：每条查询 | **15.3 s**（3 × 5 s），连跑 3 条后 `ollama ps` 仍为空 |
+| 5 | `CODERAG_SEMANTIC_TIMEOUT=5` + 模型已卸载（`T8-07` 之前的查询路径）：每条查询 | **15.3 s**（3 × 5 s），连跑 3 条后 `ollama ps` 仍为空 |
 | 6 | 构建期间并发查询 | 0.5–2.7 s，无超时 |
 | 7 | 本次修复后（模型已卸载，单进程连跑 3 次） | 10.32 s（`SEMANTIC_TIMEOUT`）→ 6.28 s（无 notice）→ 0.35 s（无 notice） |
 
@@ -297,7 +297,7 @@ T5-14 天花板探针（go/no-go）
 
 1. **只尝试一次**：查询有面向调用方的截止时间，重试只会更慢（索引路径保持 §6 的最多 2 次重试）。
 2. **先验索引，再发请求**：`validate_embedding_backend` → `load_index` → `embed_query`。配置错误仍先于索引错误报告（`SEMANTIC_BACKEND_UNSUPPORTED` 不被 `SEMANTIC_INDEX_MISSING` 掩盖），而没有向量索引时**不再**先付一次 embedding 请求。
-3. **墙钟预算**：`CODERAG_SEMANTIC_QUERY_TIMEOUT`（默认 10 s，正整数，可覆盖）从进入语义分支起计时（包含 `load_index`）；HTTP 层仍用 `CODERAG_SEMANTIC_TIMEOUT`（默认 30 s），**必须大于**预算——否则预算到点会切断正在加载的请求，预热失效。
+3. **墙钟预算**：`CODERAG_SEMANTIC_QUERY_TIMEOUT`（默认 10 s，正整数，可覆盖）从进入语义分支起计时（包含 `load_index`）。查询线程的 HTTP 传输上限**固定**为 `embed.QUERY_HTTP_TIMEOUT_S = 120 s`，与 `CODERAG_SEMANTIC_TIMEOUT` 解耦——后者只服务建索引批次（§12），用户把索引超时设得再小也不会切断正在加载的请求。
 4. **超时不取消，后台继续**：`embed_query` 在 daemon 线程里跑请求；预算到点的主线程抛 `SEMANTIC_TIMEOUT` 并回退 BM25，线程继续直到加载完成（日志 `semantic_query_warmup_completed`）。选择这一条而不是取消，是因为"取消"正是旧行为永远预热不起来的原因。
 5. **不阻塞事件循环**：`server.call_tool` 用 `asyncio.to_thread` 调 `_dispatch`，一次慢检索不会冻结同一 MCP 会话里的其它工具调用。
 
@@ -322,7 +322,7 @@ run=3 elapsed=0.35s hits=5 semantic=None
 |---|---|
 | 只把 `_dispatch` 放进线程 | 解决级联，不解决单次查询 90 s 与冷启动永远失败 |
 | 只加预算并取消请求 | 每次冷启动都从头开始，用户永远等不到一次成功 |
-| 把 `CODERAG_SEMANTIC_TIMEOUT` 默认值降到 10 s | 索引批次需要 30 s 级余量；冷加载 16 s 也会被这个值切断 |
+| 把 `CODERAG_SEMANTIC_TIMEOUT` 默认值降到 10 s | 索引批次需要 60 s 级余量；冷加载 16 s 也会被这个值切断 |
 | 查询向量缓存 | 实测收益 < 0.2 s，且不解决冷加载（`T3-12` 的缓存只服务索引批次） |
 | 强制 `keep_alive` 常驻模型 | 把约 673 MB 显存常驻强加给所有用户；Ollama 自带的 5 分钟 keep-alive 已足够 |
 
@@ -335,3 +335,53 @@ run=3 elapsed=0.35s hits=5 semantic=None
 - **Windows 现场**：本节数值全部来自 macOS；用户环境的 `toolCallTimeoutMs = 30`、Windows 上的 `load_index` / `walk_with_report` 开销与 Ollama 冷加载时间尚未测量。
 - **多客户端并发**：同一进程内多个并发查询会各自启动一个加载请求，Ollama 的排队行为未测量。
 - **模型侧呈现**：目前只验证了 `render._format_semantic_notice` 的文本与 MCP 的返回值；在真实 DSH 会话里模型读到该 notice 后的重试行为未复跑。
+
+---
+
+## 12. 2026-10-30 增补二：三层超时墙与设置面收敛（`T8-07`）
+
+### 12.1 触发事实
+
+- 用户指出：设置页暴露的「语义请求超时」（第三层，L3）与交互查询预算（第二层，L2）职责重叠——语义层超时**已经**回退 BM25，且有正常后端与索引时不会出现无响应；DSH 自带的 `toolCallTimeoutMs` 已是"无应答"的外层兜底。
+- Windows 现场 `toolCallTimeoutMs = 30`；而 `CODERAG_SEMANTIC_TIMEOUT` 当时默认也是 30，冷加载实测 15.9 s，两层边界几乎重合，用户看到的是 DSH 的 `tool call timed out`，拿不到 `SEMANTIC_TIMEOUT`。
+- 另一个反证：把 L3 设小会**永久**破坏预热——`CODERAG_SEMANTIC_TIMEOUT=5` 时每条查询 15.3 s（3 × 5 s），连跑 45 s 后 `ollama ps` 仍为空（§11.2 第 5 行）。这说明 L3 不适合作为用户旋钮。
+
+### 12.2 决策：三层各归其位
+
+| 层 | 配置 | 默认 | 职责 | 触发时的可见结果 |
+|---|---|---|---|---|
+| L1 | DSH `toolCallTimeoutMs` | 60（用户 Windows 设 30） | 唯一的外层"无响应"兜底 | 只看到传输层 `tool call timed out`，coderag 没有机会给结构化 notice |
+| L2 | `CODERAG_SEMANTIC_QUERY_TIMEOUT`（设置页 `semanticQueryTimeout`） | 10 | 交互查询的墙钟预算，覆盖校验 + `load_index` + `embed_query` | 返回 BM25 + `SEMANTIC_TIMEOUT`，后台继续加载 |
+| L3 | `CODERAG_SEMANTIC_TIMEOUT`（仅 env，不在设置页） | 60 | **建索引批次**的单次 HTTP 请求上限（最多 2 次重试，§6） | 索引任务返回结构化失败 |
+
+- 查询线程的 HTTP 传输上限**固定**为 `embed.QUERY_HTTP_TIMEOUT_S = 120 s`，与 L3 解耦；L3 再小也不会切断正在加载的请求。
+- 设置页把 `semanticTimeout` 替换为 `semanticQueryTimeout`（→ `CODERAG_SEMANTIC_QUERY_TIMEOUT`），表单仍是 13 个字段；`DEFAULT_VALUES` 为 0、`ENGINE_DEFAULTS` 为 10。
+- 关系约束从"文字约定"变成**代码强制**：L2 < L1（默认 10 < 60/30），L3 与 L2 无耦合；`§11.3` 第 3 条据此改写。
+- 索引路径仍不受 L1 约束：`code_index` 立即返回 taskId，后台任务按自己的传输上限运行（`E-01`）。
+
+### 12.3 迁移
+
+- **旧字段移除**：`semanticTimeout` 不再被表单管理；已经保存过的值保留在 profile 的 `mcp-coderag` env 里（`mergeOwnedEnv` 只删/改当前 FIELDS 拥有的键），继续作为 L3 生效。
+- **旧值可能偏小**：如果用户在旧表单里填过 5–10 秒，它现在只影响索引批次（可能更慢但可完成），不再影响查询与预热。
+- **新字段默认为 0**：表示省略，引擎用默认 10 秒；`CODERAG_SEMANTIC_QUERY_TIMEOUT` 未设时行为与 2.1.1 的 10 s 默认一致。
+- 设置页仍是 13 字段；README 的字段表与「不在设置页的变量」段落同步更新。
+
+### 12.4 被否决的方案
+
+| 方案 | 否决理由 |
+|---|---|
+| 直接删除 L3 | 建索引批次与查询的后台预热线程都需要 socket 上限；删除等于把值硬编码，且失去对慢速云端服务的可调性 |
+| 两个字段都暴露（B2，14 字段） | 用户仍要理解两个旋钮，且表单形状冻结的改动更大；职责已经能靠"查询/索引"分开 |
+| 保留 L3 并加"必须大于 L2"的启动校验 | 只能拦住错误配置，不能解决同名变量在两条路径上语义漂移的问题 |
+| 取消预算，只依赖 L1 | 用户要等满 30/60 秒才看到结果，且结构化 notice 一定丢失 |
+
+### 12.5 回滚
+
+把设置页字段名改回 `semanticTimeout`、`DEFAULT_SEMANTIC_TIMEOUT` 恢复 30、`embed_query` 改回 `float(config.timeout_s)`，重建 `lib/index.js` / `lib/client.js`；§4、§11.3 第 3 条、§11.5 的相关句子同步还原。默认路径（`CODERAG_SEMANTIC` 未设）不受影响。
+
+### 12.6 仍未验证
+
+- **Windows 设置页**：新字段 `semanticQueryTimeout` 的渲染、保存与热重载只在 macOS 上验证过。
+- **旧 profile 的小值**：保存过 5–10 秒的机器在索引批次上的实际耗时未测量（预期更慢但可完成）。
+- **云端后端**：§11–§12 的数值全部来自本地 `ollama`；openai 兼容后端的冷/热行为未复跑。
+- **Node 测试跨平台**：本次在 macOS 上 `tests/plugin/admin-host.test.mjs` 有 2 个**预存在**的 POSIX 路径失败（Windows 盘符被 `resolve()` 当成相对路径），与本次改动无关，按 `AGENTS.md` §9 已登记 backlog。

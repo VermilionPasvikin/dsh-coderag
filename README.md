@@ -329,20 +329,22 @@ DSH **0.1.7-rc.1 起**（本仓库在 **0.2.1-rc.3** 上实测）插件可以在
 | 语义后端 `semanticBackend` | `CODERAG_SEMANTIC_BACKEND` | 省略，用引擎默认 `ollama`；云端选 `openai` |
 | 语义服务 URL `semanticUrl` | `CODERAG_SEMANTIC_URL` | 省略；本地后端只允许 loopback |
 | 语义模型 `semanticModel` | `CODERAG_SEMANTIC_MODEL` | 省略，本地默认 `bge-m3` |
-| 语义请求超时 `semanticTimeout` | `CODERAG_SEMANTIC_TIMEOUT` | 0 = 省略，默认 30 秒 |
+| 语义查询超时 `semanticQueryTimeout` | `CODERAG_SEMANTIC_QUERY_TIMEOUT` | 0 = 省略，默认 10 秒；超时后先用 BM25 返回、后台继续加载 |
 | 语义批量大小 `semanticBatch` | `CODERAG_SEMANTIC_BATCH` | 0 = 省略，默认 16 |
 | 向量化 chunk 上限 `semanticMaxChunks` | `CODERAG_SEMANTIC_MAX_CHUNKS` | 0 = 省略，默认 100000（云端首次索引的计费上限） |
 | 允许非 loopback 云端地址 `semanticAllowRemote` | `CODERAG_SEMANTIC_ALLOW_REMOTE` | 关闭 = 省略；开启 = `1`（仅云端 openai + 非 loopback 需要） |
 
-**只有 `CODERAG_SEMANTIC_API_KEY` 不在设置页里**（也不会有、不应该有 API key 字段）：
-key 继续写在 patch 的 `env:` 或启动 dsh 的 shell 里（`RL-02`/`S-05`：key 只从环境或本机配置层读，
-不入库、不入日志、不进浏览器表单）。表单对「语义检索 + openai + 非 loopback URL」会强制要求打开
-`semanticAllowRemote`，与引擎的 `ALLOW_REMOTE=1` 双重开关一致（`ADR-17` §1.3）。
+**只有两个变量不在设置页里**：`CODERAG_SEMANTIC_API_KEY`（永远不会）与
+`CODERAG_SEMANTIC_TIMEOUT`（高级项）。key 继续写在 patch 的 `env:` 或启动 dsh 的 shell 里
+（`RL-02`/`S-05`：key 只从环境或本机配置层读，不入库、不入日志、不进浏览器表单）。表单对
+「语义检索 + openai + 非 loopback URL」会强制要求打开 `semanticAllowRemote`，与引擎的
+`ALLOW_REMOTE=1` 双重开关一致（`ADR-17` §1.3）。
 
-**`CODERAG_SEMANTIC_QUERY_TIMEOUT` 也不在设置页里**（13 个字段是冻结的表单形状）：它是交互查询的
-墙钟预算（默认 10 秒），按需写在启动 shell 或 patch 的 `env:` 里。预算耗尽时这一次查询返回
-`SEMANTIC_TIMEOUT` 并保留 BM25 结果，但请求**不会被取消**——后台继续加载模型，同一进程的下一次查询
-即可走热路径（`ADR-16` §11）。保存设置不会冲掉这个变量。
+`CODERAG_SEMANTIC_TIMEOUT` 是**建索引批次**的单次 HTTP 请求超时（默认 60 秒，最多重试 2 次），
+面向大 batch 与慢速云端服务；它**不参与查询路径**——查询的等待时间由上面的「语义查询超时」决定，
+后台预热请求另有固定的内部上限。需要调整时写在启动 shell 或 patch 的 `env:` 里，设置页不会覆盖它
+（未纳管变量原样保留）。查询预算耗尽时这一次查询返回 `SEMANTIC_TIMEOUT` 并保留 BM25 结果，但请求
+**不会被取消**——后台继续加载模型，同一进程的下一次查询即可走热路径（`ADR-16` §11–§12）。
 
 **行为与边界**：
 

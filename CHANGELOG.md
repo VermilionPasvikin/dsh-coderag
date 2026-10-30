@@ -10,7 +10,7 @@
 - **DSH 原生设置页（三个入口，13 个字段）**：bundle 新增一个 JS 双端插件。
   - Host 半侧（`lib/index.js`，ESM）持有 `coderag` 行的 schemastery Config，**13 个字段全部
     `.volatile()`**：`root` / `maxFiles` / `maxFileBytes` / `maxTokens` / `extraExtensions` /
-    `semantic` / `semanticBackend` / `semanticUrl` / `semanticModel` / `semanticTimeout` /
+    `semantic` / `semanticBackend` / `semanticUrl` / `semanticModel` / `semanticQueryTimeout` /
     `semanticBatch` / `semanticMaxChunks` / `semanticAllowRemote`。
     保存时 Loader 只提交 volatile 值、**不重挂载设置行**；Host 再把它们映射成 `CODERAG_*`
     合并进既有 `mcp-coderag` 行的 `config.env`。`env` 是 MCP 行的普通字段，因此该行会重挂载、
@@ -62,6 +62,11 @@
   Host 以私有 0700 cwd + `-c` 启动器调用（去掉 cwd/sys.path[0] 防影子模块）；缺失或失败时
   页面显示可关闭的结构化错误，不影响参数表单本身。
 - **README**：新增「运维面板」章节（key/后端/向量库、路由与安全边界）与相应已知限制。
+- **超时墙分层收敛（`T8-07`）**：设置页把「语义请求超时」换成「语义查询超时」
+  （`semanticQueryTimeout` → `CODERAG_SEMANTIC_QUERY_TIMEOUT`，默认 10 秒）。`CODERAG_SEMANTIC_TIMEOUT`
+  不再是设置项，降级为**建索引批次**的高级传输上限（默认 30 → 60 秒，最多重试 2 次）；查询路径改用
+  固定的 120 秒后台传输上限，因此旧 profile 里保存过的小值不会再打断冷加载，DSH 的
+  `toolCallTimeoutMs` 仍是唯一的外层兜底。
 
 ### 修复
 
