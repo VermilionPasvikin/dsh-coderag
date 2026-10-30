@@ -272,6 +272,7 @@ def index_sync(
     config: IndexConfig | None = None,
     *,
     should_cancel: Callable[[], bool] | None = None,
+    build_vectors: bool = True,
 ) -> IndexSummary:
     """Index a workspace synchronously and return the resulting counts.
 
@@ -280,6 +281,10 @@ def index_sync(
     once it returns True no further rows are written and the workspace index
     is not marked ready. Re-running replaces only the files whose content
     hash changed, adds new files and cascade-deletes removed ones.
+
+    build_vectors is False when the caller only wants the lexical index (the
+    settings page's build-index button): the optional vector build is skipped
+    even when CODERAG_SEMANTIC is on, so the two operations stay separable.
 
     Raises:
         FileNotFoundError: If root is not an existing directory. Creating the
@@ -312,7 +317,7 @@ def index_sync(
         total_chunks, written_ms = _write_batches(connection, prepared, batch_size, check)
         phase_ms["write"] += written_ms
         started = time.monotonic()
-        _finish_index_run(connection, base, current_paths, check)
+        _finish_index_run(connection, base, current_paths, check, build_vectors=build_vectors)
         phase_ms["cleanup"] = _ms(started)
         return _report_index_done(
             base, report, total_chunks, redacted, phase_ms, run_started
@@ -336,17 +341,22 @@ def _finish_index_run(
     base: Path,
     current_paths: set[str],
     check: Callable[[], bool],
+    *,
+    build_vectors: bool = True,
 ) -> None:
-    """Clean up deletes, mark the index ready and build vectors when enabled.
+    """Clean up deletes, mark the index ready and build vectors when allowed.
 
     A cancelled run neither marks the index ready nor starts the optional
-    vector build, so an aborted index never looks complete.
+    vector build, so an aborted index never looks complete. build_vectors is
+    False for the settings page's build-index action, which must not trigger
+    the embedding backend (T8-08).
     """
     if check():
         return
     _remove_missing_files(connection, current_paths)
     _mark_ready(connection, base)
-    _maybe_build_vector_index(base, connection, check)
+    if build_vectors:
+        _maybe_build_vector_index(base, connection, check)
 
 
 def _indexed_chunks(connection: sqlite3.Connection) -> list[tuple[int, str]]:

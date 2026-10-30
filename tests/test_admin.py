@@ -18,6 +18,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -715,6 +716,83 @@ def test_main_vectorize_reports_a_missing_index_on_stdout(
     event = json.loads(lines[0])
     assert event["event"] == "error"
     assert event["code"] == "INDEX_NOT_FOUND"
+
+
+def test_main_index_reports_counts_and_skips_vectorization(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The settings-page index button must never start the vector build."""
+    calls: list[bool] = []
+
+    def fake_index(root: Path, *, build_vectors: bool = True) -> SimpleNamespace:
+        calls.append(build_vectors)
+        return SimpleNamespace(files=2, chunks=5, seen_files=9, other_extensions=1)
+
+    monkeypatch.setattr("dsh_coderag.indexer.index_sync", fake_index)
+
+    code = admin.main(["index", "--root", str(tmp_path / "ws")])
+
+    assert code == 0
+    assert calls == [False]
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "files": 2,
+        "chunks": 5,
+        "seen_files": 9,
+        "other_extensions": 1,
+    }
+
+
+def test_main_remove_vectors_keeps_the_code_index(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Deleting the vector store must leave the lexical index untouched."""
+    root = tmp_path / "ws"
+    store = root / ".coderag" / "vectors"
+    (store / "cache" / "bge").mkdir(parents=True)
+    (store / "embeddings.npy").write_bytes(b"vectors")
+    (store / "manifest.json").write_bytes(b"{}")
+    (store / "cache" / "bge" / "embed-cache.bin").write_bytes(b"cache")
+    index = root / ".coderag" / "index.sqlite3"
+    index.write_bytes(b"sqlite")
+
+    assert admin.main(["remove-vectors", "--root", str(root)]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "removed": True,
+        "path": str(store),
+    }
+    assert not store.exists()
+    assert index.read_bytes() == b"sqlite"
+
+    assert admin.main(["remove-vectors", "--root", str(root)]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "removed": False,
+        "path": str(store),
+    }
+
+
+def test_remove_vectors_unlinks_a_symlink_without_deleting_its_target(
+    tmp_path: Path,
+) -> None:
+    """A crafted store path must not turn the action into a foreign delete."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    keep = outside / "keep.txt"
+    keep.write_text("keep")
+    root = tmp_path / "ws"
+    (root / ".coderag").mkdir(parents=True)
+    (root / ".coderag" / "vectors").symlink_to(outside, target_is_directory=True)
+
+    assert admin.main(["remove-vectors", "--root", str(root)]) == 0
+
+    assert not (root / ".coderag" / "vectors").exists()
+    assert keep.read_text() == "keep"
 
 
 def test_status_does_not_open_a_write_connection(tmp_path: Path) -> None:

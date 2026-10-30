@@ -22,6 +22,28 @@ def test_index_sync_refuses_a_root_that_does_not_exist(tmp_path: Path) -> None:
     assert not missing.exists()
 
 
+def test_building_the_index_can_skip_the_vector_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The settings-page index action must not contact the embedding backend."""
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "mod.py").write_text("def f():\n    return 1\n")
+    monkeypatch.setenv("CODERAG_SEMANTIC", "on")
+    monkeypatch.setenv("CODERAG_SEMANTIC_BACKEND", "ollama")
+    monkeypatch.setenv("CODERAG_SEMANTIC_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("CODERAG_SEMANTIC_MODEL", "bge-m3")
+
+    calls: list[int] = []
+    monkeypatch.setattr(indexer.vectors, "build_index", lambda *args, **kwargs: calls.append(1))
+
+    summary = index_sync(repo, build_vectors=False)
+
+    assert summary.files == 1
+    assert calls == []
+    assert not (repo / ".coderag" / "vectors").exists()
+
+
 def _query(repo: Path, sql: str) -> list[tuple[object, ...]]:
     connection = open_index(repo / ".coderag" / "index.sqlite3")
     try:

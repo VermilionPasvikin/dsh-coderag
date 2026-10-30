@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sqlite3
 import sys
 import time
@@ -819,6 +820,72 @@ def vectorize(
         return _vectorize_error(stream, _VECTORIZE_FAILED, type(exc).__name__, settings.api_key)
 
 
+def build_index(root: Path) -> int:
+    """Build or refresh the code index without touching the vector store.
+
+    The settings page's build-index action is deliberately independent from
+    vectorization (T8-08): the embedding backend is never contacted, even when
+    CODERAG_SEMANTIC is on, so a user can prepare a fresh workspace first and
+    vectorize it later. Output is one JSON object with the resulting counts.
+    """
+    from dsh_coderag.indexer import index_sync
+
+    try:
+        summary = index_sync(root, build_vectors=False)
+    except FileNotFoundError as exc:
+        return _report_error("index", "WORKSPACE_MISSING", str(exc))
+    except (OSError, RuntimeError) as exc:
+        log_event("admin_index_failed", level="error", error=type(exc).__name__)
+        return _report_error("index", "INDEX_FAILED", f"{type(exc).__name__}: {exc}")
+    _emit_json(
+        {
+            "ok": True,
+            "files": summary.files,
+            "chunks": summary.chunks,
+            "seen_files": summary.seen_files,
+            "other_extensions": summary.other_extensions,
+        }
+    )
+    return EXIT_OK
+
+
+def remove_vectors(root: Path) -> int:
+    """Delete the workspace's vector store while keeping the code index.
+
+    Only `<root>/.coderag/vectors` is removed. A symlink at that path is
+    unlinked without being followed, and a resolved target outside the
+    workspace is refused, so a crafted layout cannot delete foreign files
+    (T8-08). A workspace without a vector store is a normal no-op.
+    """
+    base = root.resolve()
+    target = base / ".coderag" / "vectors"
+    if target.is_symlink():
+        target.unlink()
+        _emit_json({"ok": True, "removed": True, "path": str(target)})
+        return EXIT_OK
+    if not target.exists():
+        _emit_json({"ok": True, "removed": False, "path": str(target)})
+        return EXIT_OK
+    resolved = target.resolve()
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        return _report_error(
+            "remove-vectors",
+            "VECTOR_STORE_OUTSIDE_WORKSPACE",
+            "the vector store resolves outside the workspace; refusing to delete it",
+        )
+    if not resolved.is_dir():
+        return _report_error(
+            "remove-vectors",
+            "VECTOR_STORE_INVALID",
+            "the vector store path is not a directory",
+        )
+    shutil.rmtree(resolved)
+    _emit_json({"ok": True, "removed": True, "path": str(target)})
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser for the admin CLI."""
     parser = argparse.ArgumentParser(
@@ -830,6 +897,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("status", "Report index and vector-store facts as one JSON object."),
         ("health", "Probe the embedding backend and print one JSON object."),
         ("vectorize", "Build or resume the vector index, streaming JSON lines."),
+        ("index", "Build or refresh the code index without touching vectors."),
+        ("remove-vectors", "Delete the vector store, keeping the code index."),
     )
     for name, help_text in commands:
         command = subparsers.add_parser(name, help=help_text)
@@ -866,6 +935,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "health":
             _emit_json(health(root))
             return EXIT_OK
+        if args.command == "index":
+            return build_index(root)
+        if args.command == "remove-vectors":
+            return remove_vectors(root)
         return vectorize(root)
     except ConfigError as exc:
         return _report_error(args.command, "CONFIG_INVALID", str(exc))
