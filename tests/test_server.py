@@ -15,7 +15,7 @@ from inline_snapshot import snapshot
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from dsh_coderag.server import build_server
+from dsh_coderag.server import SERVER_INSTRUCTIONS, build_server
 
 
 @pytest.fixture
@@ -92,6 +92,24 @@ async def test_tool_descriptions_are_stable(client: ClientSession) -> None:
             " index when no task id is given.",
         ]
     )
+
+
+@pytest.mark.snapshot
+def test_server_instructions_are_stable(tmp_path: Path) -> None:
+    """M9: the initialize instructions are a model-visible contract (ADR-18)."""
+    server = build_server(root=tmp_path)
+    assert server.instructions == snapshot(
+        "At the start of any question about where code lives, how it behaves, or"
+            " which files are involved, call mcp__coderag__code_search as your FIRST tool,"
+            " before bash, grep, or read — even if you have already run grep. It returns"
+            " ranked snippets with workspace-relative paths and line ranges in one call."
+            " The grep tool only returns raw matching lines: use it for exact strings or"
+            " regular expressions after code_search, not instead of it. Use"
+            " mcp__coderag__code_outline to inspect a file's structure before reading it"
+            " in full, and mcp__coderag__index_status when a search reports that nothing"
+            " is indexed."
+    )
+    assert server.instructions == SERVER_INSTRUCTIONS
 
 
 @pytest.mark.anyio

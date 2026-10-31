@@ -499,7 +499,7 @@ config 与 types 被所有模块只读引用。render 只被 server 调用（eva
 ```jsonc
 {
   "name": "code_search",
-  "description": "Search the workspace codebase for relevant code. Returns ranked code snippets with exact file paths and line numbers. Prefer this over grep when you do not know the exact identifier, or when searching for behaviour across multiple files. When the index is not ready the result reports a structured status instead of an empty list.",
+  "description": "Find code in this workspace by describing what you are looking for, in natural language or as an identifier. Use this first for any question about where something lives, how a behaviour is implemented, or which files are involved — including when you already know the exact identifier, because a single call returns exact file paths and line ranges. Use a literal text search only when you must match an exact string or regex, and read the returned files to confirm. When nothing is searchable yet, the result says so instead of reporting no matches.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -628,6 +628,16 @@ function helper  lines 42-44
 
 **状态机**：`pending → running → ready | failed | cancelled`
 
+#### MCP `initialize` instructions（模型可见，`ADR-18`）
+
+除四个工具的描述外，服务器还在 `initialize` 响应里发布一段 instructions；宿主把它渲染为 `### MCP server: coderag` 的 system prompt 段（从工具挂载的下一步起可见；**首个请求通常还没有任何 `mcp__coderag__*` 工具**）。原文必须与 `src/dsh_coderag/server.py` 的 `SERVER_INSTRUCTIONS` 逐字一致：
+
+```
+At the start of any question about where code lives, how it behaves, or which files are involved, call mcp__coderag__code_search as your FIRST tool, before bash, grep, or read — even if you have already run grep. It returns ranked snippets with workspace-relative paths and line ranges in one call. The grep tool only returns raw matching lines: use it for exact strings or regular expressions after code_search, not instead of it. Use mcp__coderag__code_outline to inspect a file's structure before reading it in full, and mcp__coderag__index_status when a search reports that nothing is indexed.
+```
+
+这段文本解决的是「模型先用 `grep`/`read` 起步、之后不再回头看新挂载的工具」；默认组采纳与验收数字见 `ADR-18` §3。它不是 system-prompt 注入（`E-03`），而是 MCP 协议自带的 instructions 通道。
+
 ### 3.6 SQLite 数据模型
 
 **验证记录**：本机 `forBSH` 环境实测为 **Python 3.10.21 + SQLite 3.53.4**，`fts5` **已确认可用**。⚠️ **但中文必须走 bigram 预处理**——`trigram` 分词器对本项目不可用，原因见 §5.3.1 的实测。
@@ -737,6 +747,7 @@ CREATE TABLE IF NOT EXISTS workspace_index (
 | **ADR-15** | **暂缓语义检索**：v1 不含向量，`T3-08`–`T3-11` **暂缓**；后续版本以**可选后端**引入（**默认关闭**、未配置时退回纯 BM25） | 端到端 S3 已由纯词法 + 采纳率修复达成（0.308 → 0.897，**+59.0pp**），且**调用了工具的 31 个 attempt 里只失败 1 个**、残余失败无一条归因排序；分块修复实验 S1/S2 **逐条零变化**（失败全在 `A5` 词表）；而向量要求用户装 Ollama + 1.2 GB 模型 + 首次索引几十分钟，与 v1"一条命令安装"冲突。完整依据与**重启条件**见 `docs/adr/ADR-15-defer-semantic-retrieval.md` | 以 S1/S2 未达标为由在 v1 就引入向量（部署门槛与发布目标冲突）；把"暂缓"读成"撤销 R2 结论"（R2 事实判断仍成立） |
 | **ADR-16** | **向量作为可选后端（2.0.0）**：默认关闭 + opt-in、未配置时**输出与 1.0.0 逐字节一致**、RRF(k=60) 只补齐不替换、后端为**本地 Ollama + `bge-m3`**、依赖冻结为 extra **`semantic`（只有 numpy，用 stdlib `urllib` 不引入 httpx、不引入向量库）**、向量索引落在 **`<root>/.coderag/vectors/`**（`S-03`）、失败一律结构化状态并回退 BM25（不 `isError`、不空列表）、发布服从 `ADR-14` §10.4 的 V1–V4（V3 用 **α = 0.025**，V4：C 不显著优于 B 就不发布），且**探针 `T5-14` 先行、由数据给 go/no-go** | `ADR-15` §3 的重启条件逐条兑现；本地后端是为了满足 `S-01`（默认不联网）与 `S-02`（不外发数据）——云端 embedding 需要 key 且会把代码发出机器；`numpy` 只进 extra 是为了 `RL-10`（改写后）的"不得进入必需依赖"；探针先行是因为在没有上限数据前全量实施是过早优化。完整条文见 `docs/adr/ADR-16-optional-vector-backend.md` | 默认开启或默认安装向量依赖（把"可选"做成"必需"）；云端 embedding；引入向量数据库（≤10 万 chunk 用暴力余弦足够）；把向量做成**替换**而非补齐（exact 已满分，替换只会回退）；跳过探针直接全量实施 |
 | **ADR-17** | **云端的向量后端也是可选的**：新增与 `ollama` 平级的 `openai` 后端（兼容 OpenAI `/v1/embeddings`），**双重开关**（`CODERAG_SEMANTIC=on` **且** `CODERAG_SEMANTIC_ALLOW_REMOTE=1` 才允许非 loopback 地址），key 只从环境读，形态与本地后端完全对称（默认关闭 + 干净回退 + RRF + V1–V4） | 用户需求变更（2026-09-23）要求可选的线上模型 API；选兼容协议是为了**一份实现覆盖多家**（改 URL + model 就能换供应商/换模型），且继续用标准库 `urllib`、**不引入任何厂商 SDK**（`RL-10`）。代价是**代码文本会离开本机**，故必须：默认关闭、双重开关、风险声明随每一处配置出现（`D-08`）。完整条文见 `docs/adr/ADR-17-optional-cloud-embedding.md` | 各厂商官方 SDK（依赖树随支持家数膨胀，且与"HTTP 走标准库"的冻结条文冲突）；把云端做成默认或必需依赖（`RL-10`）；**不加第二把钥匙就让远端地址生效**（那样改一个 URL 就能把代码发出去） |
+| **ADR-18** | **默认路径的工具采纳**：由 MCP `initialize` 发布短而硬的 instructions（「先 `code_search`、再 `grep`；`grep` 只用于精确串或正则」），工具描述与工具集不变；默认组评测必须同时报告采纳数 | 5 个默认评测组的 `code_search` 采纳为 **0/13**、强制变体 **13/13** 通过，说明工具可用但默认不采纳；会话取证显示宿主在**首个模型请求之后**才挂载 MCP 工具，且基座提示要求优先用 `grep`。发布 instructions 后默认组 10/13 成功、10/13 采纳（`ADR-18` §3） | 改 DSH 基座提示（`RL-01`）；重命名/新增工具（`RL-05`）；prompt 注入（`E-03`）；默认评测继续用强制 prompt |
 
 ---
 
@@ -1819,6 +1830,7 @@ T6-31  ← T6-29
 | ADR-15 | T3-08, T3-11, T5-16 | **已重启为可选后端（2.0.0）**：默认关闭、未配置时干净退回纯 BM25、**不得进入必需依赖**；重启条件见 `ADR-15` §3，形态由 `ADR-16`（`T5-05`）冻结 |
 | ADR-16 | T3-08, T3-09, T3-10, T3-11, T6-03a | **可选后端的可验收形态（2.0.0）**：默认关闭 + opt-in、未配置时输出与 1.0.0 逐字节一致、extra 名 `semantic`（只有 numpy）/后端 `ollama`+`bge-m3`/索引落点 `<root>/.coderag/vectors/`/失败码 `SEMANTIC_*` 并回退 BM25；发布服从 `ADR-14` §10.4 的 V1–V4（V3 `α = 0.025`、V4 不显著优于 B 就不发布），探针 `T5-14` 先行。原强制点 `T5-15` 已移出 2.0.0 范围，其 pyproject 那一半（extra 的声明）由 `T6-03a` 按 §3.2 的冻结内容恢复（2026-09-30 裁决） |
 | ADR-17 | T5-20, T5-21, T5-22 | **云端后端也是可选的（2.0.0）**：`openai` 兼容 `/v1/embeddings`、双重开关（`ALLOW_REMOTE=1` 才允许非 loopback）、key 只从环境读、形态与本地对称；**风险声明随每一处配置出现**（`D-08`）；判据按后端独立满足 |
+| ADR-18 | *全局* | 默认路径的工具采纳：MCP instructions 的发布与「工具在首个请求之后挂载」的已知限制；不改变工具集（`ADR-03`）与安全过滤（`ADR-08`），详见 §3.5 与 `ADR-18` |
 | C1 | T1-12 | MCP 工具 60s 超时 → 索引必须异步 |
 | C2 | T1-14 | stdio 环境清洗 → key 必须走 `config.env` |
 | C3 | *全局* | preset `complete:true` 吞注入 → 本项目不做 prompt 注入（见 `AGENTS.md` E-03） |
@@ -1918,6 +1930,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-09` | 融合结果按**融合名次**裁剪、再按源码顺序输出：`fuse_candidates` 保留名次顺序，`_trim_to_budget` 按给定顺序花预算后排序。修复 `L-015` 的 exact 命中被大文件挤出 4000-token 预算的问题；BM25 默认路径不变 | `git log --grep 'Refs: T8-09'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §13；`CHANGELOG.md` `[Unreleased]` |
 | `T8-10` | 融合输入改用 **BM25 selection order**：`_search` 返回 SQL 排序（tier → bm25/符号加成 → `c.id`）；`_apply_semantic` 在关闭/失败/无向量命中时用 `_source_order()` 恢复源码顺序，保证 BM25 默认路径与 2.1.1 逐条一致；输出仍按源码顺序。43 条 L1 命中集合不变（31/43、exact 12/12），融合第 1 名 9→12、MRR 0.429→0.467 | `git log --grep 'Refs: T8-10'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §14；`CHANGELOG.md` `[Unreleased]` |
 | `T8-11` | 归档 2026-10-30/31 的评测原始报告：三组 L2（bge-m3）`arm-{a,b,c}`、云端 L2 `arm-cloud-{a,b,c}`、强制变体 `forced-{b,c}`/`forced-cloud-c`、L1 云端 `l1-cloud-{1,2,3}.json`/`l1-bm25-now.json`，以及 `three-arm-2026-10-30.md`、`l1-three-configs-2026-10-30.md`、`l1-cloud-vs-bge-2026-10-31.md`。只归档 `report.json`/`report.md`，`.sessions/` 由 `.gitignore:22` 排除 | `git log --grep 'Refs: T8-11'` | 已完成 | 本行；`eval/runs/` |
+| `T8-12` | 默认路径的工具采纳：MCP `initialize` 发布 `SERVER_INSTRUCTIONS`（先 `code_search`、再 `grep`；`grep` 只用于精确串/正则），把默认组采纳从 0/13 提升到 10/13（成功 4/13 → 10/13）；只改模型可见提示，不改工具集与描述；宿主「首个请求后挂载 MCP 工具」记为已知限制 | `git log --grep 'Refs: T8-12'` | 已完成 | `docs/adr/ADR-18-tool-adoption.md` §3；`eval/runs/cloud-c-instructions/` |
 
 ---
 

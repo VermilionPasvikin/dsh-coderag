@@ -30,6 +30,21 @@ from dsh_coderag.walker import TooManyFilesError, walk_with_report
 
 SERVER_NAME = "coderag"
 
+# Published through the MCP initialize result. Hosts that attribute server
+# instructions place this text in the model's prompt, which is the supported
+# way for a server to explain when its tools beat a plain text search.
+SERVER_INSTRUCTIONS = (
+    "At the start of any question about where code lives, how it behaves, or"
+    " which files are involved, call mcp__coderag__code_search as your FIRST"
+    " tool, before bash, grep, or read — even if you have already run grep."
+    " It returns ranked snippets with workspace-relative paths and line ranges"
+    " in one call. The grep tool only returns raw matching lines: use it for"
+    " exact strings or regular expressions after code_search, not instead of it."
+    " Use mcp__coderag__code_outline to inspect a file's structure before"
+    " reading it in full, and mcp__coderag__index_status when a search reports"
+    " that nothing is indexed."
+)
+
 TOOLS: list[Tool] = [
     Tool(
         name="code_search",
@@ -148,7 +163,9 @@ TOOLS: list[Tool] = [
 
 def build_server(root: Path | None = None) -> Server:
     """Build the MCP server. root defaults to CODERAG_ROOT at call time."""
-    server: Server = Server(SERVER_NAME, version=__version__)
+    server: Server = Server(
+        SERVER_NAME, version=__version__, instructions=SERVER_INSTRUCTIONS
+    )
 
     def workspace_root() -> Path:
         if root is not None:
