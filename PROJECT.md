@@ -1931,6 +1931,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-10` | 融合输入改用 **BM25 selection order**：`_search` 返回 SQL 排序（tier → bm25/符号加成 → `c.id`）；`_apply_semantic` 在关闭/失败/无向量命中时用 `_source_order()` 恢复源码顺序，保证 BM25 默认路径与 2.1.1 逐条一致；输出仍按源码顺序。43 条 L1 命中集合不变（31/43、exact 12/12），融合第 1 名 9→12、MRR 0.429→0.467 | `git log --grep 'Refs: T8-10'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §14；`CHANGELOG.md` `[Unreleased]` |
 | `T8-11` | 归档 2026-10-30/31 的评测原始报告：三组 L2（bge-m3）`arm-{a,b,c}`、云端 L2 `arm-cloud-{a,b,c}`、强制变体 `forced-{b,c}`/`forced-cloud-c`、L1 云端 `l1-cloud-{1,2,3}.json`/`l1-bm25-now.json`，以及 `three-arm-2026-10-30.md`、`l1-three-configs-2026-10-30.md`、`l1-cloud-vs-bge-2026-10-31.md`。只归档 `report.json`/`report.md`，`.sessions/` 由 `.gitignore:22` 排除 | `git log --grep 'Refs: T8-11'` | 已完成 | 本行；`eval/runs/` |
 | `T8-12` | 默认路径的工具采纳：MCP `initialize` 发布 `SERVER_INSTRUCTIONS`（先 `code_search`、再 `grep`；`grep` 只用于精确串/正则），把默认组采纳从 0/13 提升到 10/13（成功 4/13 → 10/13）；只改模型可见提示，不改工具集与描述；宿主「首个请求后挂载 MCP 工具」记为已知限制 | `git log --grep 'Refs: T8-12'` | 已完成 | `docs/adr/ADR-18-tool-adoption.md` §3；`eval/runs/cloud-c-instructions/` |
+| `T8-13` | L2 用例扩充（13→20）：新增 7 条并固定分桶 7 crossfile / 6 locate / 4 regression / 3 negative；同步 `EVAL.md` §3.4 的口径与理由 | `git log --grep 'Refs: T8-13'` | 已完成 | `EVAL.md` §3.4；`cases/` |
 
 ---
 

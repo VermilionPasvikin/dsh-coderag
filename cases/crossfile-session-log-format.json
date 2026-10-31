@@ -1,0 +1,31 @@
+{
+  "name": "crossfile-session-log-format",
+  "prompt": "会话日志落盘时，文件名里那个代际版本号是从哪来的？日志默认压不压缩、由哪个包决定？把相关文件都列出来。",
+  "tags": [
+    "crossfile"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "session-format|filename\\.ts",
+      "session-persistence-jsonl|zstd"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 16
+  },
+  "answer_paths": [
+    "packages/session/session-format/src/filename.ts",
+    "packages/session/session-persistence-jsonl/src/index.ts"
+  ],
+  "notes": "出处：session-format/src/filename.ts:16 生成 `session.jsonl` 或 `session.v${generation}.jsonl`；session-persistence-jsonl/src/index.ts:66 `DEFAULT_COMPRESSION = 'zstd'`。理由：T3-00 的 harness 不兼容正是由文件名代际造成；答案是两条独立事实，跨两个包。",
+  "accept": [
+    "版本号由 packages/session/session-format/src/filename.ts 拼进文件名；默认压缩在 packages/session/session-persistence-jsonl/src/index.ts 里定为 zstd。"
+  ],
+  "reject": [
+    "版本号来自 package.json 的 version 字段。",
+    "日志默认不压缩。"
+  ]
+}

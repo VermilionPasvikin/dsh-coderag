@@ -1,0 +1,31 @@
+{
+  "name": "regression-instruction-cap-rejects",
+  "prompt": "MCP 服务器给的说明文字超过上限时，连接会被静默截断还是直接失败？失败信息里会出现什么标识？",
+  "tags": [
+    "regression",
+    "identifier"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "maxInstructionBytes",
+      "(?i)exceed|超过|拒绝|失败"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 10
+  },
+  "answer_paths": [
+    "packages/mcp/mcp-client/src/connection.ts"
+  ],
+  "notes": "出处：connection.ts:320-321，`Buffer.byteLength(instructions) > maxInstructionBytes` 时抛 `${label}: server instructions exceed maxInstructionBytes (${cap})`，不会截断。理由：固定『失败而不是静默截断』这条契约，防止将来改成截断；『标识』指错误文本里的常量名。",
+  "accept": [
+    "会直接失败，错误信息包含 maxInstructionBytes（packages/mcp/mcp-client/src/connection.ts）。"
+  ],
+  "reject": [
+    "会被静默截断到上限。",
+    "会回退到只使用工具、不加载说明文字。"
+  ]
+}

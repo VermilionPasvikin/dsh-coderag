@@ -1,0 +1,29 @@
+{
+  "name": "locate-web-fetch-cap",
+  "prompt": "抓取网页的工具最多把多少字符的结果放回模型上下文？这个上限定义在哪个文件？",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "200[_ ,]?000|20\\s*万",
+      "tool-web"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 10
+  },
+  "answer_paths": [
+    "packages/web/tool-web/src/index.ts"
+  ],
+  "notes": "出处：packages/web/tool-web/src/index.ts:34 `DEFAULT_FETCH_MAX_OUTPUT_CHARS = 200_000`，:61 收进 config schema。理由：中文『放回上下文』与代码 fetchMaxOutputChars 词形不重叠；数字 200000 是唯一答案。",
+  "accept": [
+    "上限是 200000 字符，定义在 packages/web/tool-web/src/index.ts。"
+  ],
+  "reject": [
+    "上限是 100000 字符，定义在 packages/web/tool-web/src/index.ts。"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "locate-parallel-tool-calls",
+  "prompt": "模型在一个步骤里最多能同时发起多少个工具调用？这个默认上限定义在哪个文件？",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "(?<![0-9])10(?![0-9])",
+      "agent-loop"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 10
+  },
+  "answer_paths": [
+    "packages/core/agent-loop/src/constants.ts"
+  ],
+  "notes": "出处：packages/core/agent-loop/src/constants.ts:6 `DEFAULT_MAX_PARALLEL_TOOL_CALLS = 10`；index.ts:191 作为默认值使用。理由：中文『同时发起』与代码 parallel 词形不同，答案是一个整数加一个文件。",
+  "accept": [
+    "默认是 10 个，定义在 packages/core/agent-loop/src/constants.ts。"
+  ],
+  "reject": [
+    "默认是 5 个，定义在 packages/core/agent-loop/src/index.ts。"
+  ]
+}

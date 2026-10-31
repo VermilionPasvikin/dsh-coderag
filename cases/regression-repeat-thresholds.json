@@ -1,0 +1,30 @@
+{
+  "name": "regression-repeat-thresholds",
+  "prompt": "同一个工具用一模一样的参数连续调用时，默认会在第几次开始提醒？默认一共有几个阈值、分别是多少？定义在哪个文件？",
+  "tags": [
+    "regression",
+    "identifier"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "3[\\s、,，/]+5[\\s、,，/]+8",
+      "repeat-tool-reminder"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 10
+  },
+  "answer_paths": [
+    "packages/guard/repeat-tool-reminder/src/index.ts"
+  ],
+  "notes": "出处：packages/guard/repeat-tool-reminder/src/index.ts:46 `thresholds: z.array(z.number()).default([3, 5, 8])`；:60 用 thresholds[0] 作为第一次温和提醒。理由：现有 locate 用例只问『怎么提醒/路径』，本用例把三个默认阈值钉死，防止默认值被悄悄改掉。",
+  "accept": [
+    "默认三个阈值是 3、5、8，第 3 次开始提醒；定义在 packages/guard/repeat-tool-reminder/src/index.ts。"
+  ],
+  "reject": [
+    "默认从第 2 次开始提醒，阈值是 [2, 4, 6]。"
+  ]
+}
