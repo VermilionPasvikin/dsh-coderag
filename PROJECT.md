@@ -1932,6 +1932,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-11` | 归档 2026-10-30/31 的评测原始报告：三组 L2（bge-m3）`arm-{a,b,c}`、云端 L2 `arm-cloud-{a,b,c}`、强制变体 `forced-{b,c}`/`forced-cloud-c`、L1 云端 `l1-cloud-{1,2,3}.json`/`l1-bm25-now.json`，以及 `three-arm-2026-10-30.md`、`l1-three-configs-2026-10-30.md`、`l1-cloud-vs-bge-2026-10-31.md`。只归档 `report.json`/`report.md`，`.sessions/` 由 `.gitignore:22` 排除 | `git log --grep 'Refs: T8-11'` | 已完成 | 本行；`eval/runs/` |
 | `T8-12` | 默认路径的工具采纳：MCP `initialize` 发布 `SERVER_INSTRUCTIONS`（先 `code_search`、再 `grep`；`grep` 只用于精确串/正则），把默认组采纳从 0/13 提升到 10/13（成功 4/13 → 10/13）；只改模型可见提示，不改工具集与描述；宿主「首个请求后挂载 MCP 工具」记为已知限制 | `git log --grep 'Refs: T8-12'` | 已完成 | `docs/adr/ADR-18-tool-adoption.md` §3；`eval/runs/cloud-c-instructions/` |
 | `T8-13` | L2 用例扩充（13→20）：新增 7 条并固定分桶 7 crossfile / 6 locate / 4 regression / 3 negative；同步 `EVAL.md` §3.4 的口径与理由 | `git log --grep 'Refs: T8-13'` | 已完成 | `EVAL.md` §3.4；`cases/` |
+| `T8-14` | 20 条 L2 × 六组评测（A 无工具 / B BM25 / C 云语义 × 默认/强制提示，trials=1）：默认 5/12/13、强制 4/15/16；默认采纳 0/12/11、强制 0/20/20；120 次 attempt 超时 0；失败以 `max_steps` 与未采纳为主。只归档 `report.json`/`report.md` 与对比报告，`.sessions/` 不入库 | `git log --grep 'Refs: T8-14'` | 已完成 | `eval/runs/l2-6arm-2026-10-31.md`；`eval/runs/arm20-*/` |
 
 ---
 
