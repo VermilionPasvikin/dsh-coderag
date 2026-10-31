@@ -1933,6 +1933,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-12` | 默认路径的工具采纳：MCP `initialize` 发布 `SERVER_INSTRUCTIONS`（先 `code_search`、再 `grep`；`grep` 只用于精确串/正则），把默认组采纳从 0/13 提升到 10/13（成功 4/13 → 10/13）；只改模型可见提示，不改工具集与描述；宿主「首个请求后挂载 MCP 工具」记为已知限制 | `git log --grep 'Refs: T8-12'` | 已完成 | `docs/adr/ADR-18-tool-adoption.md` §3；`eval/runs/cloud-c-instructions/` |
 | `T8-13` | L2 用例扩充（13→20）：新增 7 条并固定分桶 7 crossfile / 6 locate / 4 regression / 3 negative；同步 `EVAL.md` §3.4 的口径与理由 | `git log --grep 'Refs: T8-13'` | 已完成 | `EVAL.md` §3.4；`cases/` |
 | `T8-14` | 20 条 L2 × 六组评测（A 无工具 / B BM25 / C 云语义 × 默认/强制提示，trials=1）：默认 5/12/13、强制 4/15/16；默认采纳 0/12/11、强制 0/20/20；120 次 attempt 超时 0；失败以 `max_steps` 与未采纳为主。只归档 `report.json`/`report.md` 与对比报告，`.sessions/` 不入库 | `git log --grep 'Refs: T8-14'` | 已完成 | `eval/runs/l2-6arm-2026-10-31.md`；`eval/runs/arm20-*/` |
+| `T8-15` | V1–V4 正式复核（20 条 L2 × trials=3）：V1 达标（L1 `natural` 9/20 = 0.45 > B 0/20）；V2 未达（L1 exact 12/12、0 回归，但 L2 **7 条回归**）；V3 不显著（B 36/60 vs C 31/60；pass@3 2 gain / 3 loss，p = 1.0）；V4 触发 → **维持向量路径不发布** | `git log --grep 'Refs: T8-15'` | 已完成 | `eval/runs/l2-gate-t3-2026-10-31.md`；`docs/adr/ADR-16-optional-vector-backend.md` §15 |
 
 ---
 

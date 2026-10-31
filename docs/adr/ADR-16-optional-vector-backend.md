@@ -492,3 +492,42 @@ T8-09 的裁剪顺序不依赖本项，可单独保留。
 
 - 融合名次变化对模型实际读到的前 5 条之外的影响（仅验证了 `MRR` 与命中集合）。
 - 云端网络抖动与 Windows 上的复测。
+
+## 15. 2026-10-31 正式复核：换云端模型 + 融合修复后仍不发布（T8-15）
+
+### 15.1 触发
+
+§7.2 的 V1–V4 上次判定是 2026-09-25（`bge-m3`，`natural` 6/20 = 0.300、`exact` 0.917、`L-015` 回归）。此后发生两件事：
+换用云端 `qwen3.7-text-embedding`（ADR-17 的可选后端），以及 T8-09/T8-10 修复融合的裁剪顺序与输入名次。
+按 §7.2 的条文，发布与否需要重新裁决；本次用正式门禁口径：20 条 L2 用例 × **trials=3**（B 组 BM25、C 组云语义），L1 43 条沿用确定性结果。
+
+### 15.2 结果
+
+| 判据 | 结果 | 判定 |
+|---|---|---|
+| **V1** `natural@5 ≥ 0.40` 且 > B 组 | L1 43 条：**9/20 = 0.45**，B 组 0/20（Wilson 95% [0.258, 0.658]） | ✅ 达标 |
+| **V2** `exact@5 == 1.000` 且逐条回归 == 0 | L1：exact **12/12**、逐条回归 **0**（18 gain / 0 loss）；L2：**7 条回归** | ❌ 未达 |
+| **V3** C vs B 端到端，α = 0.025 | pass@3：2 gain / 3 loss，McNemar p = 1.0；pass^3：1 / 3，p = 0.625 | ❌ 不显著 |
+| **V4** `V1` 或 `V3` 未过 → 不发布 | V3 未过，且 C 的点估计更低（31/60 vs 36/60） | ✅ 触发（不发布） |
+
+L2 明细：B 36/60（60.0%，Wilson [0.474, 0.714]）、C 31/60（51.7%，[0.393, 0.638]）；
+7 条回归为 `crossfile-skill-precedence`、`crossfile-tool-cancel-code`、`locate-image-count-limit`、
+`locate-parallel-tool-calls`、`locate-spill-notice`、`locate-web-fetch-cap`、`regression-repeat-thresholds`；
+2 条提升为 `crossfile-session-log-format`、`crossfile-todo-snapshot`。原始证据：
+`eval/runs/l2-gate-t3-2026-10-31.md`、`eval/runs/arm20-{b,c}-t3/report.json`。
+
+### 15.3 决策
+
+**维持「向量路径不发布」**：extra 与代码保留、默认关闭、README/CHANGELOG 继续按可选/未发布表述。
+这是 V1–V4 的第二次正式判定；V1 已从不达标变为达标，但 V2 的 L2 条款与 V3 的显著性条款仍未过。
+
+### 15.4 解释
+
+- L1 的检索层提升（从 13/43 到 31/43，18 gain / 0 loss）没有转化为 L2 的端到端提升：agent 在这些用例里本来就能用 grep/bash 找到答案，检索排序不是主瓶颈。
+- L2 的失败模式仍以 `max_steps` 与 agent 循环为主；换更强 embedding 没有改变这一点。
+- 三次复跑暴露了单次读数的噪声：大量用例本身不稳定（如 `crossfile-skill-precedence` 1/3、`regression-repeat-thresholds` 1/3）。单次运行的「C 13/20 vs B 12/20」不能作为发布依据。
+
+### 15.5 后续
+
+要让发布判据可达成，需要新的 ADR 明确三件事：主判据是 L1 还是 L2；L2 的可检测效应量与样本量（当前 20×3 对 ±1 条无统计功效）；云后端的 opt-in 风险如何表述（ADR-17 §5）。
+在此之前，向量路径保持 opt-in、默认关闭、不进入发布范围。
