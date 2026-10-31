@@ -132,6 +132,11 @@ def test_search_trims_by_rank_before_rendering_in_source_order(
         "pkg/z2_exact.py",
     ]
     assert result.omitted == 2
+    assert result.ranking is not None
+    assert [path for path, _ in result.ranking][:2] == [
+        "pkg/z1_exact.py",
+        "pkg/z2_exact.py",
+    ]
 
 
 def test_fusion_ranks_lexical_candidates_by_bm25_not_source_order(

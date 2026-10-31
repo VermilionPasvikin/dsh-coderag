@@ -734,7 +734,7 @@ CREATE TABLE IF NOT EXISTS workspace_index (
 | **ADR-02** | 第一版只做 FTS5 BM25，不做向量 | BM25 在代码检索上实测赢纯向量（93.2 vs 80.4）；80% 检索不提升性能；Kilo 已删除索引功能 | 直接上向量（成本高、收益未验证） |
 | **ADR-03** | 工具集固定为 4 个，不动态增删 | MCP `list_changed` 重同步可能撞 namespace 抢占清空工具集（约束 C4） | 按语言/按目录动态注册工具 |
 | **ADR-04** | 索引异步化，立刻返回 taskId | MCP 工具调用默认 60 秒超时（约束 C1） | 同步索引（大仓库必然超时） |
-| **ADR-05** | 检索结果按源码顺序输出，而非按分数降序 | NVIDIA 实测：128 块场景 F1 从 38.40 → 44.43（第 2.5 节） | 按相关度降序（vanilla RAG） |
+| **ADR-05** | 检索结果按源码顺序输出，而非按分数降序；**展示顺序与排序质量分开度量**（`SearchResult.ranking` 携带检索名次，hit@1/MRR 不用展示顺序，T8-19） | NVIDIA 实测：128 块场景 F1 从 38.40 → 44.43（第 2.5 节） | 按相关度降序（vanilla RAG） |
 | **ADR-06** | 索引未就绪返回结构化状态，不返回空列表 | RGB 实测拒答率仅 43.33%，空结果会让模型编造（约束 C6） | 返回 `[]` + 提示词里写"没找到就说没有" |
 | **ADR-07** | **中文走 bigram 预转换 + FTS5 `unicode61`**（不用 `trigram` 分词器） | 本机 PoC 实测：`trigram` 在 7 条查询上只命中 3 条——**所有 2 字中文词全部失败**（trigram 最小匹配单位是 3 字）；改成 bigram 后 **7/7 全中**。详见 §5.3.1 | `trigram` 分词器（2 字词不可用）；`unicode61` 裸用（中文整段被当一个 token） |
 | **ADR-08** | 忽略规则 + 密钥黑名单是**索引入口的硬过滤**，不是可配置的优化项 | Kilo #11637 真实泄露 `.env.local`（约束 C7） | 靠提示词提醒模型"别看密钥" |
@@ -1934,6 +1934,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-13` | L2 用例扩充（13→20）：新增 7 条并固定分桶 7 crossfile / 6 locate / 4 regression / 3 negative；同步 `EVAL.md` §3.4 的口径与理由 | `git log --grep 'Refs: T8-13'` | 已完成 | `EVAL.md` §3.4；`cases/` |
 | `T8-14` | 20 条 L2 × 六组评测（A 无工具 / B BM25 / C 云语义 × 默认/强制提示，trials=1）：默认 5/12/13、强制 4/15/16；默认采纳 0/12/11、强制 0/20/20；120 次 attempt 超时 0；失败以 `max_steps` 与未采纳为主。只归档 `report.json`/`report.md` 与对比报告，`.sessions/` 不入库 | `git log --grep 'Refs: T8-14'` | 已完成 | `eval/runs/l2-6arm-2026-10-31.md`；`eval/runs/arm20-*/` |
 | `T8-15` | V1–V4 正式复核（20 条 L2 × trials=3）：V1 达标（L1 `natural` 9/20 = 0.45 > B 0/20）；V2 未达（L1 exact 12/12、0 回归，但 L2 **7 条回归**）；V3 不显著（B 36/60 vs C 31/60；pass@3 2 gain / 3 loss，p = 1.0）；V4 触发 → **维持向量路径不发布** | `git log --grep 'Refs: T8-15'` | 已完成 | `eval/runs/l2-gate-t3-2026-10-31.md`；`docs/adr/ADR-16-optional-vector-backend.md` §15 |
+| `T8-19` | MRR 口径修正：`SearchResult.ranking` 单独携带检索名次（BM25 选择序 / RRF 融合序），`eval/runner.py` 的 `rank` 改用它；`SearchResult.hits` 仍是 ADR-05 源码展示顺序，模型可见输出逐字节不变；`EVAL.md` §2.5 改写定义。重算 43 条 L1：BM25 MRR 0.219 → 0.2597（hit@1 8 → 10）、云端 MRR 0.269 → 0.4671（hit@1 3 → 12），Success@5 不变（13/43、31/43） | `git log --grep 'Refs: T8-19'` | 已完成 | `EVAL.md` §2.5；`eval/runs/l1-rank-metric-{bm25,cloud}.json` |
 
 ---
 

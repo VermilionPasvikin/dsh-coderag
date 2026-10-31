@@ -268,13 +268,24 @@ def _ready_result(
     skipped: SkipReport,
     max_tokens: int,
     semantic: SemanticNotice | None = None,
+    ranking: tuple[tuple[str, int], ...] | None = None,
 ) -> SearchResult:
     """Trim candidates to the token budget and build the READY result.
 
     `semantic` is None on the default path, which is what keeps the rendered
-    output byte-identical to 1.0.0 (ADR-16 2).
+    output byte-identical to 1.0.0 (ADR-16 2). `ranking` is the caller's
+    relevance order; the hits are trimmed in that order and only then sorted
+    into ADR-05 source order for rendering, so the two orders stay separable
+    (T8-09/T8-19).
     """
-    hits, omitted = _trim_to_budget(candidates, max_tokens)
+    kept, omitted = _trim_to_budget(candidates, max_tokens)
+    kept_keys = {(hit.path, hit.start_line) for hit in kept}
+    ranked = (
+        None
+        if ranking is None
+        else tuple(key for key in ranking if key in kept_keys)
+    )
+    hits = _source_order(kept)
     return SearchResult(
         status=SearchStatus.READY,
         query=query,
@@ -284,6 +295,7 @@ def _ready_result(
         skipped=skipped,
         omitted=omitted,
         semantic=semantic,
+        ranking=ranked,
     )
 
 
@@ -302,6 +314,10 @@ def search(
     full OR with CJK bigrams); the best k are re-sorted into source order
     (ADR-05) and trimmed to max_tokens, reporting how many hits were dropped.
     `path` restricts the search to a workspace-relative subdirectory or file.
+
+    The result also carries `ranking`, the hits' relevance order before the
+    ADR-05 re-sort, so the metric layer can score retrieval separately from
+    presentation (T8-19).
 
     The optional backend participates only when `semantic` (by default
     CODERAG_SEMANTIC) is enabled. An enabled but unusable backend returns
@@ -331,10 +347,12 @@ def search(
     finally:
         connection.close()
     skipped = SkipReport(reasons=walk_with_report(root).reasons)
-    candidates, notice = _apply_semantic(base, query, k, candidates, semantic)
+    candidates, ranking, notice = _apply_semantic(base, query, k, candidates, semantic)
     if not candidates:
         return _empty_result(query, files, chunks, skipped, punctuation_only)
-    return _ready_result(query, candidates, files, chunks, skipped, max_tokens, notice)
+    return _ready_result(
+        query, candidates, files, chunks, skipped, max_tokens, notice, ranking
+    )
 
 
 def _apply_semantic(
@@ -343,26 +361,35 @@ def _apply_semantic(
     k: int,
     candidates: list[Hit],
     semantic: SemanticConfig | None,
-) -> tuple[list[Hit], SemanticNotice | None]:
+) -> tuple[list[Hit], tuple[tuple[str, int], ...], SemanticNotice | None]:
     """Fuse the optional backend's candidates in, or explain why it could not.
 
-    Returns the candidates to use and the notice to report. The lexical input
-    arrives in BM25 selection order, which is what RRF must rank by; a clean
-    fallback restores ADR-05 source order because that is the frozen BM25
-    response (ADR-16 2, 14).
+    Returns the candidates to use, their relevance order and the notice to
+    report. The lexical input arrives in BM25 selection order, which is what RRF
+    must rank by; a clean fallback restores ADR-05 source order because that is
+    the frozen BM25 response, while `ranking` keeps the selection order for the
+    metric layer (ADR-16 2, 14, 16).
     """
     config, notice = _resolve_semantic(semantic)
     if config is None or not config.enabled:
-        return _source_order(candidates), notice
+        return _source_order(candidates), _ranking_keys(candidates), notice
     try:
         vector_hits = _semantic_candidates(base, query, config, k)
     except SemanticError as exc:
-        return _source_order(candidates), SemanticNotice(
-            code=exc.code, message=exc.message, hint=exc.hint
+        return (
+            _source_order(candidates),
+            _ranking_keys(candidates),
+            SemanticNotice(code=exc.code, message=exc.message, hint=exc.hint),
         )
     if not vector_hits:
-        return _source_order(candidates), notice
-    return fuse_candidates(candidates, vector_hits, limit=k), notice
+        return _source_order(candidates), _ranking_keys(candidates), notice
+    fused = fuse_candidates(candidates, vector_hits, limit=k)
+    return fused, _ranking_keys(fused), notice
+
+
+def _ranking_keys(hits: list[Hit]) -> tuple[tuple[str, int], ...]:
+    """Return the hits' (path, start_line) keys in their current order."""
+    return tuple((hit.path, hit.start_line) for hit in hits)
 
 
 def _source_order(hits: list[Hit]) -> list[Hit]:
@@ -423,13 +450,14 @@ def _semantic_candidates(
 
 
 def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
-    """Keep the highest-ranked hits under the budget, rendered in source order.
+    """Keep the highest-ranked hits under the budget, preserving their order.
 
     `hits` arrives in the caller's selection order: fusion order on the vector
-    path, source order on the BM25 path. Spending the budget in that order drops
-    the lowest-ranked candidates instead of whatever happens to sort late by
-    path (the L-015 exact regression). The kept hits are then put back in source
-    order, so ADR-05 still describes what the model sees (ADR-16 13).
+    path, BM25 selection order on the BM25 path. Spending the budget in that
+    order drops the lowest-ranked candidates instead of whatever happens to
+    sort late by path (the L-015 exact regression). The kept hits stay in that
+    relevance order here; `_ready_result` restores source order for rendering
+    (ADR-05, ADR-16 13/16, T8-09/T8-19).
 
     The first hit is always kept so a non-empty result never renders as empty.
     """
@@ -441,7 +469,6 @@ def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
             break
         kept.append(hit)
         used += estimate
-    kept.sort(key=lambda hit: (hit.path, hit.start_line))
     return kept, len(hits) - len(kept)
 
 

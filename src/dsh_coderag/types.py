@@ -123,6 +123,11 @@ class SearchResult:
     `semantic` is set only on the optional path, so the default response is
     unchanged and the model learns about a degraded backend instead of
     silently receiving BM25-only results (ADR-16 6).
+
+    `ranking` is the relevance order of the returned hits as (path, start_line)
+    keys: fusion order on the semantic path, BM25 selection order otherwise.
+    It is None for non-READY results and is never rendered; the metric layer
+    reads it so hit@1/MRR do not measure ADR-05 presentation order (T8-19).
     """
 
     status: SearchStatus
@@ -136,6 +141,7 @@ class SearchResult:
     skipped: SkipReport = field(default_factory=SkipReport)
     omitted: int = 0
     semantic: SemanticNotice | None = None
+    ranking: tuple[tuple[str, int], ...] | None = None
 
 
 @dataclass

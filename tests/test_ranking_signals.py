@@ -92,6 +92,19 @@ def test_result_order_is_still_source_order(ranking_corpus: Path) -> None:
     assert positions == sorted(positions)
 
 
+def test_ranking_reports_selection_order_not_source_order(tmp_path: Path) -> None:
+    """T8-19: the metric view is BM25 selection order, not ADR-05 render order."""
+    root = make_corpus(
+        tmp_path / "ranking-view",
+        {"pkg/a.py": "needle = 1\n", "pkg/z.py": "needle = 1\n" * 5},
+    )
+    index_sync(root)
+    result = search(root, "needle", k=5)
+    assert [hit.path for hit in result.hits] == ["pkg/a.py", "pkg/z.py"]
+    assert result.ranking is not None
+    assert [path for path, _ in result.ranking] == ["pkg/z.py", "pkg/a.py"]
+
+
 def test_selection_is_deterministic(ranking_corpus: Path) -> None:
     first = [hit.path for hit in search(ranking_corpus, "needle", k=5).hits]
     second = [hit.path for hit in search(ranking_corpus, "needle", k=5).hits]

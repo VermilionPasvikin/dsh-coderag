@@ -98,9 +98,10 @@ def check_golden_version(
 class EvalResult:
     """One task's outcome against a corpus.
 
-    `rank` is the 1-based position of the best matching target inside the
-    returned hits. Hits come back in source order (ADR-05), so rank is a
-    position in the returned list, not a relevance rank.
+    `rank` is the 1-based position of the best matching target in the retrieval
+    ranking: the fused order on the semantic path, the BM25 selection order
+    otherwise. It is deliberately not a position in the source-order hits list,
+    which is ADR-05 presentation order only (T8-19).
     """
 
     task_id: str
@@ -164,11 +165,17 @@ def _run_task(
 ) -> EvalResult:
     outcome = searcher.search(corpus_root, task.query, k=k, max_tokens=max_tokens)
     returned = tuple(hit.path for hit in outcome.hits)
+    by_key = {(hit.path, hit.start_line): hit for hit in outcome.hits}
+    ranking = (
+        outcome.ranking
+        if outcome.ranking is not None
+        else tuple((hit.path, hit.start_line) for hit in outcome.hits)
+    )
     expect = set(task.expect_paths)
     ranked = [
-        (position, hit)
-        for position, hit in enumerate(outcome.hits, start=1)
-        if hit.path in expect
+        (position, by_key[key])
+        for position, key in enumerate(ranking, start=1)
+        if key in by_key and key[0] in expect
     ]
     matched_path = ranked[0][1].path if ranked else None
     rank = ranked[0][0] if ranked else None

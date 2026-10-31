@@ -243,6 +243,20 @@ def test_run_marks_hit_when_expect_path_returned(eval_corpus: Path) -> None:
     assert run.k == DEFAULT_K
 
 
+def test_run_ranks_by_retrieval_order_not_source_order(tmp_path: Path) -> None:
+    """T8-19: rank is the BM25/fusion position, not ADR-05 render position."""
+    root = tmp_path / "ranking"
+    (root / "pkg").mkdir(parents=True)
+    (root / "pkg" / "a.py").write_text("needle = 1\n", encoding="utf-8")
+    (root / "pkg" / "z.py").write_text("needle = 1\n" * 5, encoding="utf-8")
+    index_sync(root)
+    task = make_task(query="needle", expect_paths=("pkg/z.py",))
+    result = run_eval([task], root).results[0]
+    assert result.returned_paths == ("pkg/a.py", "pkg/z.py")
+    assert result.matched_path == "pkg/z.py"
+    assert result.rank == 1
+
+
 def test_run_marks_miss_when_answer_not_returned(eval_corpus: Path) -> None:
     task = make_task(query="retry_call", expect_paths=("src/auth.py",))
     result = run_eval([task], eval_corpus).results[0]
