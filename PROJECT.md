@@ -1917,6 +1917,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-08` | 设置页新增两个运维按钮：**建索引**（admin `index` → `index_sync(build_vectors=False)`，不联系后端；索引缺失时禁用「开始向量化」并提示）与**删除向量库索引**（只删 `<root>/.coderag/vectors/`，保留 `index.sqlite3`；二次确认；无库 no-op）。同时补 admin `index`/`remove-vectors` 子命令、Host 动作与路由白名单、运行中拒绝与测试 | `git log --grep 'Refs: T8-08'` | 已完成 | 本节；`README.md`「运维面板」；`CHANGELOG.md` `[Unreleased]` |
 | `T8-09` | 融合结果按**融合名次**裁剪、再按源码顺序输出：`fuse_candidates` 保留名次顺序，`_trim_to_budget` 按给定顺序花预算后排序。修复 `L-015` 的 exact 命中被大文件挤出 4000-token 预算的问题；BM25 默认路径不变 | `git log --grep 'Refs: T8-09'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §13；`CHANGELOG.md` `[Unreleased]` |
 | `T8-10` | 融合输入改用 **BM25 selection order**：`_search` 返回 SQL 排序（tier → bm25/符号加成 → `c.id`）；`_apply_semantic` 在关闭/失败/无向量命中时用 `_source_order()` 恢复源码顺序，保证 BM25 默认路径与 2.1.1 逐条一致；输出仍按源码顺序。43 条 L1 命中集合不变（31/43、exact 12/12），融合第 1 名 9→12、MRR 0.429→0.467 | `git log --grep 'Refs: T8-10'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §14；`CHANGELOG.md` `[Unreleased]` |
+| `T8-11` | 归档 2026-10-30/31 的评测原始报告：三组 L2（bge-m3）`arm-{a,b,c}`、云端 L2 `arm-cloud-{a,b,c}`、强制变体 `forced-{b,c}`/`forced-cloud-c`、L1 云端 `l1-cloud-{1,2,3}.json`/`l1-bm25-now.json`，以及 `three-arm-2026-10-30.md`、`l1-three-configs-2026-10-30.md`、`l1-cloud-vs-bge-2026-10-31.md`。只归档 `report.json`/`report.md`，`.sessions/` 由 `.gitignore:22` 排除 | `git log --grep 'Refs: T8-11'` | 已完成 | 本行；`eval/runs/` |
 
 ---
 
