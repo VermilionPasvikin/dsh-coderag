@@ -82,6 +82,10 @@
   从未进入模型上下文。现在 `fuse_candidates` 保留融合名次、`_trim_to_budget` 按名次裁剪后再排成
   源码顺序（ADR-05 的"输出按位置"不变）；43 条 L1 上 exact 11/12 → 12/12、总命中 30 → 31，
   crossfile / natural 逐条不变；BM25 默认路径不受影响（ADR-16 §13）。
+- **融合把源码顺序当成 BM25 名次**（`T8-10`）：`_search` 选完 top-k 后按源码顺序返回，RRF 于是把
+  "第几行"当成"第几名"给词法分。现在 `_search` 返回 BM25 选择顺序，`_apply_semantic` 在关闭、
+  失败、无向量命中三条回退路径上恢复源码顺序；融合拿到真实名次，输出仍按源码顺序，BM25 默认
+  路径与 2.1.1 逐条一致（ADR-16 §14）。43 条 L1 命中集合不变（31/43、exact 12/12）。
 - **admin 子进程可被共享临时目录里的影子模块劫持并读到云端 key**：改为在私有 0700 cwd
   中运行，并使用 `python -c` 启动器（导入前从 `sys.path` 去掉 `''`/cwd）；`status` 不再
   接收 key，只接收 `CODERAG_SEMANTIC_KEY_PRESENT=1` 标记，`health`/`vectorize` 才注入 key。

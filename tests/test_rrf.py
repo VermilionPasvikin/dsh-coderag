@@ -134,6 +134,32 @@ def test_search_trims_by_rank_before_rendering_in_source_order(
     assert result.omitted == 2
 
 
+def test_fusion_ranks_lexical_candidates_by_bm25_not_source_order(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T8-10: RRF must receive BM25 selection order, not ADR-05 render order."""
+    root = workspace
+    (root / "pkg" / "a.py").write_text("zebra = 1\n" + "# filler\n" * 40, encoding="utf-8")
+    (root / "pkg" / "m.py").write_text("zebra = 1\n" + "# filler\n" * 200, encoding="utf-8")
+    (root / "pkg" / "z.py").write_text(
+        "zebra = 1\nzebra = 2\nzebra = 3\nzebra = 4\nzebra = 5\n", encoding="utf-8"
+    )
+    index_sync(root)
+
+    indexed = search(root, "zebra", k=10, semantic=_disabled())
+    middle = next(hit for hit in indexed.hits if hit.path == "pkg/m.py")
+
+    monkeypatch.setattr(
+        "dsh_coderag.searcher._semantic_candidates",
+        lambda base, query, config, k: [middle],
+    )
+    enabled = SemanticConfig(
+        enabled=True, backend="ollama", url="http://127.0.0.1:11434", timeout_s=1
+    )
+    result = search(root, "zebra", k=2, semantic=enabled)
+    assert [hit.path for hit in result.hits] == ["pkg/m.py", "pkg/z.py"]
+
+
 def test_fusion_respects_the_limit_and_is_deterministic() -> None:
     lexical = [_hit(f"pkg/f{index}.py", 0) for index in range(6)]
     vector = list(reversed(lexical))

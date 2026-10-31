@@ -438,3 +438,57 @@ run=3 elapsed=0.35s hits=5 semantic=None
 - 云端后端的网络抖动：单次查询 embedding 失败会回退 BM25（首次 43 条复跑遇到一次 `URLError` 风暴，
   报告被污染为 18/43，已丢弃并重跑；补齐网络故障的评测重试属于评测工具问题，不改生产路径）。
 - 边界样本：43 条只是单机、单语料；按名次裁剪对非 exact 桶的极端样本没有专门构造。
+
+## 14. 2026-10-31 增补四：融合输入的名次（`T8-10`）
+
+### 14.1 触发事实
+
+- `_search` 在 SQL 里选出 top-k（`ORDER BY` 非测试档位 → `bm25 - 符号加成` → `c.id`），
+  但返回前又按 `(path, start_line)` 重排成源码顺序；`_apply_semantic` 把这份顺序直接喂给
+  `fuse_candidates`，RRF 就把"源码第几行"当成了"BM25 第几名"。
+- 43 条消融（云端 `qwen3.7-text-embedding`）里，只把词法输入改成 selection order、不动裁剪：
+  融合第 1 名 9 → 12、`MRR` 0.4291 → 0.4671；渲染集合仍是 30/43，因为当时裁剪仍是
+  源码顺序（T8-09 之前）。
+- 与 T8-09 的 rank-trim 合起来：渲染集合 31/43、exact 12/12；selection order 不改变
+  命中集合，只修正融合的名次与 `MRR`。
+
+### 14.2 决策
+
+- `_search` 返回 **BM25 selection order**，即 SQL 的 tier → `bm25`/符号加成 → `c.id` 顺序。
+- `_apply_semantic` 在禁用、失败、无向量候选三条回退路径上调用 `_source_order()` 恢复
+  `(path, start_line)`，保证 BM25 默认路径与 2.1.1 逐条一致（`S6`）。
+- 融合路径把 selection order 作为词法排名；最终输出仍由 `_trim_to_budget` 按
+  `(path, start_line)` 重排（`ADR-05` 的"选按分数、排按位置"）。
+- 权重保持等权，`RRF_K = 60` 不变。
+
+### 14.3 验收
+
+- 新测试 `tests/test_rrf.py::test_fusion_ranks_lexical_candidates_by_bm25_not_source_order`：
+  构造"BM25 名次与源码顺序相反"的两个命中加一个向量命中，`k=2` 时断言输出
+  `[pkg/m.py, pkg/z.py]`；旧的源码顺序输入会得到 `[pkg/a.py, pkg/m.py]`。
+- 全量 `698 passed, 5 skipped`；`ruff check src tests` 与 `mypy --strict src` 通过。
+- 43 条 L1 云端复跑：**31/43**、exact 12/12、crossfile 10/11、natural 9/20，与 T8-09
+  完全一致（原始 `eval/runs/l1-cloud-t810.json`）。
+- 13 条 L2（C 组，云端，trials=1）复跑：**5/13**（T8-09/10 之前的同口径为 4/13），
+  新增通过的是 `locate-spill-notice`——它在本轮**真的调用了 `code_search`**（默认提示下的
+  唯一一次），且无任何 `semantic: BM25 only` / `SEMANTIC_*` 回退；token 与步数受采样影响
+  不可直接比较（原始 `eval/runs/cloud-c-after-t810/report.json`）。
+
+### 14.4 被否决的方案
+
+| 方案 | 否决理由 |
+|---|---|
+| 只修裁剪顺序（T8-09 单独） | exact 已修好，但融合仍把源码序当 BM25 名次，跨文件/自然语言桶的融合排序仍有系统性偏差 |
+| 保持 `_search` 返回源码顺序，在融合里用 `Hit.score` 重排 | `Hit.score` 是 SQLite 原始 `bm25()` 值，符号加成后的 SQL 排序无法在 Python 侧复现；并列名次与 `c.id` 的确定性也会丢 |
+| 默认 BM25 路径也改用 selection order 裁剪 | 会改变 2.1.1 的默认输出顺序与裁剪集合，破坏 `S6` |
+
+### 14.5 回滚
+
+把 `_search` 末尾恢复为 `hits.sort(key=lambda hit: (hit.path, hit.start_line))`，删除
+`_source_order()` 并把 `_apply_semantic` 的三处回退改回直接返回 `candidates`；同时删除新测试。
+T8-09 的裁剪顺序不依赖本项，可单独保留。
+
+### 14.6 仍未验证
+
+- 融合名次变化对模型实际读到的前 5 条之外的影响（仅验证了 `MRR` 与命中集合）。
+- 云端网络抖动与 Windows 上的复测。

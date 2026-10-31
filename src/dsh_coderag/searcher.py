@@ -346,20 +346,28 @@ def _apply_semantic(
 ) -> tuple[list[Hit], SemanticNotice | None]:
     """Fuse the optional backend's candidates in, or explain why it could not.
 
-    Returns the candidates to use and the notice to report. Any failure of the
-    optional path leaves `candidates` exactly as BM25 produced them, which is
-    the frozen meaning of a clean fallback (ADR-16 2).
+    Returns the candidates to use and the notice to report. The lexical input
+    arrives in BM25 selection order, which is what RRF must rank by; a clean
+    fallback restores ADR-05 source order because that is the frozen BM25
+    response (ADR-16 2, 14).
     """
     config, notice = _resolve_semantic(semantic)
     if config is None or not config.enabled:
-        return candidates, notice
+        return _source_order(candidates), notice
     try:
         vector_hits = _semantic_candidates(base, query, config, k)
     except SemanticError as exc:
-        return candidates, SemanticNotice(code=exc.code, message=exc.message, hint=exc.hint)
+        return _source_order(candidates), SemanticNotice(
+            code=exc.code, message=exc.message, hint=exc.hint
+        )
     if not vector_hits:
-        return candidates, notice
+        return _source_order(candidates), notice
     return fuse_candidates(candidates, vector_hits, limit=k), notice
+
+
+def _source_order(hits: list[Hit]) -> list[Hit]:
+    """Return hits in ADR-05 source order (path, then start line)."""
+    return sorted(hits, key=lambda hit: (hit.path, hit.start_line))
 
 
 def _resolve_semantic(
@@ -488,11 +496,13 @@ def _search(
     symbols: frozenset[str] = frozenset(),
     symbol_boost: float = SYMBOL_MATCH_BOOST,
 ) -> list[Hit]:
-    """Select the k best chunks, then return them in source order (ADR-05).
+    """Select the k best chunks and return them in BM25 selection order.
 
     Ordering is expressed in SQL so the `LIMIT` sees the final ranking:
     non-test chunks first, then the bm25 score adjusted by an exact
-    `symbol_name` match, then `c.id` as the deterministic tiebreak.
+    `symbol_name` match, then `c.id` as the deterministic tiebreak. Fusion
+    consumes this order as the lexical ranking; callers restore ADR-05 source
+    order for output (ADR-16 14).
     """
     sql, params = _search_sql(match, k, path_prefix, symbols, symbol_boost)
     rows = connection.execute(sql, params).fetchall()
@@ -509,8 +519,6 @@ def _search(
         )
         for path, seq, start_line, end_line, symbol_kind, symbol_name, text, score in rows
     ]
-    # ADR-05: selection is by score, but output follows source order.
-    hits.sort(key=lambda hit: (hit.path, hit.start_line))
     return hits
 
 
