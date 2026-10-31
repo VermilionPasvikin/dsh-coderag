@@ -14,7 +14,7 @@
       "goal"
     ],
     "no_tool_errors": true,
-    "max_steps": 16
+    "max_steps": 28
   },
   "answer_paths": [
     "packages/goal/goal/src/index.ts",

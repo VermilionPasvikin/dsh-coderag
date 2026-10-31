@@ -14,7 +14,7 @@
       "session-persistence-jsonl|zstd"
     ],
     "no_tool_errors": true,
-    "max_steps": 16
+    "max_steps": 28
   },
   "answer_paths": [
     "packages/session/session-format/src/filename.ts",

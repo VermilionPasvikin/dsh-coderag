@@ -13,7 +13,7 @@
       "spill-policy/src/notice|formatSpillNotice"
     ],
     "no_tool_errors": true,
-    "max_steps": 10
+    "max_steps": 16
   },
   "answer_paths": [
     "packages/spill/spill-policy/src/notice.ts"

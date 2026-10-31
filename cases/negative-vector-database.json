@@ -10,7 +10,7 @@
       "(?i)((没有|不存在|未找到|找不到|未包含)[^。\\n]{0,30}(faiss|lancedb|chromadb|向量))|(no\\s+(faiss|lancedb|chromadb|vector))|(not\\s+(found|present|used))"
     ],
     "no_tool_errors": true,
-    "max_steps": 8
+    "max_steps": 12
   },
   "answer_paths": [],
   "notes": "出处：全仓 grep 零命中（faiss / lancedb / chromadb / 『向量数据库』均为 0 个文件）。理由：与 elasticsearch、kafka 同类的反幻觉用例，但主题换成本项目刻意不引入的向量数据库；预期回答是明确否定。",

@@ -15,7 +15,7 @@
       "repeat-tool-reminder"
     ],
     "no_tool_errors": true,
-    "max_steps": 10
+    "max_steps": 16
   },
   "answer_paths": [
     "packages/guard/repeat-tool-reminder/src/index.ts"

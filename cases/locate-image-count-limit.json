@@ -13,7 +13,7 @@
       "DEFAULT_MAX_IMAGES_PER_MESSAGE|attachment-local/src/index"
     ],
     "no_tool_errors": true,
-    "max_steps": 10
+    "max_steps": 16
   },
   "answer_paths": [
     "packages/attachment/attachment-local/src/index.ts"

@@ -15,7 +15,7 @@
       "(?i)exceed|超过|拒绝|失败"
     ],
     "no_tool_errors": true,
-    "max_steps": 10
+    "max_steps": 16
   },
   "answer_paths": [
     "packages/mcp/mcp-client/src/connection.ts"

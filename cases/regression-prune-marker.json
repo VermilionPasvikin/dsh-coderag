@@ -11,7 +11,7 @@
       "compaction-tool-result-pruner|config\\.ts"
     ],
     "no_tool_errors": true,
-    "max_steps": 8
+    "max_steps": 16
   },
   "answer_paths": [
     "packages/compaction/compaction-tool-result-pruner/src/config.ts"

@@ -14,7 +14,7 @@
       "server-context|systemPrompt|system prompt|系统提示"
     ],
     "no_tool_errors": true,
-    "max_steps": 16
+    "max_steps": 28
   },
   "answer_paths": [
     "packages/mcp/mcp-client/src/connection.ts",

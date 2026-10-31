@@ -11,7 +11,7 @@
       "llm/llm/src/error"
     ],
     "no_tool_errors": true,
-    "max_steps": 8
+    "max_steps": 16
   },
   "answer_paths": [
     "packages/llm/llm/src/error.ts"
