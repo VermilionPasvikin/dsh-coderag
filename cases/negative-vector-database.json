@@ -15,9 +15,11 @@
   "answer_paths": [],
   "notes": "出处：全仓 grep 零命中（faiss / lancedb / chromadb / 『向量数据库』均为 0 个文件）。理由：与 elasticsearch、kafka 同类的反幻觉用例，但主题换成本项目刻意不引入的向量数据库；预期回答是明确否定。",
   "accept": [
-    "没有，仓库里不存在 faiss、lancedb 或 chromadb 的用法。"
+    "没有，仓库里不存在 faiss、lancedb 或 chromadb 的用法。",
+    "没有 faiss、lancedb 或 chromadb，仓库不存在这类向量数据库依赖。"
   ],
   "reject": [
-    "用了 faiss 做向量检索，代码在 packages/retrieval/src/index.ts。"
+    "用了 faiss 做向量检索，代码在 packages/retrieval/src/index.ts。",
+    "faiss 被用来做向量检索，代码在 packages/retrieval/src/index.ts。"
   ]
 }

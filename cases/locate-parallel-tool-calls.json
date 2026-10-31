@@ -21,9 +21,11 @@
   ],
   "notes": "出处：packages/core/agent-loop/src/constants.ts:6 `DEFAULT_MAX_PARALLEL_TOOL_CALLS = 10`；index.ts:191 作为默认值使用。理由：中文『同时发起』与代码 parallel 词形不同，答案是一个整数加一个文件。",
   "accept": [
-    "默认是 10 个，定义在 packages/core/agent-loop/src/constants.ts。"
+    "默认是 10 个，定义在 packages/core/agent-loop/src/constants.ts。",
+    "并行工具调用的默认上限是 10，源码在 packages/core/agent-loop/src/constants.ts。"
   ],
   "reject": [
-    "默认是 5 个，定义在 packages/core/agent-loop/src/index.ts。"
+    "默认是 5 个，定义在 packages/core/agent-loop/src/index.ts。",
+    "默认是 20 个，定义在 packages/core/agent-loop/src/constants.ts。"
   ]
 }

@@ -35,8 +35,8 @@ def output_ok(case: Case, text: str) -> bool:
 
 
 def test_case_count_is_within_the_l2_budget(cases: list[Case]) -> None:
-    """EVAL.md 3.4: 12-15 cases. More than that and each run gets too expensive."""
-    assert 12 <= len(cases) <= 15, f"用例数 {len(cases)} 不在 12-15"
+    """EVAL.md 3.4: 20 cases (7 crossfile / 6 locate / 4 regression / 3 negative)."""
+    assert 12 <= len(cases) <= 20, f"用例数 {len(cases)} 不在 12-20"
 
 
 def test_case_names_are_unique(cases: list[Case]) -> None:

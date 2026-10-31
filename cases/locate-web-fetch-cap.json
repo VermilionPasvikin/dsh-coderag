@@ -21,9 +21,11 @@
   ],
   "notes": "出处：packages/web/tool-web/src/index.ts:34 `DEFAULT_FETCH_MAX_OUTPUT_CHARS = 200_000`，:61 收进 config schema。理由：中文『放回上下文』与代码 fetchMaxOutputChars 词形不重叠；数字 200000 是唯一答案。",
   "accept": [
-    "上限是 200000 字符，定义在 packages/web/tool-web/src/index.ts。"
+    "上限是 200000 字符，定义在 packages/web/tool-web/src/index.ts。",
+    "网页抓取输出最多保留 20 万字符，实现在 packages/web/tool-web/src/index.ts。"
   ],
   "reject": [
-    "上限是 100000 字符，定义在 packages/web/tool-web/src/index.ts。"
+    "上限是 100000 字符，定义在 packages/web/tool-web/src/index.ts。",
+    "上限是 1000000 字符，实现在 packages/web/tool-web/src/index.ts。"
   ]
 }

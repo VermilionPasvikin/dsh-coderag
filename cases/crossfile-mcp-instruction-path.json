@@ -22,7 +22,8 @@
   ],
   "notes": "出处：connection.ts:319 构造 `### MCP server: <name>`（含字节上限检查，:320-321 抛错）；server-context.ts:28-37 用 systemPrompt.section 注册。理由：中文问『说明文字→系统提示』，代码是 instructions→systemPrompt，答案跨两个文件；只找到 connection 不够。",
   "accept": [
-    "说明文字由 packages/mcp/mcp-client/src/connection.ts 读取，再由 packages/mcp/mcp-client/src/server-context.ts 注册成 systemPrompt 段。"
+    "说明文字由 packages/mcp/mcp-client/src/connection.ts 读取，再由 packages/mcp/mcp-client/src/server-context.ts 注册成 systemPrompt 段。",
+    "mcp-client/src/connection.ts 读取说明文字，再由 mcp-client/src/server-context.ts 注册成 systemPrompt 段。"
   ],
   "reject": [
     "在 packages/core/agent-loop/src/index.ts。",

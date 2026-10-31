@@ -22,7 +22,8 @@
   ],
   "notes": "出处：session-format/src/filename.ts:16 生成 `session.jsonl` 或 `session.v${generation}.jsonl`；session-persistence-jsonl/src/index.ts:66 `DEFAULT_COMPRESSION = 'zstd'`。理由：T3-00 的 harness 不兼容正是由文件名代际造成；答案是两条独立事实，跨两个包。",
   "accept": [
-    "版本号由 packages/session/session-format/src/filename.ts 拼进文件名；默认压缩在 packages/session/session-persistence-jsonl/src/index.ts 里定为 zstd。"
+    "版本号由 packages/session/session-format/src/filename.ts 拼进文件名；默认压缩在 packages/session/session-persistence-jsonl/src/index.ts 里定为 zstd。",
+    "文件名里的代际号由 session-format 的 filename.ts 生成，持久化层 session-persistence-jsonl 默认用 zstd 压缩。"
   ],
   "reject": [
     "版本号来自 package.json 的 version 字段。",
