@@ -1,0 +1,29 @@
+{
+  "name": "semantic-compaction-threshold",
+  "prompt": "自动上下文压缩默认在模型窗口被用到多少比例时开始介入？只要比例。",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "0\\.8|80\\s*%"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 16
+  },
+  "answer_paths": [
+    "packages/compaction/compaction-basic/src/config.ts"
+  ],
+  "notes": "出处：packages/compaction/compaction-basic/src/config.ts:20 `DEFAULT_THRESHOLD_RATIO = 0.8`；README.md:66 表格同值。理由：中文「窗口被用到多少比例」与 thresholdRatio 词形不重叠。防泄露：prompt 不含 0.8/80/threshold。",
+  "accept": [
+    "默认阈值是 0.8（即窗口的 80%），定义在 packages/compaction/compaction-basic/src/config.ts。"
+  ],
+  "reject": [
+    "默认阈值是 0.5。",
+    "没有默认阈值，必须显式配置。"
+  ]
+}

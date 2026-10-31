@@ -1,0 +1,29 @@
+{
+  "name": "semantic-image-cap",
+  "prompt": "用户随消息附带的一张图片，超过多大的字节数会被直接拒绝、要求换小一点的？给出上限的数值和单位。",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "32\\s*(MiB|MB|兆字节)"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 16
+  },
+  "answer_paths": [
+    "packages/llm/llm-deepseek/src/common/file-store.ts"
+  ],
+  "notes": "出处：packages/llm/llm-deepseek/src/common/file-store.ts:13 `export const MAX_IMAGE_BYTES = 32 * 1024 * 1024`（=32 MiB），:197 超过即拒绝。理由：中文「图片被拒绝」与 MAX_IMAGE_BYTES/file-store 词形不重叠。防泄露：prompt 不含 32/33554432/MAX_IMAGE_BYTES。",
+  "accept": [
+    "单张图片上限是 32 MiB（32×1024×1024 字节），定义在 packages/llm/llm-deepseek/src/common/file-store.ts。"
+  ],
+  "reject": [
+    "单张图片上限是 64 MiB。",
+    "图片没有大小限制。"
+  ]
+}

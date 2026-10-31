@@ -1,0 +1,29 @@
+{
+  "name": "semantic-spill-cap",
+  "prompt": "命令行工具的输出太长时会先转存到临时文件。单次转存允许写入的最大数据量是多少？给出数值和单位。",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "64\\s*(MiB|MB|兆字节)"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 16
+  },
+  "answer_paths": [
+    "packages/shell/bash-local/src/index.ts"
+  ],
+  "notes": "出处：packages/shell/bash-local/src/index.ts:38 `DEFAULT_MAX_SPILL_BYTES = 64 * 1024 * 1024`（=64 MiB），:110 收进 config schema。理由：中文「转存到临时文件」与代码 spill 词形不重叠，提示词里没有任何英文标识符。防泄露：prompt 不含 64/67108864/spill/bash-local。",
+  "accept": [
+    "单次转存上限是 64 MiB（64×1024×1024 字节，即 67108864 字节），定义在 packages/shell/bash-local/src/index.ts。"
+  ],
+  "reject": [
+    "单次转存上限是 32 MiB。",
+    "转存没有上限，可以一直写。"
+  ]
+}

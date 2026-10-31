@@ -1,0 +1,30 @@
+{
+  "name": "semantic-skill-catalog-tags",
+  "prompt": "系统在提示里公布当前可用技能清单时，清单本身和包住它的外层分别用了哪两个标签？把两个标签都写出来。",
+  "tags": [
+    "locate"
+  ],
+  "assert": {
+    "turn_end": "completed",
+    "tools_called": [
+      "code_search"
+    ],
+    "output_matches": [
+      "<available_skills>",
+      "<system-reminder>"
+    ],
+    "no_tool_errors": true,
+    "max_steps": 16
+  },
+  "answer_paths": [
+    "packages/skill/tool-skill/src/index.ts"
+  ],
+  "notes": "出处：packages/skill/tool-skill/src/index.ts:259-268，`<system-reminder>` 内嵌 `<available_skills>`。理由：中文「可用技能清单」与 available_skills 词形不重叠；两个标签都要报。防泄露：prompt 不含标签名。",
+  "accept": [
+    "清单用 <available_skills> 包裹，外层再包一层 <system-reminder>，见 packages/skill/tool-skill/src/index.ts。"
+  ],
+  "reject": [
+    "清单用 <skills> 和 <reminder> 包裹。",
+    "技能清单是 JSON，不用标签。"
+  ]
+}
