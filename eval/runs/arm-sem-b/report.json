@@ -1,0 +1,395 @@
+{
+  "schema": "dsh-coderag/ab-run/v1",
+  "group": "arm-sem-b",
+  "profile": "eval-coderag",
+  "trials": 3,
+  "workspace": "/Users/vermi/projects/dsh",
+  "dsh": [
+    "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+  ],
+  "cases": [
+    {
+      "name": "semantic-compaction-threshold",
+      "tags": [
+        "locate"
+      ],
+      "prompt": "自动上下文压缩默认在模型窗口被用到多少比例时开始介入？只要比例。",
+      "answer_paths": [
+        "packages/compaction/compaction-basic/src/config.ts"
+      ],
+      "notes": "出处：packages/compaction/compaction-basic/src/config.ts:20 `DEFAULT_THRESHOLD_RATIO = 0.8`；README.md:66 表格同值。理由：中文「窗口被用到多少比例」与 thresholdRatio 词形不重叠。防泄露：prompt 不含 0.8/80/threshold。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['grep', 'glob', 'read', 'grep', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 7.227,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/000-semantic-compaction-threshold/attempt-1/sessions/--Users-vermi-projects-dsh--/session-366811bb-efc0-4d62-8ffd-481af28b3a31/session.v4.jsonl",
+          "steps": 4,
+          "total_tokens": 71360,
+          "tool_calls": [
+            "grep",
+            "glob",
+            "read",
+            "grep",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "80%（`thresholdRatio = 0.8`）。",
+          "stderr_tail": "[llm-deepseek-api-key] model listing from https://api.deepseek.com/models loaded 2 model(s), skipped 0 row(s)\ndsh: reasoning:\nThe user asks: \"自动上下文压缩默认在模型窗口被用到多少比例时开始介入？只要比例。\" (At what ratio of the model window does automatic context compaction kick in by default? Just the ratio.)\n\nThis is a question about the DeepSeek Harness repo. I should search the compaction package for the default threshold.\n\nLet me grep for it.\ndsh: reasoning:\nThe answer is 0.8 = 80%. The user asked \"只要比例\" — just the ratio. So answer: 80% (0.8).\n\nLet me verify config.ts quickly to be sure it's the default and not just a config default that profile overrides. The question says \"默认\" — default. Let me read config.ts lines around 20 and check cordis.yml profiles for override.\ndsh: reasoning:\nThe preset files define compaction-basic — do they override thresholdRatio? Let me check the standard preset around line 145.\n"
+        },
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'read', 'bash'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 5.167,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/000-semantic-compaction-threshold/attempt-2/sessions/--Users-vermi-projects-dsh--/session-4e3c6659-3d95-4634-b922-338b1d32fa39/session.v4.jsonl",
+          "steps": 3,
+          "total_tokens": 44797,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "read",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "0.8（80%）。",
+          "stderr_tail": "[llm-deepseek-api-key] model listing from https://api.deepseek.com/models loaded 2 model(s), skipped 0 row(s)\ndsh: reasoning:\nThe user asks: \"自动上下文压缩默认在模型窗口被用到多少比例时开始介入？只要比例。\" — What ratio of the model window triggers auto-compaction by default? Just the ratio.\n\nThis is about the dsh repo's compaction package. I need to find the default threshold. Let me search the code.\n\nThey want only the ratio. But I should verify from source. Let me grep for compaction config defaults.\ndsh: reasoning:\nThe answer is 0.8 (80%). Let me verify the default config file quickly to make sure \"model window used ratio\" — thresholdRatio default 0.8. Also check whether there's a different default in the actual profile config (cordis.yml) that overrides. The question asks \"自动上下文压缩默认在模型窗口被用到多少比例时开始介入\" — default. Let me check the config file and any profile overrides.\ndsh: reasoning:\nDefault is 0.8 (80%). The user wants only the ratio. Answer: 0.8（80%）.\n"
+        },
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'read', 'bash'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 6.061,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/000-semantic-compaction-threshold/attempt-3/sessions/--Users-vermi-projects-dsh--/session-fc8b4380-6d8b-4e3a-864b-93576af65204/session.v4.jsonl",
+          "steps": 3,
+          "total_tokens": 44613,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "read",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "0.8（80%）",
+          "stderr_tail": "[llm-deepseek-api-key] model listing from https://api.deepseek.com/models loaded 2 model(s), skipped 0 row(s)\ndsh: reasoning:\nThe user asks about the default auto-compaction threshold ratio in this repo. Let me search the codebase.\n\nNote: model is \"deepseek-flash\" and it says \"3 — 'deepseek-flash' is not a valid model id\" — interesting, but my instruction is to answer the user's question. The system prompt mentions model name quirks, but let's focus.\n\nLet me search the compaction package.\ndsh: reasoning:\nThe answer: 0.8. But wait — the user's question: \"自动上下文压缩默认在模型窗口被用到多少比例时开始介入？只要比例。\" — just the ratio. Let's confirm the default is on the compaction-basic plugin and maybe there's a profile default override. Let me check quickly whether defaults differ in cordis.yml profiles. The question asks default; DEFAULT_THRESHOLD_RATIO = 0.8.\n\nBut should I verify that the shipped profiles don't override? Let me check.\ndsh: reasoning:\nThe default is 0.8 (80%). Shipped profiles don't override (only a snapshot test does). Answer just the ratio.\n\nShould I mention 80%? \"只要比例\" — just the ratio. Answer: 0.8 (80%).\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 3,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "semantic-image-cap",
+      "tags": [
+        "locate"
+      ],
+      "prompt": "用户随消息附带的一张图片，超过多大的字节数会被直接拒绝、要求换小一点的？给出上限的数值和单位。",
+      "answer_paths": [
+        "packages/llm/llm-deepseek/src/common/file-store.ts"
+      ],
+      "notes": "出处：packages/llm/llm-deepseek/src/common/file-store.ts:13 `export const MAX_IMAGE_BYTES = 32 * 1024 * 1024`（=32 MiB），:197 超过即拒绝。理由：中文「图片被拒绝」与 MAX_IMAGE_BYTES/file-store 词形不重叠。防泄露：prompt 不含 32/33554432/MAX_IMAGE_BYTES。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'read', 'grep', 'read', 'grep', 'read', 'grep', 'bash'] 的保序子序列",
+            "最终回答不匹配正则 '32\\\\s*(MiB|MB|兆字节)'"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 17.041,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/001-semantic-image-cap/attempt-1/sessions/--Users-vermi-projects-dsh--/session-48f7fb2a-eae4-4aa3-a6ba-17b31b26a3b5/session.v4.jsonl",
+          "steps": 6,
+          "total_tokens": 150967,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "read",
+            "grep",
+            "read",
+            "grep",
+            "read",
+            "grep",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "单张图片的上限是 **20 MiB**（20 × 1024 × 1024 = **20,971,520 字节**，界面文案显示为 “20MB”）。\n\n如超出这个上限，系统会直接拒绝接收，报错 `IMAGE_TOO_LARGE`，并提示“单张图片不能超过 20MB”，源图不会被压缩，需要换一张更小的。另外，一条消息内所有图片合计上限 200 MiB、最多 20 张，对应的错误码是 `IMAGES_TOO_LARGE` 和 `TOO_MANY_IMAGES`。\n\n上述数值都是默认值：单张上限由 `attachment-local` 的 `maxImageBytes` 配置项控制（[index.ts:33-38](packages/attachment/attachment-local/src/index.ts#L33-L38)、[README](packages/attachment/attachment-local/README.md#L41-L43)），拒绝逻辑见 [store.ts:104](packages/attachment/attachment-local/src/store.ts#L104)；部署可以覆盖该配置。另需注意，规范化后的存储目标 4 MiB 是压缩目标，并非拒绝阈值。",
+          "stderr_tail": " above what byte count is it directly rejected with a request to use a smaller one. This maps to the maxImageBytes limit (default 20 MiB): source larger than the cap is refused, not shrunk. So answer: 20 MiB (20 × 1024 × 1024 = 20,971,520 bytes), per submitted image; configurable via maxImageBytes; normalized stored image target 4 MiB is different (downscaled, not rejected).\n\nWait: the client may reject earlier at a different threshold. Let's check ui-conversation for image validation on selection. Search for `fileTooLarge` usage.\ndsh: reasoning:\nSo the rejection limit is `maxImageBytes`, default 20 MiB. Question worded \"超过多大的字节数会被直接拒绝、要求换小一点的\" — likely answer: 20 MiB（20 × 1024 × 1024 = 20,971,520 字节），单张图片；这是默认上限，可通过 maxImageBytes 配置。Also aggregate 200 MiB / 20 images per message.\n\nLet me verify how imageSizeText formats 20 MiB → \"20MB\". And check docs/README for statement. Read image-labels and README of attachment-local maybe.\ndsh: reasoning:\nThe answer: 单张图片 20 MiB（约 21 MB，20 × 1024 × 1024 = 20,971,520 字节），超出即拒绝并提示换小图。默认值，可通过 `maxImageBytes` 配置。此外每条消息合计 200 MiB / 最多 20 张。\n\nNote the user asks \"超过多大的字节数会被直接拒绝\" — give upper limit numeric and unit. Since the runtime might have configured a different value, but default is 20 MiB. The displayed copy formats it as \"20MB\".\n\nShould I check if the deployment config changes it (cordis.yml)? Let's check profile config for maxImageBytes overrides.\ndsh: reasoning:\nThose are fixture/test values (5 MiB), not shipped defaults. Shipped default is 20 MiB.\n\nShould answer concisely in Chinese. Note: if the question is about \"用户随消息附带的一张图片\" and the actual harness (this deployment) limits, the projection is in the fixture 5 MiB — but that's test fixture not product. Defaults: 20 MiB per image, 200 MiB aggregate per message.\n\nGive: 20 MiB = 20,971,520 字节（20 × 1024 × 1024）；UI 文案显示为 \"20MB\"。超出则 `IMAGE_TOO_LARGE`，提示\"单张图片不能超过 20MB\"，源图不会被压缩，需换小图。可配置 `maxImageBytes`。Also mention aggregate 200 MiB per message / 20 images.\n\nCitation: file paths.\n"
+        },
+        {
+          "passed": false,
+          "failures": [
+            "最终回答不匹配正则 '32\\\\s*(MiB|MB|兆字节)'",
+            "步数 18 超过 max_steps=16"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 63.571,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/001-semantic-image-cap/attempt-2/sessions/--Users-vermi-projects-dsh--/session-7d5e0371-a1fc-4c7c-86d4-07add7dc7b63/session.v4.jsonl",
+          "steps": 18,
+          "total_tokens": 681480,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "mcp__coderag__code_search",
+            "bash",
+            "bash",
+            "read",
+            "bash",
+            "grep",
+            "bash",
+            "read",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "**上限：20 MiB，即 20 × 1024 × 1024 = 20,971,520 字节。** 源文件字节数只要超过 20,971,520 字节，就会被拒绝，系统既不会自动缩图，也不会降采样留用。\n\n具体行为：\n\n- 客户端在选择或拖入文件时会先做拦截：`file.size > maxImageBytes` 时，客户端就弹出提示“单张图片不能超过 20MB”，并且整批文件都不会进入附件栏。这个上限值经 `imageSizeText` 渲染为 `20MB`（`packages/client/ui-conversation/src/client/skeleton/InputBar.tsx:211`、`packages/client/ui-conversation/src/client/image-labels.ts:12`）。\n- 即使绕过输入框，主机侧在准入时也会再次校验 `data.byteLength > maxImageBytes`，并抛出 `IMAGE_TOO_LARGE`；前端会把该错误叠加 `details.reason`，映射为同一句提示（`packages/attachment/attachment-local/src/store.ts:104`、`packages/client/ui-conversation/src/client/image-labels.ts:50`）。\n- 这个上限就是默认值 `DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024`，随 base profile 的 `attachment-local` 条目一起生效，未做覆盖（`packages/attachment/attachment-local/src/index.ts:34`、`packages/bundle/base/cordis.patch.yml:125`）；部署可以通过配置项 `attachment-local.config.maxImageBytes` 修改该上限。\n\n单位说明与边界：这里的 MiB 按 1024 进制计算。判断条件是严格大于，因此恰好 20,971,520 字节的文件在字节维度上仍被接受；但同一准入还限制单张 64,000,000 像素、单边 8192 px，因此文件字节数虽小，像素或边长超限仍可能被拒。单条消息另有 20 张、合计 200 MiB 的总额限制（`packages/attachment/attachment-local/src/index.ts:36-38`）。",
+          "stderr_tail": " No.\n\nAlso, should I mention the 200 MiB aggregate and 20-image count? Yes, as context. And distinguish: images larger than 20 MiB are rejected, not downscaled; images passing admission are normalized to ≤4 MiB / 2048².\n\nHmm, but one subtlety: client refuses if `file.size > maxImageBytes`; store refuses if `data.byteLength > maxImageBytes`. So exactly 20 MiB (20,971,520 bytes) is accepted. So \"超过 20 MiB（即超过 20,971,520 字节）\" is the threshold.\n\nAlso, does the initial prompt path for images maybe have a smaller limit via `session/attachment` upload RPC body? The connection body cap is 201 MiB, so fine.\n\nNow let me double check if there's a documented different limit for \"web chat user message image\" e.g., `docs/subsystems/conversation.md` or product docs like \"图片最大 10MB\". Search docs for \"图片\" + \"MB\".\ndsh: reasoning:\nGood. So the definitive answer: 20 MiB (20 × 1024 × 1024 = 20,971,520 bytes) per single image, encoded source bytes, default `maxImageBytes`; strictly greater is refused client-side with toast \"单张图片不能超过 20MB\" (English: \"Each image must be smaller than 20MB\") and server-side `IMAGE_TOO_LARGE`. Note it's configurable; also aggregate 200 MiB and 20-image count.\n\nI should mention that this is the default in the shipped base profile (no override), and that the limit is checked on the file's byte size before upload (client pre-check) and re-enforced by the host on admission.\n\nAlso mention adjacent caps: 64,000,000 pixels, 8192 px per side (these may reject earlier even for small files, but not byte-based).\n\nLet me give file references with paths and lines. Answer in Chinese since the user asked in Chinese.\n\nShould I double-check the exact line numbers? Let me confirm:\n- packages/attachment/attachment-local/src/index.ts:36 `DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024`\n- store.ts:104-106 throws IMAGE_TOO_LARGE\n- InputBar.tsx:211-213 client pre-check\n- locales.ts:46\n- image-labels.ts:12-15 renders as \"20MB\"\n\nLet me quickly confirm the line of DEFAULT_MAX_IMAGE_BYTES.\n"
+        },
+        {
+          "passed": false,
+          "failures": [
+            "最终回答不匹配正则 '32\\\\s*(MiB|MB|兆字节)'"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 28.753,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/001-semantic-image-cap/attempt-3/sessions/--Users-vermi-projects-dsh--/session-12f638d1-9dc2-4151-91b1-b3eaa8a1f7a2/session.v4.jsonl",
+          "steps": 10,
+          "total_tokens": 285723,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "mcp__coderag__code_search",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "**默认上限为单张图片 20 MiB，即 20,971,520 字节。** 超过这个字节数的图片会在准入阶段直接被拒绝，用户看到的提示是“单张图片不能超过 20MB”，英文见 `Each image must be smaller than 20MB`。\n\n具体细节：\n\n- 常量 `DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024 = 20,971,520` 字节定义在 `packages/attachment/attachment-local/src/index.ts:34`。\n- 校验位于 `packages/attachment/attachment-local/src/store.ts:103`：判断条件是 `input.data.byteLength > limits.maxImageBytes`；因此这个上限是包含边界的：正好 20,971,520 字节可以通过，从 20,971,521 字节起才会以 `IMAGE_TOO_LARGE` 被拒。\n- 界面文案按 1024² 换算成 `MB` 展示，所以显示为“20MB”，见 `packages/client/ui-conversation/src/client/locales.ts:47`（中文）和 `:208`（英文），换算在 `packages/client/ui-conversation/src/client/image-labels.ts:13`。\n- 该值可以通过部署配置中的 `maxImageBytes` 调整，并不是写死的固定值（见 `packages/attachment/attachment-local/src/index.ts:64`）。\n- 另外还有总上限：同一条消息中所有图片的源字节合计不能超过 **200 MiB**，单条消息最多 20 张（`DEFAULT_MAX_IMAGE_BYTES` 是单张图片的限制；总量限制由 `maxMessageImageBytes` 和 `maxImagesPerMessage` 控制，见同一文件的 36–38 行）。如果一张图片本身没有超过 20 MiB，但与其他图片合计超过 200 MiB，会被以 `IMAGES_TOO_LARGE` 拒绝。\n\n以上限制针对的是**编码后的源图字节**；像素尺寸另受 64,000,000 像素、单边 8192px 的独立限制，超限则走 `IMAGE_TOO_MANY_PIXELS` / `IMAGE_DIMENSION_TOO_LARGE`，不影响上述字节数结论。",
+          "stderr_tail": "换小一点\". Maybe there's another place: the client may pre-check and show \"图片过大，请换一张小一点的\". Let's grep whole repo for \"小一点\" and similar strings.\n\nAlso maybe the question refers to the model request image limit (request-image maxBytes), where a source image is downscaled automatically. But \"用户随消息附带\" = attachment admission.\n\nLet me grep for Chinese copy \"换一张\" or \"小一点\".\ndsh: reasoning:\nClear. Also there is a config-catalog line 1182: \"Maximum accumulated base64 image payload after Files API fallback (default 20 MiB)\" — that's the LLM route accumulation, unrelated to user attachment rejection (it's outbound request). The question says \"用户随消息附带的一张图片\" so inbound attachment.\n\nBut wait — maybe the question is about the model falling back to Files API because the request is too large... no.\n\nLet's also verify no client-side per-image check with a different limit (e.g., 10MB in the web client). Search client for size checks on attach.\ndsh: reasoning:\nNo client-side pre-check. So the host rejects when data.byteLength > 20 MiB.\n\nNow answer in Chinese, concise: 默认上限 20 MiB（20 × 1024 × 1024 = 20,971,520 字节），超过此值（即 ≥20,971,521 字节）在准入时以 IMAGE_TOO_LARGE 直接拒绝，界面提示“单张图片不能超过 20MB”（英文 “Each image must be smaller than 20MB”）。注意是 MiB（二进制），显示时按 1024² 换算写成 MB。可通过 attachment-local 的 maxImageBytes 配置修改；另有每条消息 200 MiB 总量上限（20 张）——单张即使未超 20 MiB，若与同一消息其他图片合计超 200 MiB 也会被拒（IMAGES_TOO_LARGE）。\n\nAlso note it's source encoded bytes, not decoded; images exceeding pixel/dimension limits rejected separately.\n\nProvide file references with lines. Cite paths: packages/attachment/attachment-local/src/index.ts:34, store.ts:104, packages/client/ui-conversation/src/client/locales.ts:47.\n\nThe answer must give value and unit. Keep concise.\n\nOne consideration: the question might be from a user asking about the product (not repo) — but still same answer.\n\nAlso, \"直接拒绝\" — should mention exactly exactly 20 MiB accepted (check is strict >), so limit inclusive.\n\nLet me double-check store.ts line number and the exact check.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 3,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "semantic-skill-catalog-tags",
+      "tags": [
+        "locate"
+      ],
+      "prompt": "系统在提示里公布当前可用技能清单时，清单本身和包住它的外层分别用了哪两个标签？把两个标签都写出来。",
+      "answer_paths": [
+        "packages/skill/tool-skill/src/index.ts"
+      ],
+      "notes": "出处：packages/skill/tool-skill/src/index.ts:259-268，`<system-reminder>` 内嵌 `<available_skills>`。理由：中文「可用技能清单」与 available_skills 词形不重叠；两个标签都要报。防泄露：prompt 不含标签名。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['grep', 'grep', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 8.725,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/002-semantic-skill-catalog-tags/attempt-1/sessions/--Users-vermi-projects-dsh--/session-9568be7f-157f-41a9-a579-4ae9b70970a1/session.v4.jsonl",
+          "steps": 3,
+          "total_tokens": 52755,
+          "tool_calls": [
+            "grep",
+            "grep",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "这两个标签是：\n\n- 外层用于包裹整个目录消息的标签：`<system-reminder>`\n- 清单本身实际所在的标签：`<available_skills>`\n\n也就是说，技能目录的渲染结果是 `<system-reminder>` 里嵌套 `<available_skills>`；清单条目位于 `<available_skills>` 内，而整段提示语和前后说明由 `<system-reminder>` 包住。来源：`packages/skill/tool-skill/src/index.ts` 的 `renderCatalogMessage` 和 `renderCatalogUpdate`。",
+          "stderr_tail": "s. The following skills are available in this session:\n\n<available_skills>\n- `dsh-archive-agent-notes`: ...\n```\n\nSo the outer wrapper is `<available_skills>` and the list itself... Hmm, the list items are just bullet points with backticks, no tag. Wait — \"清单本身和包住它的外层分别用了哪两个标签\" — \"the list itself and the outer layer wrapping it respectively used which two tags?\"\n\nMaybe the outer is `<available_skills>` and the list itself is... Actually the skill entries are in `<available_skills>` ... but there's also the `<skill_content>` block. Hmm.\n\nWait, maybe the question is about a different structure — perhaps in the actual harness, the system prompt includes `<available_skills>` and inside there's another tag? Let me think. In this session, only `<available_skills>` is present. The items are bullet markers.\n\nHmm, \"清单本身和包住它的外层\" — the list itself (i.e., each skill's content block?) and the outer wrapper. Perhaps the answer expected: outer wrapper `available_skills`, inner list format with bullet `-`. But they ask for two tags.\n\nMaybe the intent: The list is wrapped in `<available_skills>`, and the outer... hmm, but \"包住它的外层\" = \"the outer layer that wraps it\". So the list itself is one tag and the wrapper is another tag. Possibly the question is a trick to test whether the model can inspect its own prompt. In some harnesses the skills are presented as:\n\n```\n<available-skills>\n...\n</available-skills>\n```\n\nOr maybe there's `<skills>` outer and `<available_skills>` inner? Let me check the repository source to see how the skill catalog is rendered into the prompt. That's the robust approach: search the codebase for \"available_skills\".\n\nLet me do that.\ndsh: reasoning:\nThe user asks about the two tags: the outer wrapper and the list itself. From the code, the catalog is rendered inside `<system-reminder>` and the list itself is in `<available_skills>`. So the two tags are `<system-reminder>` (outer) and `<available_skills>` (list itself).\n\nLet me verify the render code to be precise.\n"
+        },
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['grep', 'grep', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 8.863,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/002-semantic-skill-catalog-tags/attempt-2/sessions/--Users-vermi-projects-dsh--/session-1032246a-5a77-49d5-91f1-aa381fdac091/session.v4.jsonl",
+          "steps": 3,
+          "total_tokens": 48156,
+          "tool_calls": [
+            "grep",
+            "grep",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "外层标签是 `<system-reminder>`，用它包裹整条技能目录消息；清单本身则用 `<available_skills>`，用它包裹一条条技能条目。\n\n`packages/skill/tool-skill/src/index.ts:254-269` 中的渲染结果：\n\n```html\n<system-reminder>\nA skill is a reusable set of task-specific instructions. The following skills are available in this session:\n\n<available_skills>\n- `dsh-code-review`: ...\n</available_skills>\n\n...\n</system-reminder>\n```\n\n- 清单本身：`<available_skills>` … `</available_skills>`\n- 外层包装：`<system-reminder>` … `</system-reminder>`\n\n这个外层框架由 `dsh-tool-skill` 自己负责，并不是通用框架自带；因此目录更新（`renderCatalogUpdate`）也沿用同一对标签，即使目录被清空，也仍然会发送一个空的 `<available_skills>` 信封。",
+          "stderr_tail": "kill catalog\" is presented. The literal text in my context: \"A skill is a reusable set of task-specific instructions. The following skills are available in this session:\" followed by `<available_skills>...</available_skills>` all inside `<system-reminder>...</system-reminder>`.\n\nSo answer both tags. Should I check the repo? Maybe the question expects me to look at the source code that generates the prompt to confirm. But the question is directly answerable from the prompt itself. I could optionally verify by grepping the repo for `available_skills`. That would strengthen the answer. Let me do a quick grep.\n\nActually, since it's about \"系统在提示里公布当前可用技能清单时\" — when the system publishes the available skills list in the prompt. The two tags: the list itself (`<available_skills>`) and the outer wrapper enclosing it (`<system-reminder>`). Let me verify in the repo quickly.\n\nLet me grep for \"available_skills\" in packages.\ndsh: reasoning:\nThe grep confirms. Now let me look at the source to confirm the two tags precisely: `<system-reminder>` outer, `<available_skills>` inner.\n\nLet me read the source around lines 250-305 of packages/skill/tool-skill/src/index.ts to give precise answer. Though I have enough from grep. But confirming the actual rendered structure helps.\n\nThe user's question: \"系统在提示里公布当前可用技能清单时，清单本身和包住它的外层分别用了哪两个标签？把两个标签都写出来。\"\n\nAnswer: the list itself uses `<available_skills>` ... `</available_skills>`, and the outer wrapper uses `<system-reminder>` ... `</system-reminder>`.\n\nLet me quickly read the source for accuracy.\ndsh: reasoning:\nThe user asks a simple factual question. Answer with the two tags.\n\nLet me give the precise answer, referencing the source.\n\nStructure:\n```html\n<system-reminder>\nA skill is a reusable set of task-specific instructions...\n<available_skills>\n- `name`: description\n</available_skills>\n...\n</system-reminder>\n```\n\nSo: list itself = `<available_skills>`; outer = `<system-reminder>`.\n\nI'll answer concisely in Chinese, with source reference.\n"
+        },
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['grep', 'grep', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 7.744,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/002-semantic-skill-catalog-tags/attempt-3/sessions/--Users-vermi-projects-dsh--/session-3344df05-039e-40c8-82b7-1842005a1aed/session.v4.jsonl",
+          "steps": 3,
+          "total_tokens": 47758,
+          "tool_calls": [
+            "grep",
+            "grep",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "这两个标签分别是：\n\n- **清单本身**：`<available_skills>` … `</available_skills>`，其中每个 skill 占一条条目（`- \\`名字\\`: 描述`）。\n- **包住清单的外层**：`<system-reminder>` … `</system-reminder>`，整条目录消息（包括开头说明、结尾的加载规则，以及“用户可显式注入 `<skill_content>`”那句）都在这个外层标签内。\n\n也就是说，结构是 `<system-reminder>` 里嵌 `<available_skills>`（目录更新消息也使用同一对信封）。源码见 `packages/skill/tool-skill/src/index.ts` 中的 `renderCatalogMessage`（第 258–269 行）与 `renderCatalogUpdate`（第 292–302 行）。",
+          "stderr_tail": "d each item uses `- ` ... hmm, actually the list items don't have tags. The outer is `<available_skills>` and the list itself... Within it, items are plain `-` bullets. But the question says \"清单本身和包住它的外层分别用了哪两个标签\" — the list itself and the outer layer wrapping it.\n\nLooking at the actual text: `<available_skills>` then `- \\`dsh-archive-agent-notes\\`: ...` and `</available_skills>`.\n\nHmm, so outer tag = `<available_skills>`. The list itself... no tag. Unless there's something in the harness code that generates this. Maybe the format is `<available_skills>` and the skill entries are... hmm.\n\nWait — maybe the question refers to the fact that in this repo's code, the skills are rendered with a tag like `<skill>` or `<skill_content>`. Earlier in the prompt there's mention of `<skill_content>` block for user-invoked skills. But the catalog itself...\n\nLet me check the repo to see how the available skills block is rendered. There might be a renderer that emits `<available_skills>` ... `<skill name=\"...\">`. In the given prompt, though, items are bullets. But the actual rendered prompt in this conversation shows bullets.\n\nHmm, the question might be a trap checking whether I read the prompt. The answer from the prompt as shown: outer `<available_skills>`, and the list — there is no inner tag. But the question presupposes two tags.\n\nActually maybe I should search the repo for \"available_skills\".\n\nLet me grep.\ndsh: reasoning:\nThe user asks: what two tags does the system prompt use when publishing the available skills catalog — the list itself and the outer wrapper around it?\n\nFrom the code, the catalog message is wrapped in `<system-reminder>` and the entries are wrapped in `<available_skills>`. So the inner list tag is `<available_skills>`, and the outer wrapper is `<system-reminder>`.\n\nLet me verify by reading the source around line 255-300 in packages/skill/tool-skill/src/index.ts.\ndsh: reasoning:\nThe answer: outer wrapper `<system-reminder>`, inner list `<available_skills>`.\n"
+        }
+      ],
+      "successes": 0,
+      "trials": 3,
+      "pass@k": 0.0,
+      "pass^k": 0.0
+    },
+    {
+      "name": "semantic-spill-cap",
+      "tags": [
+        "locate"
+      ],
+      "prompt": "命令行工具的输出太长时会先转存到临时文件。单次转存允许写入的最大数据量是多少？给出数值和单位。",
+      "answer_paths": [
+        "packages/shell/bash-local/src/index.ts"
+      ],
+      "notes": "出处：packages/shell/bash-local/src/index.ts:38 `DEFAULT_MAX_SPILL_BYTES = 64 * 1024 * 1024`（=64 MiB），:110 收进 config schema。理由：中文「转存到临时文件」与代码 spill 词形不重叠，提示词里没有任何英文标识符。防泄露：prompt 不含 64/67108864/spill/bash-local。",
+      "attempts": [
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'read', 'bash', 'bash', 'bash', 'bash', 'read', 'read'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 15.522,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/003-semantic-spill-cap/attempt-1/sessions/--Users-vermi-projects-dsh--/session-5133f835-2488-4678-9af2-1c45fab88b73/session.v4.jsonl",
+          "steps": 6,
+          "total_tokens": 137211,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "read",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "read",
+            "read"
+          ],
+          "turn_end": "completed",
+          "final_text": "**每次输出流（stdout、stderr）的转存上限均为 64 MiB（67,108,864 字节）。**\n\n依据：\n\n- `packages/shell/bash-local/src/index.ts:38` — `DEFAULT_MAX_SPILL_BYTES = 64 * 1024 * 1024`，也就是 `maxSpillBytes` 配置项的默认值；PowerShell 执行器 `pwsh-local` 也使用同一个默认值。\n- `packages/shell/bash-local/README.md:48` — 配置表里把它写成 `maxSpillBytes` = `67,108,864`，含义是“Per-stream full-output spill cap”。\n- 执行时的强制位置在 `packages/subprocess/subprocess-local/src/output.ts:110`：当累计写入字节数 `total > maxSpillBytes` 时，会调用 `discardSpill()` 关闭并删除临时文件，之后不再转存，模型只能拿到内存中 `maxOutputBytes`（默认 64,000 字节）以内的尾部输出。\n\n以下是两点需要澄清的内容：\n\n1. **这是每个输出流各自的额度**，并非每次命令的总量：stdout 和 stderr 各自拥有 64 MiB。\n2. 这是一个**默认可配置的部署参数**（`maxSpillBytes`），并非硬编码的协议常量；另外，`spill-policy` 中 `maxInlineBytes: 50000` 决定“超过多少字节的文本工具结果需要转存到 spill 存储”，它只是触发阈值，并不是单次写入量的上限。",
+          "stderr_tail": "uld be a cap in spill-policy (spillStore maxBytes) — the spill-local store may have a maxBytes. Let me check spill-local store for a default cap.\n\nAlso the subprocess OutputCollector enforces maxSpillBytes; when exceeding, it deletes file and gives up. So \"单次转存允许写入的最大数据量\" = maxSpillBytes default 64 MiB per stream.\n\nBut maybe the spill-local store has its own limit (e.g., 8 MiB default). Let's check both.\ndsh: reasoning:\nSo bash-local default maxSpillBytes = 64 * 1024 * 1024 = 67,108,864 bytes (64 MiB). The spill file cap. Question: \"单次转存允许写入的最大数据量是多少？给出数值和单位。\" — likely answer 64 MiB (67,108,864 字节).\n\nBut let's check whether the runtime config in the shipped baseline overrides it, e.g. cordis.patch.yml. Grep didn't show maxSpillBytes in yml. Let's check bundle/base more carefully. Also check README of bash-local for documented default.\n\nAlso \"命令行工具\" might be the bash tool. The spill policy maxInlineBytes=50000 is the threshold for spilling tool results to spill store, not the amount written. The maximum data written per spill... Hmm, two candidate answers: 64 MiB (spill file cap for command output) and spill-local store which maybe has no cap.\n\nLet me check output.ts around line 100-150 for exact semantics: when total > maxSpillBytes, the spill is discarded (spillAbandon). So max data written = 64 MiB, then beyond that the file is removed and only in-memory tail kept.\n\nCheck the exact comparison: `this.total > this.maxSpillBytes` → abandon. So writes allowed until total exceeds. So cap 64 MiB.\n\nLet me also verify the README documents this and check whether there's a config override in bundle. Let me grep \"spill\" in bundle yml and README.\ndsh: reasoning:\nConfirmed. The bash tool (bash-local) default per-stream spill cap is 67,108,864 bytes = 64 MiB. Let me confirm the README line and also whether the spill-policy spill store writes unbounded. The question says \"命令行工具的输出太长时会先转存到临时文件\" — that's the shell tool spill. So 64 MiB.\n\nLet me read README around line 48 to cite.\n"
+        },
+        {
+          "passed": true,
+          "failures": [],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 18.688,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/003-semantic-spill-cap/attempt-2/sessions/--Users-vermi-projects-dsh--/session-d3136bd9-37c0-4c46-a7bb-91a9acdc91f5/session.v4.jsonl",
+          "steps": 6,
+          "total_tokens": 181138,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "mcp__coderag__code_search",
+            "grep",
+            "read",
+            "grep",
+            "grep",
+            "grep",
+            "read",
+            "grep"
+          ],
+          "turn_end": "completed",
+          "final_text": "**64 MiB（67,108,864 字节）**，按每条流单独计算。\n\n依据：\n\n- `packages/shell/bash-local/src/index.ts:38` — `DEFAULT_MAX_SPILL_BYTES = 64 * 1024 * 1024`\n- 同文件 `:110` 把它作为 `maxSpillBytes` 的默认值（`:184` 传入 `spill: { maxBytes }`）；`pwsh-local` 中也是同样的默认值，README 配置表也写作 `67,108,864`。\n- 语义在 `packages/subprocess/subprocess-local/src/output.ts:108-126`：stdout 和 stderr 各自独立，超过内存上限（默认 64,000 字节）时开始写入临时 spill 文件；整条流累计超过 `maxSpillBytes` 就丢弃该 spill（文件被删除），只保留内存中的尾部输出。\n\n所以单次 spill 最多允许写入 **64 MiB**，该值可通过 `maxSpillBytes` 配置调整（须为正有限数）。",
+          "stderr_tail": "cit cap? Or perhaps there is a cap in the tool layer: maybe `output-retention` or `SpillStore` has a max. Let me check if spill-local has a size cap.\n\nAlso maybe the question relates to the harness's own tool output handling — the bash tool's output limit `maxOutputBytes` 64,000, and the spill cap 64 MiB. \"单次转存允许写入的最大数据量\" = 64 MiB seems the intended answer, since that's the spill cap.\n\nBut let's double-check the wording: \"命令行工具的输出太长时会先转存到临时文件\" — \"When a command-line tool's output is too long, it is first spilled to a temporary file.\" Yes: shell bash-local: per-stream in-memory output cap 64,000 bytes; overflow spills to temp file; spill file cap 64 MiB. So answer: 64 MiB = 67,108,864 bytes = 64 × 1024 × 1024.\n\nShould I also mention that exceeding it discards the spill and keeps only the in-memory tail? Yes, good nuance.\n\nAlso check whether the harness's own output-spill service (dsh-spill) has a maximum — because the user may be referring to \"转存到临时文件\" through spill-local too. Let me check spill-local store for any cap. The grep earlier showed no cap constants. Let's quickly check the store write.\ndsh: reasoning:\nTwo different spill mechanisms. The user's question likely targets the subprocess/shell spill cap. Answer: 64 MiB (67,108,864 bytes), per stream, configurable via `maxSpillBytes` (bash-local / pwsh-local).\n\nHmm, but \"单次转存允许写入的最大数据量\" - \"the maximum amount of data allowed to be written in a single spill\" — in output.ts the check is `this.total > maxSpillBytes`; total is whole-stream bytes. When exceeded, the spill is discarded entirely. So effectively max content in a spill file = 64 MiB.\n\nAlso the store (dsh-spill) has no cap. Given ambiguity, I'll answer the shell spill cap with the number and unit, noting it's per stream and configurable, and mention the alternative reading? The question is likely from a doc/quiz. Answer concisely: 64 MiB (67,108,864 bytes) per stream.\n\nMaybe verify the zh README wording to align terminology. Fine.\n\nI'll answer in Chinese.\n"
+        },
+        {
+          "passed": false,
+          "failures": [
+            "tools_called ['code_search'] 不是 ['bash', 'grep', 'bash', 'bash', 'bash', 'bash', 'bash', 'bash', 'bash', 'bash'] 的保序子序列"
+          ],
+          "error": null,
+          "exit_code": 0,
+          "duration_s": 17.468,
+          "session_log": "/Users/vermi/myProjects/python/dsh-coderag/eval/runs/arm-sem-b/.sessions/003-semantic-spill-cap/attempt-3/sessions/--Users-vermi-projects-dsh--/session-03ef2eae-1071-431c-8799-8c20715a9ea4/session.v4.jsonl",
+          "steps": 6,
+          "total_tokens": 151469,
+          "tool_calls": [
+            "bash",
+            "grep",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash",
+            "bash"
+          ],
+          "turn_end": "completed",
+          "final_text": "**64 MiB（67,108,864 字节）**，按每个输出流分别计算，默认值。\n\n依据：\n\n- `packages/shell/bash-local/src/index.ts:38` 与 `packages/shell/pwsh-local/src/index.ts:55`：`const DEFAULT_MAX_SPILL_BYTES = 64 * 1024 * 1024`\n- `packages/shell/bash-local/README.md` 的配置表：`maxSpillBytes` 默认 `67,108,864`，含义是“Per-stream full-output spill cap”\n\n配套行为：内存尾部超过默认 `maxOutputBytes` = 64,000 字节时，输出才开始转存；转存文件累计超过 `maxSpillBytes`（64 MiB）后，`OutputCollector` 会删除该文件并停止转存，此后只保留内存中的尾部内容（见 `packages/subprocess/subprocess-local/src/output.ts` 的 `spillAll`/`discardSpill`）。若保存失败且未能删除该转存文件，残留文件的大小也不会超过这 64 MiB。该上限是 `maxSpillBytes` 配置项，可以调大。",
+          "stderr_tail": "on content in spill-local.\n\nWait — maybe the question is not about the harness's own code but a documented fact in docs. Let's search docs for \"64 MiB\" or \"maxSpillBytes\" description in shell docs. But the question likely derives from the actual behavior: the answer 64 MiB (67,108,864 bytes).\n\nBut \"单次转存允许写入的最大数据量\" — \"the maximum amount of data allowed to be written in one spill\". Consider also that discardSpill removes the file once total > maxSpillBytes, and the comment \"A failed unlink leaves at most maxSpillBytes behind\". So consistent.\n\nIs the cap per stream, so a command's stdout and stderr can each spill up to 64 MiB? Yes, per-stream. \"单次转存\" might mean one stream's spill file.\n\nLet me double-check shell docs statement of the behavior to phrase the answer. Look at docs/subsystems/shell.md around lines 130-160. Also check whether there's a distinct mention \"64 MiB\".\n\nAlso, maybe the question is about \"临时文件\" created for `dsh` CLI output by the harness bash tool itself when output is too long — but this is a harness dev repo; the user (an agent) is asking about the tool's behavior. Actually this whole conversation is the agent harness's question — likely from a benchmark about the repo. The expected answer: 64 MiB (67,108,864 bytes).\n\nWait, could it instead be about `maxOutputBytes` 64,000 bytes? \"命令行工具的输出太长时会先转存到临时文件\" — the in-memory cap at which it spills is 64,000 bytes (64 KB). But the question asks \"单次转存允许写入的最大数据量\" — the maximum data allowed in a single spill write, i.e., the spill file cap, not the trigger threshold. So 64 MiB.\n\nLet me verify docs mention.\ndsh: reasoning:\nGreat: README confirms maxSpillBytes default 67,108,864 bytes = 64 MiB per stream.\n\nAnswer: 单次（每个输出流）转存上限 67,108,864 字节 = 64 MiB（即 64 × 1024 × 1024 字节）。超过后放弃完整转存文件，只保留内存尾部。这是默认值，可由 maxSpillBytes 配置。\n\nShould I mention \"单次\" ambiguity? The cap is per stream, not per write chunk. Each write chunk itself is unbounded but the total file cap is 64 MiB. I'll answer concisely with source reference.\n"
+        }
+      ],
+      "successes": 1,
+      "trials": 3,
+      "pass@k": 0.33333333333333337,
+      "pass^k": 0.0
+    }
+  ],
+  "successes": 1,
+  "attempts": 12,
+  "task_success_rate": 0.08333333333333333
+}
