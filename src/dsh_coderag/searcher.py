@@ -127,8 +127,9 @@ def fuse_candidates(
 
     Ordering follows the frozen contract: the non-test-first tier comes first
     (ADR-16, update of 2026-09-24), then the descending RRF score, then a
-    deterministic tie-break. The selected hits are returned in source order, so
-    ADR-05 still holds for what the model sees.
+    deterministic tie-break. The hits stay in fusion order so the token budget
+    can drop the lowest-ranked candidates first; the caller restores source
+    order after trimming (ADR-05, ADR-16 13).
     """
     by_key: dict[tuple[str, int], Hit] = {}
     for hit in (*lexical, *vector):
@@ -151,7 +152,7 @@ def fuse_candidates(
             hit.start_line,
         ),
     )[:limit]
-    return sorted(ordered, key=lambda hit: (hit.path, hit.start_line))
+    return ordered
 
 
 def query_symbols(query: str) -> frozenset[str]:
@@ -414,7 +415,13 @@ def _semantic_candidates(
 
 
 def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
-    """Keep hits in output order until len(text)/3.5 exceeds max_tokens.
+    """Keep the highest-ranked hits under the budget, rendered in source order.
+
+    `hits` arrives in the caller's selection order: fusion order on the vector
+    path, source order on the BM25 path. Spending the budget in that order drops
+    the lowest-ranked candidates instead of whatever happens to sort late by
+    path (the L-015 exact regression). The kept hits are then put back in source
+    order, so ADR-05 still describes what the model sees (ADR-16 13).
 
     The first hit is always kept so a non-empty result never renders as empty.
     """
@@ -426,6 +433,7 @@ def _trim_to_budget(hits: list[Hit], max_tokens: int) -> tuple[list[Hit], int]:
             break
         kept.append(hit)
         used += estimate
+    kept.sort(key=lambda hit: (hit.path, hit.start_line))
     return kept, len(hits) - len(kept)
 
 

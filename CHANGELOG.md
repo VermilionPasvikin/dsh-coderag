@@ -77,6 +77,11 @@
 
 ### 修复
 
+- **语义检索的 token 预算按源码顺序裁剪，exact 命中被大文件挤掉**（`T8-09`）：融合已经选中
+  `protocol.ts`（融合第 1–2 名），但 4000-token 预算按源码顺序被前面三个大文件吃满，exact 命中
+  从未进入模型上下文。现在 `fuse_candidates` 保留融合名次、`_trim_to_budget` 按名次裁剪后再排成
+  源码顺序（ADR-05 的"输出按位置"不变）；43 条 L1 上 exact 11/12 → 12/12、总命中 30 → 31，
+  crossfile / natural 逐条不变；BM25 默认路径不受影响（ADR-16 §13）。
 - **admin 子进程可被共享临时目录里的影子模块劫持并读到云端 key**：改为在私有 0700 cwd
   中运行，并使用 `python -c` 启动器（导入前从 `sys.path` 去掉 `''`/cwd）；`status` 不再
   接收 key，只接收 `CODERAG_SEMANTIC_KEY_PRESENT=1` 标记，`health`/`vectorize` 才注入 key。

@@ -1915,6 +1915,7 @@ python3 scripts/test-verify-plan.py .     # 校验器自身的变异测试：20 
 | `T8-06` | CLI `search` 不呈现 `semantic` notice（越界缺陷，仅登记）；MCP 路径不受影响 | — | 未修 | `docs/backlog.md`「静默丢弃语义降级通知」 |
 | `T8-07` | 超时墙分层收敛：设置页字段 `semanticTimeout` → `semanticQueryTimeout`（`CODERAG_SEMANTIC_QUERY_TIMEOUT`，默认 10 s）；`CODERAG_SEMANTIC_TIMEOUT` 移出表单、降级为**建索引批次**的传输上限（默认 60 s，最多重试 2 次）；查询线程固定 120 s 传输上限，与前者解耦 | `git log --grep 'Refs: T8-07'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §12；`README.md` 字段表 |
 | `T8-08` | 设置页新增两个运维按钮：**建索引**（admin `index` → `index_sync(build_vectors=False)`，不联系后端；索引缺失时禁用「开始向量化」并提示）与**删除向量库索引**（只删 `<root>/.coderag/vectors/`，保留 `index.sqlite3`；二次确认；无库 no-op）。同时补 admin `index`/`remove-vectors` 子命令、Host 动作与路由白名单、运行中拒绝与测试 | `git log --grep 'Refs: T8-08'` | 已完成 | 本节；`README.md`「运维面板」；`CHANGELOG.md` `[Unreleased]` |
+| `T8-09` | 融合结果按**融合名次**裁剪、再按源码顺序输出：`fuse_candidates` 保留名次顺序，`_trim_to_budget` 按给定顺序花预算后排序。修复 `L-015` 的 exact 命中被大文件挤出 4000-token 预算的问题；BM25 默认路径不变 | `git log --grep 'Refs: T8-09'` | 已完成 | `docs/adr/ADR-16-optional-vector-backend.md` §13；`CHANGELOG.md` `[Unreleased]` |
 
 ---
 

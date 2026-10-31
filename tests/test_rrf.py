@@ -91,13 +91,47 @@ def test_fusion_applies_the_frozen_non_test_first_tier() -> None:
     assert mixed[0].path == "pkg/a.py"
 
 
-def test_fusion_output_follows_source_order() -> None:
+def test_fusion_output_follows_fusion_order() -> None:
+    """T8-09: trimming must see relevance order, not the ADR-05 render order."""
     fused = fuse_candidates(
         [_hit("pkg/z.py", 0, 5), _hit("pkg/a.py", 0, 9)],
         [_hit("pkg/z.py", 0, 5)],
         limit=5,
     )
-    assert [(hit.path, hit.start_line) for hit in fused] == [("pkg/a.py", 9), ("pkg/z.py", 5)]
+    assert [(hit.path, hit.start_line) for hit in fused] == [("pkg/z.py", 5), ("pkg/a.py", 9)]
+
+
+def test_search_trims_by_rank_before_rendering_in_source_order(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T8-09: an exact hit that sorts late must survive the token budget."""
+    root = workspace
+    big = "alpha = '" + "x" * 1200 + "'\n"
+    (root / "pkg" / "a_big.py").write_text(big, encoding="utf-8")
+    (root / "pkg" / "b_big.py").write_text(big.replace("x", "y"), encoding="utf-8")
+    (root / "pkg" / "z1_exact.py").write_text("alpha = 1\n", encoding="utf-8")
+    (root / "pkg" / "z2_exact.py").write_text("alpha = 2\n", encoding="utf-8")
+    index_sync(root)
+
+    indexed = search(root, "alpha", k=10, semantic=_disabled())
+    exact = {hit.path: hit for hit in indexed.hits if hit.path.startswith("pkg/z")}
+    assert set(exact) == {"pkg/z1_exact.py", "pkg/z2_exact.py"}
+
+    monkeypatch.setattr(
+        "dsh_coderag.searcher._semantic_candidates",
+        lambda base, query, config, k: [exact["pkg/z1_exact.py"], exact["pkg/z2_exact.py"]],
+    )
+    enabled = SemanticConfig(
+        enabled=True, backend="ollama", url="http://127.0.0.1:11434", timeout_s=1
+    )
+    result = search(root, "alpha", k=10, max_tokens=450, semantic=enabled)
+    assert [hit.path for hit in result.hits] == [
+        "pkg/a_big.py",
+        "pkg/alpha.py",
+        "pkg/z1_exact.py",
+        "pkg/z2_exact.py",
+    ]
+    assert result.omitted == 2
 
 
 def test_fusion_respects_the_limit_and_is_deterministic() -> None:

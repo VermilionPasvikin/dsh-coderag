@@ -263,6 +263,7 @@ T5-14 天花板探针（go/no-go）
 | `RL-07` | §4 的可覆盖默认值（不硬编码批大小与规模上限） |
 | `S5` / `S6` | 由 `T5-07` 登记进 `PROJECT.md` §1.4：`S5` = 开启时 `natural` 桶 `S@5` 阈值，`S6` = 默认路径零回归 |
 | `E-01`（工具调用 60 s 预算） | §11 增补：查询路径的墙钟预算（默认 10 s）必须明显小于宿主预算；`call_tool` 走 `asyncio.to_thread`，一次慢检索不再冻结整个 MCP 会话 |
+| `ADR-05`（选按分数、排按位置） | §13 明确**预算裁剪也属于"选"**：裁剪按融合名次（分数），随后再把保留的命中排成源码顺序（位置）。BM25 默认路径的输入本来就是源码顺序，输出不变 |
 
 ---
 
@@ -385,3 +386,55 @@ run=3 elapsed=0.35s hits=5 semantic=None
 - **旧 profile 的小值**：保存过 5–10 秒的机器在索引批次上的实际耗时未测量（预期更慢但可完成）。
 - **云端后端**：§11–§12 的数值全部来自本地 `ollama`；openai 兼容后端的冷/热行为未复跑。
 - **Node 测试跨平台**：本次在 macOS 上 `tests/plugin/admin-host.test.mjs` 有 2 个**预存在**的 POSIX 路径失败（Windows 盘符被 `resolve()` 当成相对路径），与本次改动无关，按 `AGENTS.md` §9 已登记 backlog。
+
+---
+
+## 13. 2026-10-31 增补三：融合结果的裁剪顺序（`T8-09`）
+
+### 13.1 触发事实
+
+- 43 条 L1（云端 `qwen3.7-text-embedding`）里唯一失败的 exact 是 `L-015`（`SSH_MAX_PROCESS_HANDLES`）。
+- 调试复刻：融合**选进了** `packages/ssh/ssh/src/protocol.ts`（融合第 1–2 名），但 `_trim_to_budget`
+  按**源码顺序**消耗 4000-token 预算；`helper-processes.ts`、`helper.ts:1`、`helper.ts:53` 三条大文件
+  先把预算吃满，`protocol.ts` 被丢弃——模型从未看到 exact 命中。
+- 43 条消融（`w_bm25 ∈ {1, 1.5, 2, 3}` × exact 置顶）：`w ≥ 1.5` 把 crossfile 从 10/11 压到 1/11、
+  natural 从 9/20 压到 0/20，exact 只多 1 个第 1 名；置顶在 rank-trim 之后没有额外收益。
+  结论：**权重不是杠杆**，问题在裁剪顺序。
+
+### 13.2 决策
+
+- `fuse_candidates` 返回**融合名次顺序**（不再在这里重排成源码顺序）。
+- `_trim_to_budget` 按**给定顺序**（融合路径=名次；BM25 路径=源码顺序）花预算，保留的命中再按
+  `(path, start_line)` 排成源码顺序。`ADR-05` 的"选按分数、排按位置"因此覆盖到裁剪这一步。
+- BM25 默认路径不变：候选本来就按源码顺序到达，裁剪与再排序与 2.1.1 逐条一致（`S6`）。
+- 权重保持等权，`RRF_K = 60` 不变。
+
+### 13.3 验收
+
+- 43 条 L1（云端 + rank-trim）：渲染 **31/43**（原 30）、**exact 12/12**（原 11/12）、crossfile 10/11、
+  natural 9/20；token 预算仍是 4000，其余两桶逐条不变（原始 `eval/runs/l1-cloud-t809b.json`）。
+- 测试：`tests/test_rrf.py::test_fusion_output_follows_fusion_order` 与
+  `test_search_trims_by_rank_before_rendering_in_source_order`（晚排序的 exact 命中不被预算丢掉，
+  且保留集合仍按源码顺序渲染）。
+- 实现：`src/dsh_coderag/searcher.py` 的 `fuse_candidates` / `_trim_to_budget`；提交 `Refs: T8-09`。
+
+### 13.4 被否决的方案
+
+| 方案 | 否决理由 |
+|---|---|
+| 给 BM25 加权（`w_bm25 ≥ 1.5`） | crossfile 10→1、natural 9→0；exact 只多 1 个第 1 名，渲染不变 |
+| exact 查询置顶（pin） | 在 rank-trim 上没有额外收益；还要引入查询分类，而权重推导已表明温和权重救不回 exact |
+| 只把词法输入改成 score-order、不改裁剪 | 融合 MRR 改善，但渲染集合仍是 30/43、exact 仍 11/12——模型看不到 |
+| 提高 token 预算 | 只掩盖问题：大文件仍会按源码顺序吃掉新增预算，且 `S4` 承诺 ≤4000 |
+
+### 13.5 回滚
+
+把 `fuse_candidates` 的返回值恢复为 `sorted(ordered, key=lambda hit: (hit.path, hit.start_line))`，
+`_trim_to_budget` 去掉末尾排序，并还原上面两条测试；默认路径不受影响。
+
+### 13.6 仍未验证
+
+- L2 13 条端到端（C 组）在 rank-trim 后的回归复跑。
+- 云端后端的网络抖动：单次查询 embedding 失败会回退 BM25（首次 43 条复跑遇到一次 `URLError` 风暴，
+  报告被污染为 18/43，已丢弃并重跑；补齐网络故障的评测重试属于评测工具问题，不改生产路径）。
+- 边界样本：43 条只是单机、单语料；按名次裁剪对非 exact 桶的极端样本没有专门构造。
